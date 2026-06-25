@@ -1,0 +1,21 @@
+name: radioroc
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  - pip
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - pyserial
+  - pyvisa
+  - pyusb
+  - libusb
+  - libftdi
+  - pip:
+      - ftd2xx
+      - PyQt6
+      - keyboard
+      - pyreadline3
+      - PyYAML

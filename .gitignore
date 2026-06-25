@@ -1,0 +1,24 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+# Local Python/conda environments
+.conda*/
+.venv/
+venv/
+
+# Vendor installers, archives, drivers, and extracted binaries
+*.exe
+*.dmg
+*.dll
+*.pdf
+*.pyd
+*.zip
+*_extracted/
+Components - Radioroc2 BGA - 29_11_24/
+radioroc_extracted/
+
+# Generated reverse-engineering notes and run output
+*_pydisasm.txt
+radioroc2_user_guide.txt
+radioroc_runs/
