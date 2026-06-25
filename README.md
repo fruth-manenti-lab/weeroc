@@ -58,4 +58,3 @@ For signal S-curves, pass `--use-ctest` and provide an external pulse into `in_t
 ## Notes
 
 Autocalibration support is present but should be treated carefully. First verify default I2C readback and a small pedestal S-curve on a few channels before running it across all 64 channels.
-
