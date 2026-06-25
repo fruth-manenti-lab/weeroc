@@ -346,7 +346,7 @@ class RadiorocOps:
     ) -> None:
         print(f"{'T1' if t1 else 'T2'} autocalibration: step1 - 2-step LSB estimate")
         self.write_word(3, "00111111")
-        self.prepare_calibration_rows(t1=t1, value=0)
+        self.prepare_calibration_rows(t1=t1, value=0, channels=channels)
         step1 = out_dir / "autocal_step1.csv"
         self.scurve(
             list(range(0, 1000, 50)),
@@ -409,9 +409,9 @@ class RadiorocOps:
             edge_or_level=edge_or_level,
         )
 
-    def prepare_calibration_rows(self, *, t1: bool, value: int) -> None:
+    def prepare_calibration_rows(self, *, t1: bool, value: int, channels: list[int]) -> None:
         subadd = 4 if t1 else 5
-        rows = [I2CRow(ch, subadd, bits(value, 8)) for ch in range(N_CHANNELS)]
+        rows = [I2CRow(ch, subadd, bits(value, 8)) for ch in channels]
         self.write_fifo(rows)
 
     @staticmethod
