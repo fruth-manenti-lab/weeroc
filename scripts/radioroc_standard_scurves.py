@@ -15,6 +15,7 @@ DEFAULT_PORT = "/dev/cu.usbserial-RD3_320"
 DEFAULT_CONFIG = Path("configs/radio_default_i2c.csv")
 DEFAULT_OUT = Path("radioroc_runs")
 N_CHANNELS = 64
+FPGA_IO_NAMES = ("io0", "io1", "io2", "io3", "io4")
 
 
 def bits(value: int, width: int = 8) -> str:
@@ -210,6 +211,19 @@ class RadiorocOps:
             if row.add == add and row.subadd == subadd:
                 return row
         return None
+
+    def read_register_bits(self, add: int, subadd: int) -> str:
+        row = self.find_row(add, subadd)
+        fallback = row.data if row is not None else "00000000"
+        if self.dry_run:
+            return fallback
+        try:
+            data = self.read_fifo([I2CRow(add, subadd, fallback)])
+        except Exception:
+            return fallback
+        if not data:
+            return fallback
+        return bits(data[0], 8)
 
     def rows(self, *, add_lt: int | None = None, subadd: int | None = None) -> list[I2CRow]:
         out = self.df_i2c
@@ -478,6 +492,316 @@ class RadiorocOps:
             total_time = time.perf_counter() - start_time
             print(f"thresholdscan measurement time: {total_time:.3f} seconds", flush=True)
 
+    def configure_adc_external_hold(
+        self,
+        *,
+        trigger_channel: int,
+        hold_delay_ns: int,
+        conversion_delay_ns: int,
+        nb_acq: int,
+        trigger_type: int,
+        trigger_source: int,
+        rstn_manual: bool,
+        ext_trig: bool,
+        adc_window_ns: int,
+        adc_nb_trig: int,
+    ) -> None:
+        if not 0 <= trigger_channel < N_CHANNELS:
+            raise ValueError("trigger_channel must be in range 0..63")
+        if hold_delay_ns < 0 or hold_delay_ns % 5 != 0:
+            raise ValueError("hold_delay_ns must be non-negative and divisible by 5")
+        if conversion_delay_ns < 0 or conversion_delay_ns % 40 != 0:
+            raise ValueError("conversion_delay_ns must be non-negative and divisible by 40")
+        if nb_acq < 1 or nb_acq > 255:
+            raise ValueError("nb_acq must be in range 1..255")
+        if not 0 <= trigger_type <= 3:
+            raise ValueError("trigger_type must be in range 0..3")
+        if not 0 <= trigger_source <= 7:
+            raise ValueError("trigger_source must be in range 0..7")
+        if adc_window_ns < 0 or adc_window_ns % 5 != 0:
+            raise ValueError("adc_window_ns must be non-negative and divisible by 5")
+        if not 0 <= adc_nb_trig <= 63:
+            raise ValueError("adc_nb_trig must be in range 0..63")
+
+        ext_hold_code = hold_delay_ns // 5
+        if ext_hold_code > 0xFFF:
+            raise ValueError("external hold delay code must fit in 12 bits; max delay is 20475 ns")
+
+        i2c65_12_bits = self.read_register_bits(65, 12)
+        # Vendor ADC setup uses ASIC external-hold mode when FPGA-generated
+        # hold delay is scanned.
+        self.write_register(65, 12, i2c65_12_bits[:3] + "1" + i2c65_12_bits[4:])
+
+        ext_hold_bits = bits(ext_hold_code, 12)
+        w22 = "00" + bits(trigger_channel, 6)
+        w23 = "00000000"
+        w24 = bits(adc_window_ns // 5, 8)
+        w25 = bits(trigger_source, 3) + str(int(rstn_manual)) + "1" + str(int(ext_trig)) + bits(trigger_type, 2)
+        w26 = ext_hold_bits[4:]
+        w27 = "00" + bits(adc_nb_trig, 6)
+        w30 = ext_hold_bits[:4] + bits(0, 3)
+        w31 = bits(conversion_delay_ns // 40, 8)
+
+        self.write_word(22, w22)
+        self.write_word(23, w23)
+        self.write_word(24, w24)
+        self.write_word(25, w25)
+        self.write_word(26, w26)
+        self.write_word(27, w27)
+        self.write_word(30, w30)
+        self.write_word(31, w31)
+        self.write_word(21, bits(nb_acq))
+
+    def configure_adc_internal_hold(self, *, trigger_channel: int, hold_code: int, nb_acq: int) -> None:
+        if not 0 <= trigger_channel < N_CHANNELS:
+            raise ValueError("trigger_channel must be in range 0..63")
+        if not 0 <= hold_code <= 255:
+            raise ValueError("internal hold code must be in range 0..255")
+        if nb_acq < 1 or nb_acq > 255:
+            raise ValueError("nb_acq must be in range 1..255")
+
+        i2c65_12 = self.read_register_bits(65, 12)
+        self.write_register(65, 12, i2c65_12[:2] + "10" + i2c65_12[4:])
+        self.write_register(65, 8, bits(hold_code))
+
+        saved_w23 = self.read_word(23) if not self.dry_run else "00000000"
+        self.write_word(31, "11111111")
+        self.write_word(25, "01110100")
+        self.write_word(22, "00" + bits(trigger_channel, 6))
+        self.write_word(23, "00" + saved_w23[2:])
+        self.write_word(21, bits(nb_acq))
+
+    def acquire_adc_batch(
+        self,
+        *,
+        nb_acq: int,
+        timeout_s: float = 5.0,
+        synchro_trigger: bool = False,
+    ) -> tuple[list[list[float]], list[list[float]]]:
+        if nb_acq < 1 or nb_acq > 255:
+            raise ValueError("nb_acq must be in range 1..255")
+        if self.dry_run:
+            return [[math.nan] * nb_acq for _ in range(N_CHANNELS)], [[math.nan] * nb_acq for _ in range(N_CHANNELS)]
+
+        saved_w2 = self.read_word(2)
+        self.write_word(21, bits(nb_acq))
+        self.write_word(2, saved_w2[:1] + "1" + saved_w2[3:])
+        self.write_word(2, saved_w2[:1] + "0" + saved_w2[3:])
+        self.write_word(2, saved_w2[0] + "1" + saved_w2[2:])
+        self.write_word(2, saved_w2[0] + "0" + saved_w2[2:])
+
+        if synchro_trigger:
+            self.pulse_synchro_trigger(count=nb_acq + 1, period_ms=1.0)
+
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            w4 = self.read_word(4)
+            if w4[5] == "1":
+                break
+            time.sleep(0.01)
+        else:
+            raise TimeoutError("ADC acquisition timed out waiting for FPGA word 4 bit 5")
+
+        count_words = self.read_word(29) + self.read_word(28)
+        total_nb_acq = int(int(count_words, 2) / 256)
+        if total_nb_acq <= 0:
+            return [[] for _ in range(N_CHANNELS)], [[] for _ in range(N_CHANNELS)]
+
+        payload = self.dev.read_words(20, total_nb_acq * N_CHANNELS * 4)
+        lg = [[] for _ in range(N_CHANNELS)]
+        hg = [[] for _ in range(N_CHANNELS)]
+        ch = 0
+        for i in range(0, len(payload) - 3, 4):
+            lg[ch].append(0.25 * int.from_bytes(payload[i : i + 2], "big"))
+            hg[ch].append(0.25 * int.from_bytes(payload[i + 2 : i + 4], "big"))
+            ch = 0 if ch == N_CHANNELS - 1 else ch + 1
+        return hg, lg
+
+    def pulse_synchro_trigger(self, *, count: int, period_ms: float) -> None:
+        if count < 1:
+            raise ValueError("sync pulse count must be at least 1")
+        if period_ms < 0:
+            raise ValueError("sync pulse period must be non-negative")
+        saved_w22 = self.read_word(22) if not self.dry_run else "00000000"
+        for i in range(count):
+            self.write_word(22, "1" + saved_w22[1:])
+            self.write_word(22, "0" + saved_w22[1:])
+            if period_ms > 0 and i != count - 1:
+                time.sleep(period_ms / 1000.0)
+
+    def read_fpga_io_mux(self) -> dict[str, int]:
+        # Vendor firmware_options.set_io packs IO4..IO0 as 5 three-bit fields:
+        # word78 gets the first 7 bits, word77 gets the last 8 bits.
+        if self.dry_run:
+            return {name: 0 for name in FPGA_IO_NAMES}
+        w77 = self.read_word(77)
+        w78 = self.read_word(78)
+        packed = w78[-7:] + w77
+        return {
+            "io4": int(packed[0:3], 2),
+            "io3": int(packed[3:6], 2),
+            "io2": int(packed[6:9], 2),
+            "io1": int(packed[9:12], 2),
+            "io0": int(packed[12:15], 2),
+        }
+
+    def write_fpga_io_mux(self, **updates: int) -> dict[str, int]:
+        mux = self.read_fpga_io_mux()
+        for name, index in updates.items():
+            if name not in FPGA_IO_NAMES:
+                raise ValueError(f"unknown FPGA IO name {name!r}; expected one of {', '.join(FPGA_IO_NAMES)}")
+            if not 0 <= index <= 7:
+                raise ValueError("FPGA IO mux index must be in range 0..7")
+            mux[name] = index
+        packed = (
+            bits(mux["io4"], 3)
+            + bits(mux["io3"], 3)
+            + bits(mux["io2"], 3)
+            + bits(mux["io1"], 3)
+            + bits(mux["io0"], 3)
+        )
+        self.write_word(77, packed[7:15])
+        self.write_word(78, packed[0:7])
+        return mux
+
+    def scan_fpga_io_mux_for_synchro(self, *, io_name: str, pulses_per_index: int, period_ms: float) -> None:
+        if io_name not in FPGA_IO_NAMES:
+            raise ValueError(f"unknown FPGA IO name {io_name!r}; expected one of {', '.join(FPGA_IO_NAMES)}")
+        if pulses_per_index < 1:
+            raise ValueError("pulses_per_index must be at least 1")
+        original = self.read_fpga_io_mux()
+        print(f"Initial FPGA IO mux: {original}", flush=True)
+        try:
+            for index in range(8):
+                mux = self.write_fpga_io_mux(**{io_name: index})
+                print(
+                    f"Testing {io_name.upper()} mux index {index}; mux={mux}; "
+                    f"pulsing {pulses_per_index} times at {period_ms} ms period",
+                    flush=True,
+                )
+                self.pulse_synchro_trigger(count=pulses_per_index, period_ms=period_ms)
+        finally:
+            self.write_fpga_io_mux(**original)
+            print(f"Restored FPGA IO mux: {original}", flush=True)
+
+    def scan_all_fpga_io_muxes_for_synchro(self, *, pulses_per_index: int, period_ms: float) -> None:
+        if pulses_per_index < 1:
+            raise ValueError("pulses_per_index must be at least 1")
+        original = self.read_fpga_io_mux()
+        print(f"Initial FPGA IO mux: {original}", flush=True)
+        try:
+            for index in range(8):
+                updates = {name: index for name in FPGA_IO_NAMES}
+                mux = self.write_fpga_io_mux(**updates)
+                print(
+                    f"Testing all FPGA IO muxes at index {index}; mux={mux}; "
+                    f"pulsing {pulses_per_index} times at {period_ms} ms period",
+                    flush=True,
+                )
+                self.pulse_synchro_trigger(count=pulses_per_index, period_ms=period_ms)
+        finally:
+            self.write_fpga_io_mux(**original)
+            print(f"Restored FPGA IO mux: {original}", flush=True)
+
+    @staticmethod
+    def _mean_stdev(values: list[float]) -> tuple[float, float]:
+        if not values:
+            return math.nan, math.nan
+        if len(values) == 1:
+            return values[0], 0.0
+        return statistics.mean(values), statistics.stdev(values)
+
+    def hold_scan(
+        self,
+        delays_ns: list[int],
+        *,
+        mode: str,
+        channels: list[int],
+        out_csv: Path,
+        trigger_channel: int,
+        threshold_dac: int | None,
+        t1: bool,
+        use_mask: bool,
+        use_ctest: bool,
+        nb_acq: int,
+        conversion_delay_ns: int,
+        trigger_type: int,
+        trigger_source: int,
+        rstn_manual: bool,
+        ext_trig: bool,
+        adc_window_ns: int,
+        adc_nb_trig: int,
+        timeout_s: float,
+        synchro_trigger: bool,
+    ) -> None:
+        if mode not in {"internal", "external"}:
+            raise ValueError("hold scan mode must be internal or external")
+        out_csv.parent.mkdir(parents=True, exist_ok=True)
+        if threshold_dac is not None:
+            self.set_threshold_dac(threshold_dac, t1=t1)
+        self.prepare_scurve_masks(t1=t1, use_mask=use_mask, use_ctest=use_ctest)
+        if use_mask:
+            self.set_mask_for_channel(trigger_channel, t1=t1, enabled=True)
+        if use_ctest:
+            self.set_ctest_for_channel(trigger_channel, enabled=True)
+        saved_w2 = self.read_word(2) if not self.dry_run else "00000000"
+        saved_i2c65_12 = self.read_register_bits(65, 12)
+        header = ["hold_code" if mode == "internal" else "hold_delay_ns"]
+        for ch in channels:
+            header.extend([f"ch{ch}_hg_mean", f"ch{ch}_hg_stdev", f"ch{ch}_lg_mean", f"ch{ch}_lg_stdev", f"ch{ch}_count"])
+        start_time = time.perf_counter()
+        try:
+            with out_csv.open("w", newline="") as fp:
+                writer = csv.writer(fp)
+                writer.writerow(header)
+                for delay_ns in delays_ns:
+                    if mode == "internal":
+                        self.configure_adc_internal_hold(
+                            trigger_channel=trigger_channel,
+                            hold_code=delay_ns,
+                            nb_acq=nb_acq,
+                        )
+                    else:
+                        self.configure_adc_external_hold(
+                            trigger_channel=trigger_channel,
+                            hold_delay_ns=delay_ns,
+                            conversion_delay_ns=conversion_delay_ns,
+                            nb_acq=nb_acq,
+                            trigger_type=trigger_type,
+                            trigger_source=trigger_source,
+                            rstn_manual=rstn_manual,
+                            ext_trig=ext_trig,
+                            adc_window_ns=adc_window_ns,
+                            adc_nb_trig=adc_nb_trig,
+                        )
+                    hg, lg = self.acquire_adc_batch(
+                        nb_acq=nb_acq,
+                        timeout_s=timeout_s,
+                        synchro_trigger=synchro_trigger,
+                    )
+                    row: list[float | int] = [delay_ns]
+                    summary = []
+                    for ch in channels:
+                        hg_mean, hg_stdev = self._mean_stdev(hg[ch])
+                        lg_mean, lg_stdev = self._mean_stdev(lg[ch])
+                        row.extend([hg_mean, hg_stdev, lg_mean, lg_stdev, len(hg[ch])])
+                        summary.append((ch, hg_mean, lg_mean, len(hg[ch])))
+                    writer.writerow(row)
+                    fp.flush()
+                    label = "code" if mode == "internal" else "delay"
+                    unit = "" if mode == "internal" else " ns"
+                    print(f"hold {label}={delay_ns}{unit} values={summary[:4]}{'...' if len(summary) > 4 else ''}", flush=True)
+        finally:
+            try:
+                if use_mask or use_ctest:
+                    self.prepare_scurve_masks(t1=t1, use_mask=use_mask, use_ctest=use_ctest)
+                self.write_register(65, 12, saved_i2c65_12)
+                self.write_word(2, saved_w2)
+            except Exception as exc:
+                print(f"warning: hold scan cleanup failed: {exc}", flush=True)
+            total_time = time.perf_counter() - start_time
+            print(f"holdscan measurement time: {total_time:.3f} seconds", flush=True)
+
     def autocalibrate_scurve(
         self,
         *,
@@ -644,11 +968,35 @@ def main() -> None:
     parser.add_argument("--skip-fpga-init", action="store_true")
     parser.add_argument("--scurve", action="store_true")
     parser.add_argument("--threshold-scan", action="store_true")
+    parser.add_argument("--hold-scan", action="store_true")
+    parser.add_argument("--pulse-synchro-test", action="store_true", help="Pulse the FPGA synchro-trigger output without running an acquisition.")
     parser.add_argument("--autocalibrate", action="store_true")
     parser.add_argument("--channels", default="0", help="Channel list, e.g. 0, 0-7, or all.")
     parser.add_argument("--dac-min", type=int, default=0)
     parser.add_argument("--dac-max", type=int, default=1023)
     parser.add_argument("--dac-step", type=int, default=50)
+    parser.add_argument("--hold-mode", choices=["internal", "external"], default="internal")
+    parser.add_argument("--hold-min-ns", "--hold-min-code", dest="hold_min_ns", type=int, default=0)
+    parser.add_argument("--hold-max-ns", "--hold-max-code", dest="hold_max_ns", type=int, default=255)
+    parser.add_argument("--hold-step-ns", "--hold-step-code", dest="hold_step_ns", type=int, default=5)
+    parser.add_argument("--hold-trigger-channel", type=int, help="ADC trigger channel for hold scan. Defaults to first selected channel.")
+    parser.add_argument("--hold-threshold-dac", type=int, help="Set T1/T2 threshold DAC before the hold scan.")
+    parser.add_argument("--hold-acquisitions", type=int, default=10, help="ADC acquisitions per hold-delay point.")
+    parser.add_argument("--hold-conversion-delay-ns", type=int, default=400, help="ADC conversion delay; must be divisible by 40 ns.")
+    parser.add_argument("--hold-timeout-s", type=float, default=5.0, help="Timeout per ADC batch.")
+    parser.add_argument("--hold-synchro-trigger", action="store_true", help="Pulse the FPGA synchro-trigger output for each hold-scan ADC batch.")
+    parser.add_argument("--sync-pulses", type=int, default=1000, help="Number of pulses for --pulse-synchro-test.")
+    parser.add_argument("--sync-period-ms", type=float, default=10.0, help="Pulse period for --pulse-synchro-test.")
+    parser.add_argument("--sync-io", choices=FPGA_IO_NAMES, default="io1", help="FPGA IO connector to configure for sync pulse diagnostics.")
+    parser.add_argument("--sync-io-mux-index", type=int, help="Set one FPGA IO mux index before sync pulse diagnostics.")
+    parser.add_argument("--scan-sync-io-mux", action="store_true", help="Cycle mux indices 0..7 on --sync-io while pulsing the synchro trigger.")
+    parser.add_argument("--scan-all-sync-io-muxes", action="store_true", help="Cycle mux indices 0..7 on every FPGA IO while pulsing the synchro trigger.")
+    parser.add_argument("--adc-trigger-type", type=int, default=0, help="Vendor ADC trigger type code; default 0=simple trigger.")
+    parser.add_argument("--adc-trigger-source", type=int, default=3, help="Vendor ADC T1 source code; default 3=individual channel.")
+    parser.add_argument("--adc-window-ns", type=int, default=50, help="ADC trigger coincidence/window width; must be divisible by 5 ns.")
+    parser.add_argument("--adc-nb-trig", type=int, default=1, help="ADC time-window trigger count.")
+    parser.add_argument("--adc-rstn-manual", action="store_true", help="Set vendor ADC Reset_n manual bit.")
+    parser.add_argument("--adc-ext-trig", action="store_true", help="Use external ASIC acquisition trigger in ADC setup.")
     parser.add_argument("--trigger-window-ms", type=float, default=100.0, help="Threshold-scan counting window per channel/DAC.")
     parser.add_argument("--threshold-averages", type=int, default=1, help="Number of repeated threshold-count windows to average per DAC/channel.")
     parser.add_argument(
@@ -692,6 +1040,27 @@ def main() -> None:
         if args.trigger_preamp_gain is not None:
             ops.set_trigger_preamp_gain(args.trigger_preamp_gain, channels=channels)
 
+        if args.sync_io_mux_index is not None:
+            mux = ops.write_fpga_io_mux(**{args.sync_io: args.sync_io_mux_index})
+            print(f"Set {args.sync_io.upper()} mux index to {args.sync_io_mux_index}; mux={mux}")
+
+        if args.scan_sync_io_mux:
+            ops.scan_fpga_io_mux_for_synchro(
+                io_name=args.sync_io,
+                pulses_per_index=args.sync_pulses,
+                period_ms=args.sync_period_ms,
+            )
+
+        if args.scan_all_sync_io_muxes:
+            ops.scan_all_fpga_io_muxes_for_synchro(
+                pulses_per_index=args.sync_pulses,
+                period_ms=args.sync_period_ms,
+            )
+
+        if args.pulse_synchro_test:
+            print(f"Pulsing FPGA synchro trigger {args.sync_pulses} times, period {args.sync_period_ms} ms")
+            ops.pulse_synchro_trigger(count=args.sync_pulses, period_ms=args.sync_period_ms)
+
         if args.scurve:
             dacs = list(range(args.dac_min, args.dac_max + 1, args.dac_step))
             ops.scurve(
@@ -716,6 +1085,30 @@ def main() -> None:
                 out_csv=args.out_dir / "thresholdscan.csv",
                 trigger_window_ms=args.trigger_window_ms,
                 averages=args.threshold_averages,
+            )
+
+        if args.hold_scan:
+            delays_ns = list(range(args.hold_min_ns, args.hold_max_ns + 1, args.hold_step_ns))
+            ops.hold_scan(
+                delays_ns,
+                mode=args.hold_mode,
+                t1=not args.t2,
+                use_mask=not args.no_mask,
+                use_ctest=args.use_ctest,
+                channels=channels,
+                out_csv=args.out_dir / "holdscan.csv",
+                trigger_channel=args.hold_trigger_channel if args.hold_trigger_channel is not None else channels[0],
+                threshold_dac=args.hold_threshold_dac,
+                nb_acq=args.hold_acquisitions,
+                conversion_delay_ns=args.hold_conversion_delay_ns,
+                trigger_type=args.adc_trigger_type,
+                trigger_source=args.adc_trigger_source,
+                rstn_manual=args.adc_rstn_manual,
+                ext_trig=args.adc_ext_trig,
+                adc_window_ns=args.adc_window_ns,
+                adc_nb_trig=args.adc_nb_trig,
+                timeout_s=args.hold_timeout_s,
+                synchro_trigger=args.hold_synchro_trigger,
             )
 
         if args.autocalibrate:

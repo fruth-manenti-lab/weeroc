@@ -8,6 +8,7 @@ __pycache__/
 venv/
 
 # Vendor installers, archives, drivers, and extracted binaries
+local_artifacts/
 *.exe
 *.dmg
 *.dll

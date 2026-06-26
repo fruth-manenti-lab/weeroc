@@ -6,8 +6,9 @@ This repository intentionally does not include the WEEROC installer, extracted b
 
 ## Contents
 
-- `scripts/radioroc_standard_scurves.py`: standard setup, default ASIC I2C write/readback, pedestal S-curve scan, threshold scan, and experimental autocalibration flow.
+- `scripts/radioroc_standard_scurves.py`: standard setup, default ASIC I2C write/readback, pedestal S-curve scan, threshold scan, experimental external-hold scan, and experimental autocalibration flow.
 - `scripts/plot_threshold_scan.py`: plot threshold-scan CSV files to PNG.
+- `scripts/plot_hold_scan.py`: plot hold-scan CSV files to PNG.
 - `scripts/radioroc_serial_probe.py`: read-only USB serial probe for FPGA register reads.
 - `scripts/radioroc_env_check.py`: environment/import/device visibility check.
 - `configs/radio_default_i2c.csv`: default RADIOROC 2 ASIC I2C table used by the standard setup flow.
@@ -121,6 +122,87 @@ python scripts/plot_threshold_scan.py \
   --yscale log \
   --steps
 ```
+
+## Hold Scan
+
+Experimental hold scan support is available. Internal mode follows the vendor holdscan workflow: the ASIC is put in internal-hold mode, ASIC register `add=65, subadd=8` is swept over the 8-bit hold delay code, ADC frames are read from FPGA address `20`, and `holdscan.csv` records mean/stdev high-gain and low-gain values for each selected channel.
+
+Start with a short channel-4 internal hold scan:
+
+```bash
+python scripts/radioroc_standard_scurves.py \
+  --execute \
+  --hold-scan \
+  --hold-mode internal \
+  --channels 4 \
+  --hold-trigger-channel 4 \
+  --hold-threshold-dac 250 \
+  --hold-min-code 0 \
+  --hold-max-code 255 \
+  --hold-step-code 5 \
+  --hold-acquisitions 10 \
+  --pat-gain 1 \
+  --use-ctest \
+  --hold-synchro-trigger \
+  --out-dir radioroc_runs/hold_ch4_smoke
+```
+
+If needed, apply and verify defaults as a separate setup step before the scan. Keeping it separate makes hardware/I2C timeouts easier to diagnose.
+
+Plot the newest hold scan:
+
+```bash
+python scripts/plot_hold_scan.py --channels 4 --exclude-zero
+```
+
+For internal hold scans, code `0` can be an invalid delay-cell edge case and may dominate the y-axis. Use `--exclude-zero` for the standard diagnostic plot, or `--x-min` to remove a wider early-code region.
+
+For synchronized Ctest injection, connect the board FPGA synchro output, labeled as `IO1`/synchro trigger in the vendor hold-scan workflow, to the signal generator external trigger input. Set the generator to externally triggered burst/pulse mode, and connect the generator output through the attenuator to `in-test1`. The `--hold-synchro-trigger` flag pulses the FPGA synchro signal once per requested ADC acquisition batch, matching the vendor holdscan behavior.
+
+To scope the FPGA synchro output without running a scan:
+
+```bash
+python scripts/radioroc_standard_scurves.py \
+  --execute \
+  --pulse-synchro-test \
+  --sync-pulses 1000 \
+  --sync-period-ms 10
+```
+
+If no pulse is visible on the connector, scan the FPGA IO mux while watching the scope. The script prints each mux index before pulsing, then restores the original mux settings at the end:
+
+```bash
+python scripts/radioroc_standard_scurves.py \
+  --execute \
+  --scan-sync-io-mux \
+  --sync-io io1 \
+  --sync-pulses 100 \
+  --sync-period-ms 10
+```
+
+If the connector label is uncertain, scan all configurable FPGA IO outputs at the same mux index. This is the best first diagnostic when a specific `IO1` scan is flat:
+
+```bash
+python scripts/radioroc_standard_scurves.py \
+  --execute \
+  --scan-all-sync-io-muxes \
+  --sync-pulses 100 \
+  --sync-period-ms 10
+```
+
+Once the visible mux index is known, set it explicitly before a pulse test:
+
+```bash
+python scripts/radioroc_standard_scurves.py \
+  --execute \
+  --sync-io io1 \
+  --sync-io-mux-index <index> \
+  --pulse-synchro-test \
+  --sync-pulses 1000 \
+  --sync-period-ms 10
+```
+
+External FPGA-generated hold scan is still available with `--hold-mode external`. In external mode the hold value is a delay in ns and must be divisible by 5.
 
 ## Notes
 
