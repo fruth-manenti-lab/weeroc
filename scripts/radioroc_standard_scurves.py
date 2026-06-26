@@ -269,6 +269,22 @@ class RadiorocOps:
             self.write_register(65, 2, dac_bits[4:] + "00")
             self.write_register(65, 3, "0000" + dac_bits[:4])
 
+    def set_trigger_preamp_gain(self, gain: int, *, channels: list[int]) -> None:
+        if not 1 <= gain <= 63:
+            raise ValueError("trigger preamp gain code must be in range 1..63; 1=max gain, 63=min gain")
+        rows = []
+        for ch in channels:
+            row = self.find_row(ch, 1)
+            if row is None:
+                continue
+            current = parse_bits(row.data)
+            compensation = current & 0xC0
+            rows.append(I2CRow(ch, 1, bits(compensation | gain, 8)))
+        if not rows:
+            raise RuntimeError("no trigger preamp gain rows found for selected channels")
+        print(f"Setting trigger preamp paT gain code {gain} on channels {channels}")
+        self.write_fifo(rows)
+
     def set_mask_for_channel(self, channel: int, *, t1: bool, enabled: bool) -> None:
         row = self.find_row(channel, 6)
         if row is None:
@@ -302,6 +318,18 @@ class RadiorocOps:
                 data[3] = "0"
                 row.data = "".join(data)
             self.write_fifo(rows)
+
+    @staticmethod
+    def _accurate_delay_ms(delay_ms: float) -> None:
+        if delay_ms <= 0:
+            return
+        deadline = time.perf_counter() + delay_ms / 1000.0
+        while True:
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0:
+                return
+            if remaining > 0.003:
+                time.sleep(remaining - 0.001)
 
     def scurve(
         self,
@@ -380,6 +408,75 @@ class RadiorocOps:
                 self.write_word(1, saved_w1[:6] + "00")
             except Exception as exc:
                 print(f"warning: scurve cleanup failed: {exc}", flush=True)
+
+    def threshold_scan(
+        self,
+        dacs: list[int],
+        *,
+        t1: bool,
+        use_mask: bool,
+        use_ctest: bool,
+        channels: list[int],
+        out_csv: Path,
+        trigger_window_ms: float,
+        averages: int,
+    ) -> None:
+        if trigger_window_ms <= 0:
+            raise ValueError("trigger_window_ms must be positive")
+        if averages < 1:
+            raise ValueError("averages must be at least 1")
+
+        out_csv.parent.mkdir(parents=True, exist_ok=True)
+        self.prepare_scurve_masks(t1=t1, use_mask=use_mask, use_ctest=use_ctest)
+        saved_w1 = self.read_word(1) if not self.dry_run else "00000000"
+        header = ["DAC"] + [f"ch{ch}" for ch in channels]
+        start_time = time.perf_counter()
+        try:
+            with out_csv.open("w", newline="") as fp:
+                writer = csv.writer(fp)
+                writer.writerow(header)
+                for dac in dacs:
+                    self.set_threshold_dac(dac, t1=t1)
+                    values = []
+                    for ch in channels:
+                        self.write_word(6, bits(ch))
+                        if use_mask:
+                            self.set_mask_for_channel(ch, t1=t1, enabled=True)
+                        if use_ctest:
+                            self.set_ctest_for_channel(ch, enabled=True)
+
+                        rates = []
+                        for _ in range(averages):
+                            # Mirrors the vendor threshold scan: reset counter,
+                            # open counting window, wait, close window, read count.
+                            self.write_word(1, "01" + saved_w1[2:8])
+                            self.write_word(1, "00" + saved_w1[2:8])
+                            self.write_word(1, "10" + saved_w1[2:8])
+                            if self.dry_run:
+                                trigger_count = 0
+                            else:
+                                self._accurate_delay_ms(trigger_window_ms)
+                                self.write_word(1, "00" + saved_w1[2:8])
+                                trigger_count = int.from_bytes(self.dev.read_words(96, 4), "little")
+                            rates.append(trigger_count / (trigger_window_ms / 1000.0))
+                        values.append(statistics.mean(rates))
+
+                        if use_mask:
+                            self.set_mask_for_channel(ch, t1=t1, enabled=False)
+                        if use_ctest:
+                            self.set_ctest_for_channel(ch, enabled=False)
+                    writer.writerow([dac] + [round(v, 6) for v in values])
+                    fp.flush()
+                    print(f"threshold dac={dac} hz={values[:8]}{'...' if len(values) > 8 else ''}", flush=True)
+        finally:
+            try:
+                if use_mask or use_ctest:
+                    self.prepare_scurve_masks(t1=t1, use_mask=use_mask, use_ctest=use_ctest)
+                self.write_word(1, saved_w1)
+            except Exception as exc:
+                print(f"warning: threshold scan cleanup failed: {exc}", flush=True)
+            total_time = time.perf_counter() - start_time
+            print(f"thresholdscan measurement time: {total_time:.3f} seconds", flush=True)
 
     def autocalibrate_scurve(
         self,
@@ -546,11 +643,20 @@ def main() -> None:
     parser.add_argument("--verify-limit", type=int, default=16, help="Rows to verify; use 0 for the full default table.")
     parser.add_argument("--skip-fpga-init", action="store_true")
     parser.add_argument("--scurve", action="store_true")
+    parser.add_argument("--threshold-scan", action="store_true")
     parser.add_argument("--autocalibrate", action="store_true")
     parser.add_argument("--channels", default="0", help="Channel list, e.g. 0, 0-7, or all.")
     parser.add_argument("--dac-min", type=int, default=0)
     parser.add_argument("--dac-max", type=int, default=1023)
     parser.add_argument("--dac-step", type=int, default=50)
+    parser.add_argument("--trigger-window-ms", type=float, default=100.0, help="Threshold-scan counting window per channel/DAC.")
+    parser.add_argument("--threshold-averages", type=int, default=1, help="Number of repeated threshold-count windows to average per DAC/channel.")
+    parser.add_argument(
+        "--trigger-preamp-gain",
+        "--pat-gain",
+        type=int,
+        help="Set selected channels' trigger preamplifier paT gain code before scanning: 1=max gain, 63=min gain.",
+    )
     parser.add_argument("--t2", action="store_true", help="Use T2 instead of T1.")
     parser.add_argument("--no-mask", action="store_true")
     parser.add_argument("--use-ctest", action="store_true")
@@ -583,6 +689,9 @@ def main() -> None:
             if not ops.verify_default_config(limit=limit):
                 raise SystemExit(2)
 
+        if args.trigger_preamp_gain is not None:
+            ops.set_trigger_preamp_gain(args.trigger_preamp_gain, channels=channels)
+
         if args.scurve:
             dacs = list(range(args.dac_min, args.dac_max + 1, args.dac_step))
             ops.scurve(
@@ -594,6 +703,19 @@ def main() -> None:
                 out_csv=args.out_dir / "scurve.csv",
                 clock_index=args.clock_index,
                 edge_or_level=args.trigger_level,
+            )
+
+        if args.threshold_scan:
+            dacs = list(range(args.dac_min, args.dac_max + 1, args.dac_step))
+            ops.threshold_scan(
+                dacs,
+                t1=not args.t2,
+                use_mask=not args.no_mask,
+                use_ctest=args.use_ctest,
+                channels=channels,
+                out_csv=args.out_dir / "thresholdscan.csv",
+                trigger_window_ms=args.trigger_window_ms,
+                averages=args.threshold_averages,
             )
 
         if args.autocalibrate:

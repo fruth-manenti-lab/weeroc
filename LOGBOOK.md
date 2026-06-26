@@ -1,21 +1,6 @@
 # RADIOROC Logbook
 
-## 2026-06-25
+Daily notes are split into dated files:
 
-- Confirmed USB serial communication with the WEEROC RADIOROC 2 board on `/dev/cu.usbserial-RD3_320`.
-- Verified default I2C configuration from `configs/radio_default_i2c.csv`: 677 rows checked, 677 matched, 0 mismatches.
-- Implemented a Python-based standard setup and S-curve/autocalibration workflow derived from the extracted vendor behavior.
-- Added serial read retry and frame resynchronization to tolerate stale or misaligned USB serial bytes.
-- Updated T1 pedestal autocalibration to use a vendor-like LSB estimate from a reference channel at calibration values 0 and 63.
-- Ran T1 pedestal autocalibration without external signal:
-  - Channels 0-3: final 50% crossing span about 5.5 DAC units.
-  - Channels 0-15: final 50% crossing span about 7.5 DAC units.
-  - Channels 0-63: final 50% crossing span about 8.4 DAC units, improved from about 78.7 DAC units before correction.
-- Full-chip T1 calibration values were written and read back successfully; observed calibration range was 8 to 56.
-- Added S-curve cleanup so scan masks and FPGA word 1 are restored after errors or interrupts.
-- Added final-scan early stop once all selected channels are low for 5 consecutive DAC points; live smoke test on channels 0-3 stopped at DAC 148 instead of scanning to DAC 180.
-
-Notes:
-
-- Some pedestal S-curves show residual low-level plateaus after the main falling edge. The 50% alignment works, but future standard reports should include quality flags for ambiguous curves, residual plateau level, and missing or noisy crossings.
-- The command-line dry-run path still opens the serial port before dry-run behavior is useful; direct `RadiorocOps(..., dry_run=True)` testing works. This can be cleaned up later.
+- [2026-06-26](logbooks/2026-06-26.md)
+- [2026-06-25](logbooks/2026-06-25.md)
