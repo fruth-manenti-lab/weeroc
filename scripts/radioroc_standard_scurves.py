@@ -503,6 +503,7 @@ class RadiorocOps:
         trigger_source: int,
         rstn_manual: bool,
         ext_trig: bool,
+        peak_sensing: bool,
         adc_window_ns: int,
         adc_nb_trig: int,
     ) -> None:
@@ -528,15 +529,19 @@ class RadiorocOps:
             raise ValueError("external hold delay code must fit in 12 bits; max delay is 20475 ns")
 
         i2c65_12_bits = self.read_register_bits(65, 12)
-        # Vendor ADC setup uses ASIC external-hold mode when FPGA-generated
-        # hold delay is scanned.
-        self.write_register(65, 12, i2c65_12_bits[:3] + "1" + i2c65_12_bits[4:])
+        # Vendor holdscan external mode sets the ASIC hold source to external.
+        if peak_sensing:
+            self.write_register(65, 12, i2c65_12_bits[:2] + "01" + "0000")
+        else:
+            self.write_register(65, 12, i2c65_12_bits[:3] + "1" + i2c65_12_bits[4:])
 
         ext_hold_bits = bits(ext_hold_code, 12)
         w22 = "00" + bits(trigger_channel, 6)
-        w23 = "00000000"
+        saved_w23 = self.read_word(23) if (peak_sensing and not self.dry_run) else "00000000"
+        w23 = "01" + saved_w23[2:] if peak_sensing else "00000000"
         w24 = bits(adc_window_ns // 5, 8)
-        w25 = bits(trigger_source, 3) + str(int(rstn_manual)) + "1" + str(int(ext_trig)) + bits(trigger_type, 2)
+        peak_or_ext_trig = peak_sensing or ext_trig
+        w25 = bits(trigger_source, 3) + str(int(rstn_manual)) + "1" + str(int(peak_or_ext_trig)) + bits(trigger_type, 2)
         w26 = ext_hold_bits[4:]
         w27 = "00" + bits(adc_nb_trig, 6)
         w30 = ext_hold_bits[:4] + bits(0, 3)
@@ -729,6 +734,7 @@ class RadiorocOps:
         trigger_source: int,
         rstn_manual: bool,
         ext_trig: bool,
+        peak_sensing: bool,
         adc_window_ns: int,
         adc_nb_trig: int,
         timeout_s: float,
@@ -771,6 +777,7 @@ class RadiorocOps:
                             trigger_source=trigger_source,
                             rstn_manual=rstn_manual,
                             ext_trig=ext_trig,
+                            peak_sensing=peak_sensing,
                             adc_window_ns=adc_window_ns,
                             adc_nb_trig=adc_nb_trig,
                         )
@@ -997,6 +1004,7 @@ def main() -> None:
     parser.add_argument("--adc-nb-trig", type=int, default=1, help="ADC time-window trigger count.")
     parser.add_argument("--adc-rstn-manual", action="store_true", help="Set vendor ADC Reset_n manual bit.")
     parser.add_argument("--adc-ext-trig", action="store_true", help="Use external ASIC acquisition trigger in ADC setup.")
+    parser.add_argument("--hold-peak-sensing", action="store_true", help="Use the vendor external-hold peak-sensing control word for synchronized hold scans.")
     parser.add_argument("--trigger-window-ms", type=float, default=100.0, help="Threshold-scan counting window per channel/DAC.")
     parser.add_argument("--threshold-averages", type=int, default=1, help="Number of repeated threshold-count windows to average per DAC/channel.")
     parser.add_argument(
@@ -1105,6 +1113,7 @@ def main() -> None:
                 trigger_source=args.adc_trigger_source,
                 rstn_manual=args.adc_rstn_manual,
                 ext_trig=args.adc_ext_trig,
+                peak_sensing=args.hold_peak_sensing,
                 adc_window_ns=args.adc_window_ns,
                 adc_nb_trig=args.adc_nb_trig,
                 timeout_s=args.hold_timeout_s,
