@@ -1,0 +1,6 @@
+{
+  "sync_io": "io1",
+  "sync_io_mux_index": 5,
+  "pulses": 100,
+  "period_ms": 10.0
+}

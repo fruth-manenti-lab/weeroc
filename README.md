@@ -1,209 +1,200 @@
-# WEEROC RADIOROC 2 tools
+# WEEROC RADIOROC 2 Tools
 
-Small Python tools for working with a WEEROC RADIOROC 2 evaluation board over USB serial on macOS.
+Python tools for working with a WEEROC RADIOROC 2 evaluation board over USB
+serial on macOS.
 
-This repository intentionally does not include the WEEROC installer, extracted binaries, local conda environment, or generated run outputs.
+This repository intentionally does not include the WEEROC installer, extracted
+binaries, local conda environment, or generated run outputs.
 
-## Contents
+## Layout
 
-- `scripts/radioroc_standard_scurves.py`: standard setup, default ASIC I2C write/readback, pedestal S-curve scan, threshold scan, experimental external-hold scan, and experimental autocalibration flow.
-- `scripts/plot_threshold_scan.py`: plot threshold-scan CSV files to PNG.
-- `scripts/plot_hold_scan.py`: plot hold-scan CSV files to PNG.
-- `scripts/radioroc_serial_probe.py`: read-only USB serial probe for FPGA register reads.
-- `scripts/radioroc_env_check.py`: environment/import/device visibility check.
-- `configs/radio_default_i2c.csv`: default RADIOROC 2 ASIC I2C table used by the standard setup flow.
-- `environment-radioroc.yml`: conda environment specification.
+- `radioroc_client.py`: hardware-facing library for serial frames, FPGA words,
+  ASIC I2C slow control, scan configuration, scan execution, metadata, and
+  non-hardware fake transport tests.
+- `radioroc_analysis.py`: CSV parsing, latest-run discovery, plot rendering,
+  and simple threshold/hold scan summaries.
+- `scripts/radioroc_check_connection.py`: read-only FPGA status-word check.
+- `scripts/radioroc_apply_defaults.py`: apply and optionally verify the default
+  ASIC I2C table.
+- `scripts/radioroc_threshold_scan.py`: trigger-rate threshold scans.
+- `scripts/radioroc_scurve.py`: S-curve scans.
+- `scripts/radioroc_hold_scan.py`: internal/external hold scans.
+- `scripts/radioroc_sync_pulse.py`: FPGA synchro-trigger pulse test.
+- `scripts/radioroc_io_mux_scan.py`: FPGA IO mux diagnostic scan.
+- `scripts/plot_threshold_scan.py`, `scripts/plot_hold_scan.py`,
+  `scripts/plot_hold_comparison.py`: plotting wrappers.
+- `configs/radio_default_i2c.csv`: default RADIOROC 2 ASIC I2C table.
+- `configs/presets/`: known-good workflow presets.
+- `tests/`: non-hardware unit tests.
+- `scripts/radioroc_standard_scurves.py`: legacy compatibility script kept as a
+  reference until the new scripts fully replace it in daily use.
 
 ## Environment
 
-Create an environment:
+Create the conda environment:
 
 ```bash
 conda env create -f environment-radioroc.yml
 conda activate radioroc
 ```
 
-The working Mac setup used the board's FTDI VCP serial port:
+The tested Mac setup used:
 
 ```text
 /dev/cu.usbserial-RD3_320
 ```
 
-## Standard Setup
+## Safety Model
 
-Apply the default ASIC configuration and verify readback:
+Write-capable scripts are dry-run by default. Add `--execute` only when the
+board is connected, powered, and the input cabling is correct.
+
+Generated outputs go under `radioroc_runs/`, which is ignored by git. Vendor
+installers, extracted files, archives, and local notes belong under
+`local_artifacts/`, also ignored by git.
+
+## Quick Checks
+
+Read the FPGA firmware/status word:
 
 ```bash
-python scripts/radioroc_standard_scurves.py --execute --apply-defaults --verify-defaults --verify-limit 0
+python scripts/radioroc_check_connection.py
 ```
 
-Expected result on the tested board:
+Expected response on the tested board:
 
 ```text
-Verified 677 I2C default rows: 677 ok, 0 mismatch
+OK: address 100 = 00000101 (5)
 ```
 
-## Pedestal S-Curve
-
-Run a no-external-signal pedestal/noise S-curve. Do not pass `--use-ctest` for this mode.
+Apply default ASIC settings:
 
 ```bash
-python scripts/radioroc_standard_scurves.py --execute --scurve --channels 0 --dac-min 100 --dac-max 200 --dac-step 10
+python scripts/radioroc_apply_defaults.py --execute --verify --verify-limit 0
 ```
 
-On the tested board, channel 0 crossed around DAC `145-155`.
+## Preset Workflows
 
-## Signal S-Curve
+The short user-facing commands use JSON presets. Command-line flags override
+values from the preset.
 
-For signal S-curves, pass `--use-ctest` and provide an external pulse into `in_test`/Ctest synchronized from the S-curve clock output, normally FPGA `IO0`.
-
-## Threshold Scan
-
-Run a trigger-rate threshold scan for one channel. This is the basis of the SiPM staircase measurement described in the RADIOROC user guide.
+Channel-4 SiPM dark threshold scan:
 
 ```bash
-python scripts/radioroc_standard_scurves.py \
+python scripts/radioroc_threshold_scan.py \
   --execute \
-  --threshold-scan \
-  --channels 4 \
-  --dac-min 80 \
-  --dac-max 180 \
-  --dac-step 2 \
-  --trigger-window-ms 100 \
-  --out-dir radioroc_runs/threshold_ch4
+  --preset configs/presets/threshold_ch4_sipm_dark.json \
+  --out-dir radioroc_runs/threshold_ch4_sipm_dark
 ```
 
-Optionally set the selected channel's trigger preamplifier gain before the scan:
+External track-and-hold Ctest scan:
 
 ```bash
-python scripts/radioroc_standard_scurves.py \
+python scripts/radioroc_hold_scan.py \
   --execute \
-  --threshold-scan \
-  --channels 4 \
-  --trigger-preamp-gain 8 \
-  --dac-min 60 \
-  --dac-max 220 \
-  --dac-step 2 \
-  --trigger-window-ms 200 \
-  --out-dir radioroc_runs/threshold_ch4_gain8
+  --preset configs/presets/hold_external_track_ctest_ch4.json \
+  --out-dir radioroc_runs/hold_external_track_ctest_ch4
 ```
 
-The trigger preamplifier gain code follows the RADIOROC UI convention: `1` is maximum gain, `63` is minimum gain, and `0` is intentionally rejected because it opens/unbiases the preamplifier.
-
-For an EXE-like SiPM dark staircase comparison, use a longer window and repeated acquisitions:
+External peak-sensing Ctest scan:
 
 ```bash
-python scripts/radioroc_standard_scurves.py \
+python scripts/radioroc_hold_scan.py \
   --execute \
-  --apply-defaults \
-  --threshold-scan \
-  --channels 4 \
-  --pat-gain 1 \
-  --dac-min 0 \
-  --dac-max 600 \
-  --dac-step 5 \
-  --trigger-window-ms 500 \
-  --threshold-averages 3 \
-  --out-dir radioroc_runs/staircase_ch4_gain1_compare
+  --preset configs/presets/hold_external_peak_ctest_ch4.json \
+  --out-dir radioroc_runs/hold_external_peak_ctest_ch4
 ```
 
-Plot the result:
+IO1 synchro pulse test at mux index 5:
 
 ```bash
-python scripts/plot_threshold_scan.py
-```
-
-By default the plotter finds the newest `thresholdscan.csv` under `radioroc_runs` and writes a PNG beside it. To plot a specific file:
-
-```bash
-python scripts/plot_threshold_scan.py \
-  radioroc_runs/threshold_ch4/thresholdscan.csv \
-  --channels 4 \
-  --yscale log \
-  --steps
-```
-
-## Hold Scan
-
-Experimental hold scan support is available. Internal mode follows the vendor holdscan workflow: the ASIC is put in internal-hold mode, ASIC register `add=65, subadd=8` is swept over the 8-bit hold delay code, ADC frames are read from FPGA address `20`, and `holdscan.csv` records mean/stdev high-gain and low-gain values for each selected channel.
-
-Start with a short channel-4 internal hold scan:
-
-```bash
-python scripts/radioroc_standard_scurves.py \
+python scripts/radioroc_sync_pulse.py \
   --execute \
-  --hold-scan \
-  --hold-mode internal \
-  --channels 4 \
-  --hold-trigger-channel 4 \
-  --hold-threshold-dac 250 \
-  --hold-min-code 0 \
-  --hold-max-code 255 \
-  --hold-step-code 5 \
-  --hold-acquisitions 10 \
-  --pat-gain 1 \
-  --use-ctest \
-  --hold-synchro-trigger \
-  --out-dir radioroc_runs/hold_ch4_smoke
+  --preset configs/presets/sync_pulse_io1_mux5.json
 ```
 
-If needed, apply and verify defaults as a separate setup step before the scan. Keeping it separate makes hardware/I2C timeouts easier to diagnose.
+IO1 mux scan:
+
+```bash
+python scripts/radioroc_io_mux_scan.py \
+  --execute \
+  --preset configs/presets/io_mux_scan_io1.json
+```
+
+## Plotting
+
+Plot the newest threshold scan:
+
+```bash
+python scripts/plot_threshold_scan.py --latest --steps --summary
+```
 
 Plot the newest hold scan:
 
 ```bash
-python scripts/plot_hold_scan.py --channels 4 --exclude-zero
+python scripts/plot_hold_scan.py --latest --channels 4 --gain hg --summary
 ```
 
-For internal hold scans, code `0` can be an invalid delay-cell edge case and may dominate the y-axis. Use `--exclude-zero` for the standard diagnostic plot, or `--x-min` to remove a wider early-code region.
-
-For synchronized Ctest injection, connect the board FPGA synchro output, labeled as `IO1`/synchro trigger in the vendor hold-scan workflow, to the signal generator external trigger input. Set the generator to externally triggered burst/pulse mode, and connect the generator output through the attenuator to `in-test1`. The `--hold-synchro-trigger` flag pulses the FPGA synchro signal once per requested ADC acquisition batch, matching the vendor holdscan behavior.
-
-To scope the FPGA synchro output without running a scan:
+For internal hold scans, code `0` can be a bad edge-case point. Use:
 
 ```bash
-python scripts/radioroc_standard_scurves.py \
-  --execute \
-  --pulse-synchro-test \
-  --sync-pulses 1000 \
-  --sync-period-ms 10
+python scripts/plot_hold_scan.py --latest --exclude-zero
 ```
 
-If no pulse is visible on the connector, scan the FPGA IO mux while watching the scope. The script prints each mux index before pulsing, then restores the original mux settings at the end:
+Compare several hold scans:
 
 ```bash
-python scripts/radioroc_standard_scurves.py \
-  --execute \
-  --scan-sync-io-mux \
-  --sync-io io1 \
-  --sync-pulses 100 \
-  --sync-period-ms 10
+python scripts/plot_hold_comparison.py \
+  radioroc_runs/run_a/holdscan.csv \
+  radioroc_runs/run_b/holdscan.csv \
+  --channel 4 \
+  --gain hg
 ```
 
-If the connector label is uncertain, scan all configurable FPGA IO outputs at the same mux index. This is the best first diagnostic when a specific `IO1` scan is flat:
+## Physical Meaning
+
+Threshold scan / SiPM staircase:
+The threshold DAC is swept while the FPGA counts discriminator triggers in a
+fixed time window. With a biased SiPM, the trigger rate versus DAC reveals the
+dark-count staircase and the useful threshold region.
+
+S-curve:
+The ASIC threshold is swept while a pulse/noise occupancy counter is read. It is
+used for pedestal/noise studies and later calibration work.
+
+Internal hold:
+The ASIC internal delay-cell hold code is swept and ADC values are read. Code
+`0` can produce an invalid or misleading edge point, so diagnostic plots often
+exclude it.
+
+External track-and-hold:
+The FPGA-generated external hold delay is swept. With synchronized Ctest
+injection, this maps the timing region where the ADC samples the injected pulse
+properly.
+
+External peak sensing:
+The vendor external peak-sensing path is used instead of a simple external hold
+sample. It is useful as a timing diagnostic and comparison to track-and-hold.
+
+## Known Lab Setup
+
+- FPGA `IO1` is connected to the signal generator external trigger input.
+- `IO1` mux index `5` produces the usable synchro trigger pulses.
+- The signal generator output goes through a 20 dB attenuator into `in-test1`
+  for Ctest scans.
+- A typical Ctest setup used a 500 mV generator pulse before attenuation, about
+  50 mV at the board input, 100 ns width, triggered burst mode.
+- Channel `4` is the current test channel.
+
+## Tests
+
+Run non-hardware tests:
 
 ```bash
-python scripts/radioroc_standard_scurves.py \
-  --execute \
-  --scan-all-sync-io-muxes \
-  --sync-pulses 100 \
-  --sync-period-ms 10
+python -m py_compile radioroc_client.py radioroc_analysis.py scripts/*.py tests/*.py
+python -m unittest discover -s tests -v
 ```
 
-Once the visible mux index is known, set it explicitly before a pulse test:
-
-```bash
-python scripts/radioroc_standard_scurves.py \
-  --execute \
-  --sync-io io1 \
-  --sync-io-mux-index <index> \
-  --pulse-synchro-test \
-  --sync-pulses 1000 \
-  --sync-period-ms 10
-```
-
-External FPGA-generated hold scan is still available with `--hold-mode external`. In external mode the hold value is a delay in ns and must be divisible by 5.
-
-## Notes
-
-Autocalibration support is present but should be treated carefully. First verify default I2C readback and a small pedestal S-curve on a few channels before running it across all 64 channels.
+Live hardware smoke tests are documented in `SMOKE_TESTS.md`; they are not
+automatic tests because they require board state, cabling, and sometimes an
+oscilloscope.

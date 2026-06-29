@@ -1,3 +1,11 @@
+"""Legacy RADIOROC all-in-one workflow script.
+
+This file is kept as a compatibility/reference implementation for the original
+prototype workflows. New user-facing work should prefer the focused scripts
+(`radioroc_threshold_scan.py`, `radioroc_hold_scan.py`, etc.) and the shared
+library in `radioroc_client.py`.
+"""
+
 from __future__ import annotations
 
 import argparse

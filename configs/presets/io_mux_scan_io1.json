@@ -1,0 +1,6 @@
+{
+  "sync_io": "io1",
+  "all_ios": false,
+  "pulses_per_index": 100,
+  "period_ms": 10.0
+}

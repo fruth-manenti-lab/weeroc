@@ -1,30 +1,19 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
+import sys
 import time
 
 import serial
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-DEFAULT_PORTS = ["/dev/cu.usbserial-RD3_320", "/dev/cu.usbserial-RD3_321"]
-DEFAULT_BAUDS = [9600, 115200, 921600, 1_000_000, 2_000_000, 3_000_000]
+from radioroc_client import DEFAULT_BAUD, DEFAULT_PORT, encode_read_request
 
 
-def read_frame(address: int, length: int = 1) -> bytes:
-    if not 0 <= address <= 127:
-        raise ValueError("address must be in range 0..127")
-    if not 1 <= length <= 65536:
-        raise ValueError("length must be in range 1..65536")
-    encoded_length = length - 1
-    return bytes(
-        [
-            0xAA,
-            encoded_length & 0xFF,
-            address | 0x80,
-            (encoded_length >> 8) & 0xFF,
-            0x55,
-        ]
-    )
+DEFAULT_PORTS = [DEFAULT_PORT, "/dev/cu.usbserial-RD3_321"]
+DEFAULT_BAUDS = [9600, DEFAULT_BAUD, 921600, 1_000_000, 2_000_000, 3_000_000]
 
 
 def probe_port(port: str, baud: int, frame: bytes, timeout: float) -> bytes:
@@ -47,7 +36,7 @@ def main() -> None:
 
     ports = args.port or DEFAULT_PORTS
     bauds = args.baud or DEFAULT_BAUDS
-    frame = read_frame(args.address)
+    frame = encode_read_request(args.address)
     print(f"read address {args.address}: {frame.hex(' ')}")
 
     for port in ports:

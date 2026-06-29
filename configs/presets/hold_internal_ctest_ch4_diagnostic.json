@@ -1,0 +1,18 @@
+{
+  "mode": "internal",
+  "channels": "4",
+  "trigger_channel": 4,
+  "threshold_dac": 250,
+  "hold_min": 0,
+  "hold_max": 255,
+  "hold_step": 5,
+  "acquisitions": 10,
+  "pat_gain": 1,
+  "use_ctest": true,
+  "synchro_trigger": true,
+  "sync_io": "io1",
+  "sync_io_mux_index": 5,
+  "rstn_manual": false,
+  "no_mask": false,
+  "t2": false
+}
