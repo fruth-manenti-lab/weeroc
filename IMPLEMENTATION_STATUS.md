@@ -6,6 +6,11 @@ Delivery 3 (shared threshold job lifecycle) is implemented on
 `feat/threshold-jobs` at `8849808`, package version `0.3.0`. The next bounded task is the desktop threshold workflow in simulation.
 Use `NEXT_SESSION.md` to start that work in a fresh chat.
 
+The user's preference to generally delegate suitable routine work to smaller
+models, with focused context and minimal duplication, is now recorded in
+`AGENTS.md` and the handoff. This documentation-only update was checked with
+`git diff --check`; the implementation validation and next task are unchanged.
+
 Delivery 2 remains at `6c44092` on `feat/transport-ownership`; `782014f` recorded
 its validation and threshold-job handoff.
 

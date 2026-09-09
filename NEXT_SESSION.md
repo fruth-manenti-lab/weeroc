@@ -13,6 +13,17 @@ Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md` (especially
 from `feat/threshold-jobs` on a new local feature branch. Keep this chat limited
 to a minimal desktop threshold workflow in simulation, consuming the shared API.
 
+User preference: generally use smaller model agents for suitable routine work,
+with the aim of reducing total tokens and compute. After defining the shared
+contract, delegate independent bounded documentation, tests/review or small
+implementation tasks. Prefer GPT-5.6 Luna for straightforward tasks and Sol/Terra
+for bounded coding when available. Supply focused context instead of the entire
+chat, keep worker responses concise, and avoid duplicating their work. Keep tiny
+edits local when delegation overhead would exceed the work. The lead retains
+architecture, shared contracts, hardware decisions, review and integration;
+workers stay offline and own non-overlapping files. Do not assume that adding
+agents automatically reduces total token use.
+
 First inspect `radioroc.application.threshold`, its result/event contracts and
 `tests/test_threshold_jobs.py`. Define a small UI/worker boundary and acceptance
 checks before editing. Use an optional PySide6 dependency so core/CLI installs
