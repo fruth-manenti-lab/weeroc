@@ -8,14 +8,24 @@ import sys
 
 from pathlib import Path
 
-from radioroc_cli_common import (
-    add_connection_args,
-    apply_preset_defaults,
-    connection_config_from_args,
-    load_preset_from_argv,
-    run_metadata,
-    settings_from_args,
-)
+if __package__:
+    from .radioroc_cli_common import (
+        add_connection_args,
+        apply_preset_defaults,
+        connection_config_from_args,
+        load_preset_from_argv,
+        run_metadata,
+        settings_from_args,
+    )
+else:
+    from radioroc_cli_common import (
+        add_connection_args,
+        apply_preset_defaults,
+        connection_config_from_args,
+        load_preset_from_argv,
+        run_metadata,
+        settings_from_args,
+    )
 from radioroc_client import FPGA_FIRMWARE_STATUS_WORD, FPGA_IO_NAMES, RadiorocDevice, RadiorocSerial, SyncPulseConfig
 
 

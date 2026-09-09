@@ -15,12 +15,14 @@ import statistics
 import time
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 
 import serial
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from radioroc_client import DEFAULT_CONFIG
 
 DEFAULT_PORT = "/dev/cu.usbserial-RD3_320"
-DEFAULT_CONFIG = Path("configs/radio_default_i2c.csv")
 DEFAULT_OUT = Path("radioroc_runs")
 N_CHANNELS = 64
 FPGA_IO_NAMES = ("io0", "io1", "io2", "io3", "io4")

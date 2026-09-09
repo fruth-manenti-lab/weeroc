@@ -12,9 +12,6 @@ import sys
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/radioroc-matplotlib")
 
-import matplotlib.pyplot as plt
-
-
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line parser.
 
@@ -50,6 +47,8 @@ def main() -> int:
 
     args = build_parser().parse_args()
     try:
+        import matplotlib.pyplot as plt
+
         values: list[float] = []
         with args.csv.open(newline="") as fp:
             for row in csv.DictReader(fp):

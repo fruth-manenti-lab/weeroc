@@ -5,6 +5,7 @@ __pycache__/
 # Local Python/conda environments
 .conda*/
 .venv/
+.venv-*/
 venv/
 
 # Vendor installers, archives, drivers, and extracted binaries
@@ -30,3 +31,8 @@ radioroc_runs/
 /test1_std/
 /test2/
 /test3/
+
+# Python packaging output
+/build/
+/dist/
+*.egg-info/

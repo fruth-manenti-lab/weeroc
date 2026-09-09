@@ -7,12 +7,20 @@ import argparse
 from pathlib import Path
 import sys
 
-from radioroc_cli_common import (
-    add_connection_args,
-    apply_preset_defaults,
-    connection_config_from_args,
-    load_preset_from_argv,
-)
+if __package__:
+    from .radioroc_cli_common import (
+        add_connection_args,
+        apply_preset_defaults,
+        connection_config_from_args,
+        load_preset_from_argv,
+    )
+else:
+    from radioroc_cli_common import (
+        add_connection_args,
+        apply_preset_defaults,
+        connection_config_from_args,
+        load_preset_from_argv,
+    )
 from radioroc_client import DEFAULT_CONFIG, RadiorocDevice, RadiorocSerial, bits
 
 

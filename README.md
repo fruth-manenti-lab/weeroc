@@ -3,6 +3,10 @@
 Python tools for working with a WEEROC RADIOROC 2 evaluation board over USB
 serial on macOS.
 
+The cross-platform rebuild has started with an installable CLI/core package.
+See [development setup](DEVELOPMENT.md), [implementation status](IMPLEMENTATION_STATUS.md),
+and the [rebuild plan](CROSS_PLATFORM_REBUILD_PLAN.md). The desktop UI is pending.
+
 This repository intentionally does not include the WEEROC installer, extracted
 binaries, local conda environment, or generated run outputs.
 

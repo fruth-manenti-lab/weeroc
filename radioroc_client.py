@@ -14,6 +14,7 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from importlib.resources import files
 import json
 import math
 from pathlib import Path
@@ -29,7 +30,9 @@ import serial
 DEFAULT_PORT: str = "/dev/cu.usbserial-RD3_320"
 DEFAULT_BAUD: int = 115200
 DEFAULT_TIMEOUT_SECONDS: float = 0.5
-DEFAULT_CONFIG: Path = Path("configs/radio_default_i2c.csv")
+DEFAULT_CONFIG: Path = Path(__file__).resolve().parent / "configs" / "radio_default_i2c.csv"
+if not DEFAULT_CONFIG.is_file():
+    DEFAULT_CONFIG = Path(str(files("radioroc.resources").joinpath("radio_default_i2c.csv")))
 DEFAULT_RUNS_DIR: Path = Path("radioroc_runs")
 N_CHANNELS: int = 64
 FPGA_IO_NAMES: tuple[str, ...] = ("io0", "io1", "io2", "io3", "io4")

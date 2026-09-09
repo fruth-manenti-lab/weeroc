@@ -398,8 +398,11 @@ the foundation for every remaining feature without interrupting current lab tool
 
 ## 7. Implementation kickoff and Git workflow
 
-Start with a small baseline milestone. This section is an execution sequence;
-the Git cleanup and implementation steps below have not yet been performed.
+Start with a small baseline milestone. The current lab baseline has now been
+committed on `chore/lab-baseline` and tagged `pre-desktop-rebuild` at `603c69b`.
+The initial packaging and development checks are implemented on
+`build/python-foundation`; see `IMPLEMENTATION_STATUS.md` for validation limits
+and the next bounded tasks.
 
 The initial Git audit found `main` at `b77f76d`, seven modified tracked files,
 untracked acquisition/plotting tools, a preset, lab notes/figures, this plan, and
@@ -407,11 +410,13 @@ five measurement directories (`test0`, `test1`, `test1_std`, `test2`, `test3`).
 Existing vendor files and `radioroc_runs` are ignored.
 
 Correction to cleanup: the user intended those five experiment directories to
-remain local and uncommitted. They were deleted before that clarification;
-recovery was investigated, and narrow Git exclusions now protect those names
-from accidental commits if restored or recreated. The user accepted proceeding
-if recovery is unavailable. Scripts, logbooks and their figures, saved results
-under `radioroc_runs`, and automated tests were retained.
+remain local and uncommitted. They were deleted before that clarification, then
+27 files were recovered from local Git snapshot tree
+`9c1da1e65fe2384f39c680f5b29add8ca341d2b6` and verified against its blob hashes.
+Narrow Git exclusions keep the restored directories out of commits. Scripts,
+logbooks and their figures, results under `radioroc_runs`, and automated tests
+were retained. Snapshot recovery verifies the recovered bytes, not that no
+unrecorded changes existed after that snapshot.
 
 ### Delivery 0 — Preserve the current lab baseline
 

@@ -7,16 +7,28 @@ import argparse
 from pathlib import Path
 import sys
 
-from radioroc_cli_common import (
-    add_connection_args,
-    add_write_safety_args,
-    apply_preset_defaults,
-    connection_config_from_args,
-    load_preset_from_argv,
-    prepare_device,
-    run_metadata,
-    settings_from_args,
-)
+if __package__:
+    from .radioroc_cli_common import (
+        add_connection_args,
+        add_write_safety_args,
+        apply_preset_defaults,
+        connection_config_from_args,
+        load_preset_from_argv,
+        prepare_device,
+        run_metadata,
+        settings_from_args,
+    )
+else:
+    from radioroc_cli_common import (
+        add_connection_args,
+        add_write_safety_args,
+        apply_preset_defaults,
+        connection_config_from_args,
+        load_preset_from_argv,
+        prepare_device,
+        run_metadata,
+        settings_from_args,
+    )
 from radioroc_client import RadiorocDevice, RadiorocSerial, ScurveConfig, default_run_dir, parse_channels
 
 
