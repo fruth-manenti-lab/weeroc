@@ -9,6 +9,7 @@ import sys
 
 
 COMMANDS = {
+    "ports": "radioroc_list_ports",
     "check-connection": "radioroc_check_connection",
     "apply-defaults": "radioroc_apply_defaults",
     "scurve": "radioroc_scurve",

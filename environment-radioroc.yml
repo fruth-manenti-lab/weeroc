@@ -9,6 +9,7 @@ dependencies:
   - scipy
   - matplotlib
   - pyserial
+  - filelock
   - pyvisa
   - pyusb
   - libusb

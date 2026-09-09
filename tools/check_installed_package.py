@@ -23,11 +23,14 @@ import sys
 import radioroc_client
 import radioroc_analysis
 from radioroc.__main__ import COMMANDS
+from radioroc.transport import RadiorocSerial
+from radioroc.cli.radioroc_standard_scurves import RadiorocSerial as LegacySerial
 
 repo = Path(sys.argv[1]).resolve()
 assert not Path(radioroc_client.__file__).resolve().is_relative_to(repo / 'src')
 assert Path(radioroc_client.__file__).resolve() != repo / 'radioroc_client.py'
 assert radioroc_client.encode_read_request(100) == bytes.fromhex('aa 00 e4 00 55')
+assert radioroc_client.RadiorocSerial is RadiorocSerial is LegacySerial
 assert hashlib.sha256(radioroc_client.DEFAULT_CONFIG.read_bytes()).hexdigest() == sys.argv[2]
 device = radioroc_client.RadiorocDevice(radioroc_client.RadiorocMemoryTransport(), dry_run=True)
 device.load_default_config()

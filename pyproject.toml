@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "radioroc-tools"
-version = "0.1.0"
+version = "0.2.0"
 description = "RADIOROC 2 board workflows and analysis tools"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["pyserial>=3.5,<4"]
+dependencies = ["pyserial>=3.5,<4", "filelock>=3.16,<4"]
 
 [project.optional-dependencies]
 analysis = ["matplotlib>=3.8,<4"]
@@ -21,7 +21,7 @@ radioroc = "radioroc.__main__:main"
 # the implementation or default configuration. Extract modules incrementally.
 [tool.setuptools]
 py-modules = ["radioroc_client", "radioroc_analysis"]
-packages = ["radioroc", "radioroc.cli", "radioroc.resources"]
+packages = ["radioroc", "radioroc.cli", "radioroc.resources", "radioroc.protocol", "radioroc.transport"]
 include-package-data = false
 
 [tool.setuptools.package-dir]

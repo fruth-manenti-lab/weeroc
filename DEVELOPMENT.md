@@ -1,7 +1,8 @@
 # Development
 
 The lab baseline is tagged `pre-desktop-rebuild` (`603c69b`). The first rebuild
-branch is `build/python-foundation`. These commits are local until pushed.
+branch is `build/python-foundation`; transport work continues on
+`feat/transport-ownership`. These commits are local until pushed.
 
 ## Install
 
@@ -17,7 +18,7 @@ radioroc --help
 radioroc threshold-scan --help
 ```
 
-The base install requires only pySerial; plotting requires `[analysis]`. No Qt,
+The base install requires pySerial and filelock; plotting requires `[analysis]`. No Qt,
 vendor installer, D2XX library or connected board is needed for offline checks.
 The GUI is not implemented yet. Future dependencies will be introduced with the
 features that use them. The historical conda environment remains available for
@@ -28,8 +29,12 @@ existing lab work.
 The installed `radioroc` command and `python -m radioroc` dispatch to the current
 script implementations. `python scripts/radioroc_threshold_scan.py ...` and the
 other original commands still work from a source checkout.
+`python -m radioroc` requires a regular or editable installation; merely adding
+`src` to `PYTHONPATH` does not supply the transitional CLI/resource mappings.
 
 Core modules retain the import names `radioroc_client` and `radioroc_analysis`.
+Frame helpers now live in `radioroc.protocol`; communication, discovery and
+ownership live in `radioroc.transport`. Old names remain re-exported for scripts.
 Setuptools temporarily maps `scripts/` to `radioroc.cli` and `configs/` to
 `radioroc.resources`, so code and configuration are packaged without duplicate
 copies. New package code lives in `src/radioroc/`. These mappings are a migration
@@ -43,7 +48,8 @@ from importlib.resources import files
 preset = files('radioroc.resources').joinpath('presets/threshold_ch4_sipm_dark.json')
 ```
 
-Existing workflow behavior remains unchanged: some dry-run commands still open
+Successful workflow settings/sequences remain unchanged; transport failures now
+propagate explicitly and requests are not automatically resent. Some dry-run commands still open
 the serial port. Offline checks run help, pure functions and recorded/synthetic
 data only. Fixing dry-run hardware access belongs to the upcoming workflow work.
 
@@ -59,7 +65,7 @@ python -m venv .venv-wheel
 ```
 
 The smoke check launches isolated Python processes in a temporary directory,
-checks packaged configuration bytes, all 14 commands, and optional headless plot
+checks packaged configuration bytes, all 15 commands, and optional headless plot
 rendering. It catches packaging failures that imports from the checkout conceal.
 GitHub Actions repeats the checks on Ubuntu and macOS. Debian installation and
 physical USB behavior on each target OS still need separate validation.
@@ -79,3 +85,65 @@ need a separate backup; no external data backup was configured in this delivery.
 
 Packaging references: [setuptools configuration](https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html)
 and [GitHub Python workflows](https://docs.github.com/en/actions/tutorials/build-and-test-code/python).
+
+## Communication and board ownership
+
+`radioroc ports --json` lists FTDI candidates and their board identities without
+opening them. VID/PID alone does not confirm a RADIOROC board. Select `--port`
+explicitly and confirm a status response. The previous Mac default remains for
+compatibility; automatic control-interface selection is a later task.
+
+All framed serial entry points, including legacy calibration and serial-probe
+scripts, share a board lock under `~/.radioroc/locks`. Two interfaces with the
+same VID/PID/serial number share one lock. If serial identity is unavailable,
+USB location is used, then a canonical port path as the final fallback. The
+fallback cannot group interfaces without identifying metadata. Duplicate USB
+serial numbers conservatively contend for the same lock.
+
+Locks coordinate participating programs for the same OS user, including
+different checkouts. Use a local home filesystem; other users, vendor D2XX
+programs and programs that ignore this lock are outside its guarantee. POSIX
+serial exclusive mode supplies an additional port-level advisory check. Leave
+lock files in place: the OS lock determines ownership, not whether a file or PID
+exists. Normal close and process exit release it; a failed serial close retains
+ownership until close succeeds. Prefer `with RadiorocSerial(...)` sessions.
+
+Read requests are sent once because repeating FIFO reads can consume subsequent
+data. Fragmented replies are assembled within the timeout. A missing reply raises
+`TransportTimeoutError`; incomplete/malformed data raises `TransportProtocolError`;
+device I/O failure raises `TransportIOError`. Failed ASIC readback propagates,
+instead of pretending a loaded default was measured. Response metadata bytes
+1–2 are deliberately opaque until firmware evidence establishes their meaning.
+Leading non-header noise is skipped. A bad footer rejects the transaction;
+the parser does not search inside a malformed ADC payload for another frame.
+Without verified metadata or a transaction identifier, same-shaped stale frames
+cannot be distinguished reliably from current replies.
+Requests above 256 bytes retain the previous encoding; the 65536-byte maximum is
+tested offline only (the vendor wrapper restricts it to 65535).
+
+Transaction serialization prevents interleaving individual calls on one transport.
+Preventing two complete scans from running through one shared session belongs
+to the next application/job layer; do not run workflows concurrently today.
+
+The historical conda environment needs filelock for this branch; it is now
+listed in `environment-radioroc.yml`. Package installations install it automatically.
+
+References: [pySerial timeout/exclusive behavior](https://pyserial.readthedocs.io/en/latest/pyserial_api.html)
+and [filelock](https://py-filelock.readthedocs.io/en/latest/).
+
+## Session scope and handoffs
+
+Use one bounded delivery per chat: define its outcome, allowed modules, tests
+and explicit exclusions before implementation. Put discoveries outside that
+scope into `IMPLEMENTATION_STATUS.md` rather than expanding the current change.
+
+Start a new chat after the delivery is tested and committed, particularly when
+moving to a different subsystem (transport → jobs, jobs → desktop UI). A second
+major change of objective or repeated re-explanation of old decisions is also
+a useful signal to checkpoint. Conversation length alone is not a completion
+criterion, and a new chat does not replace a clear scope.
+
+Before handoff, record the branch/commit, checks, hardware state, known gaps and
+one next task in `IMPLEMENTATION_STATUS.md`; prepare `NEXT_SESSION.md` as the
+copyable starting prompt. Ask the new chat to read those files and `AGENTS.md`.
+If work is incomplete, label the checkpoint WIP instead of marking it complete.

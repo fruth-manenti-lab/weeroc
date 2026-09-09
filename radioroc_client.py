@@ -22,14 +22,19 @@ import statistics
 import subprocess
 import sys
 import time
-from typing import Optional
+# Prefer this checkout's package when running legacy scripts without installation.
+_source_package = Path(__file__).resolve().parent / "src"
+if (_source_package / "radioroc").is_dir():
+    sys.path.insert(0, str(_source_package))
 
-import serial
+from radioroc.protocol import bits, parse_bits, encode_read_request, encode_write_request
+from radioroc.transport import (
+    DEFAULT_PORT, DEFAULT_BAUD, DEFAULT_TIMEOUT_SECONDS,
+    RadiorocConnectionConfig, RadiorocSerial, RadiorocMemoryTransport,
+)
+from radioroc.transport.errors import TransportProtocolError
 
 
-DEFAULT_PORT: str = "/dev/cu.usbserial-RD3_320"
-DEFAULT_BAUD: int = 115200
-DEFAULT_TIMEOUT_SECONDS: float = 0.5
 DEFAULT_CONFIG: Path = Path(__file__).resolve().parent / "configs" / "radio_default_i2c.csv"
 if not DEFAULT_CONFIG.is_file():
     DEFAULT_CONFIG = Path(str(files("radioroc.resources").joinpath("radio_default_i2c.csv")))
@@ -60,22 +65,6 @@ EXTERNAL_HOLD_TRACK_ADC_CONTROL_WORD: str = "01111000"
 EXTERNAL_HOLD_PEAK_ADC_CONTROL_WORD: str = "01111100"
 INTERNAL_HOLD_CONVERSION_WORD: str = "11111111"
 EXTERNAL_HOLD_VENDOR_CONVERSION_WORD: str = "00000100"
-
-
-@dataclass
-class RadiorocConnectionConfig:
-    """Connection settings for a RADIOROC 2 USB serial session.
-
-    **Attributes**
-    - `port` (`str`): macOS serial device path, for example
-      `"/dev/cu.usbserial-RD3_320"`.
-    - `baud` (`int`): Serial baud rate. The tested board uses `115200`.
-    - `timeout_s` (`float`): Read and write timeout in seconds.
-    """
-
-    port: str = DEFAULT_PORT
-    baud: int = DEFAULT_BAUD
-    timeout_s: float = DEFAULT_TIMEOUT_SECONDS
 
 
 @dataclass
@@ -778,70 +767,6 @@ def scan_values(min_value: int, max_value: int, step: int, *, name: str = "scan"
     return list(range(min_value, max_value + 1, step))
 
 
-def bits(value: int, width: int = 8) -> str:
-    """Format an integer as a zero-padded binary string.
-
-    **Inputs**
-    - `value` (`int`): Integer value to format.
-    - `width` (`int`): Minimum number of output bits.
-
-    **Returns**
-    - `str`: Binary representation with no `0b` prefix.
-    """
-
-    return format(value, f"0{width}b")
-
-
-def parse_bits(value: str) -> int:
-    """Parse a binary string into an integer.
-
-    **Inputs**
-    - `value` (`str`): Binary string with optional surrounding whitespace.
-
-    **Returns**
-    - `int`: Parsed integer value.
-    """
-
-    return int(str(value).strip(), 2)
-
-
-def encode_read_request(address: int, length: int = 1) -> bytes:
-    """Encode a RADIOROC FPGA read request frame.
-
-    **Inputs**
-    - `address` (`int`): FPGA word address in the range `0..127`.
-    - `length` (`int`): Number of bytes to read. Valid range is `1..65536`.
-
-    **Returns**
-    - `bytes`: Framed request suitable for writing to the serial port.
-    """
-
-    if not 0 <= address <= 127:
-        raise ValueError("address must be in range 0..127")
-    if not 1 <= length <= 65536:
-        raise ValueError("length must be in range 1..65536")
-    encoded_length: int = length - 1
-    return bytes([0xAA, encoded_length & 0xFF, address | 0x80, (encoded_length >> 8) & 0xFF, 0x55])
-
-
-def encode_write_request(address: int, payload: bytes) -> bytes:
-    """Encode a RADIOROC FPGA write request frame.
-
-    **Inputs**
-    - `address` (`int`): FPGA word address in the range `0..127`.
-    - `payload` (`bytes`): One to 256 payload bytes.
-
-    **Returns**
-    - `bytes`: Framed request suitable for writing to the serial port.
-    """
-
-    if not 0 <= address <= 127:
-        raise ValueError("address must be in range 0..127")
-    if not 1 <= len(payload) <= 256:
-        raise ValueError("payload length must be in range 1..256")
-    return bytes([0xAA, len(payload) - 1, address]) + payload + bytes([0x55])
-
-
 def parse_channels(value: str, *, n_channels: int = N_CHANNELS) -> list[int]:
     """Parse a channel selection string.
 
@@ -874,286 +799,6 @@ def parse_channels(value: str, *, n_channels: int = N_CHANNELS) -> list[int]:
     if not all(0 <= channel < n_channels for channel in result):
         raise ValueError(f"channels must be in range 0..{n_channels - 1}")
     return result
-
-
-class RadiorocSerial:
-    """Low-level RADIOROC USB serial transport.
-
-    This class owns framed FPGA word reads/writes. It does not know about ASIC
-    slow control, scan workflows, plotting, or command-line arguments.
-
-    **Attributes**
-    - `port` (`str`): Serial device path.
-    - `baud` (`int`): Serial baud rate.
-    - `timeout` (`float`): Read/write timeout in seconds.
-    - `ser` (`serial.Serial | None`): Open pyserial object while inside the
-      context manager.
-    """
-
-    def __init__(self, port: str = DEFAULT_PORT, baud: int = DEFAULT_BAUD, timeout: float = DEFAULT_TIMEOUT_SECONDS):
-        """Create a serial transport object.
-
-        **Inputs**
-        - `port` (`str`): Serial device path.
-        - `baud` (`int`): Serial baud rate.
-        - `timeout` (`float`): Read/write timeout in seconds.
-
-        **Returns**
-        - `None`
-        """
-
-        self.port: str = port
-        self.baud: int = baud
-        self.timeout: float = timeout
-        self.ser: Optional[serial.Serial] = None
-
-    @classmethod
-    def from_config(cls, config: RadiorocConnectionConfig) -> "RadiorocSerial":
-        """Create a serial transport from connection settings.
-
-        **Inputs**
-        - `config` (`RadiorocConnectionConfig`): Serial connection settings.
-
-        **Returns**
-        - `RadiorocSerial`: Unopened serial transport.
-        """
-
-        return cls(port=config.port, baud=config.baud, timeout=config.timeout_s)
-
-    def __enter__(self) -> "RadiorocSerial":
-        """Open the serial port and clear stale buffers.
-
-        **Inputs**
-        - None
-
-        **Returns**
-        - `RadiorocSerial`: Open transport.
-
-        **Hardware side effects**
-        - Opens the USB serial port and clears pending input/output buffers.
-        """
-
-        self.ser = serial.Serial(self.port, baudrate=self.baud, timeout=self.timeout, write_timeout=self.timeout)
-        self.ser.reset_input_buffer()
-        self.ser.reset_output_buffer()
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        """Close the serial port.
-
-        **Inputs**
-        - `*exc` (`object`): Context-manager exception details.
-
-        **Returns**
-        - `None`
-        """
-
-        if self.ser:
-            self.ser.close()
-
-    def transfer(self, frame: bytes, read_len: int = 0) -> bytes:
-        """Write one request frame and optionally read a response frame.
-
-        **Inputs**
-        - `frame` (`bytes`): Encoded read or write request.
-        - `read_len` (`int`): Expected response length in bytes. Use `0` for
-          write-only requests.
-
-        **Returns**
-        - `bytes`: Response bytes, or empty bytes for write-only requests.
-
-        **Hardware side effects**
-        - Writes bytes to the RADIOROC USB serial interface.
-        - Clears the serial input buffer before read transactions.
-        """
-
-        if self.ser is None:
-            raise RuntimeError("serial port is not open")
-        if read_len > 0:
-            self.ser.reset_input_buffer()
-        self.ser.write(frame)
-        self.ser.flush()
-        if read_len <= 0:
-            return b""
-
-        data = bytearray()
-        deadline: float = time.monotonic() + max(self.timeout, 0.1)
-        while time.monotonic() < deadline:
-            chunk: bytes = self.ser.read(max(1, read_len - len(data)))
-            if chunk:
-                data.extend(chunk)
-                while data and data[0] != 0xAA:
-                    data.pop(0)
-                if len(data) >= read_len:
-                    candidate: bytes = bytes(data[:read_len])
-                    if candidate[-1] == 0x55:
-                        return candidate
-                    data.pop(0)
-            else:
-                time.sleep(0.001)
-        return bytes(data)
-
-    def read_word(self, address: int) -> str:
-        """Read one FPGA word as an eight-bit binary string.
-
-        **Inputs**
-        - `address` (`int`): FPGA word address in the range `0..127`.
-
-        **Returns**
-        - `str`: Eight-bit binary word.
-
-        **Hardware side effects**
-        - Sends a read request to the FPGA over USB serial.
-        """
-
-        last_response: bytes = b""
-        for _ in range(3):
-            response: bytes = self.transfer(encode_read_request(address, 1), 5)
-            if len(response) == 5 and response[0] == 0xAA and response[-1] == 0x55:
-                return bits(response[3], 8)
-            last_response = response
-            time.sleep(0.01)
-        raise RuntimeError(f"bad read_word({address}) response: {last_response.hex(' ')}")
-
-    def read_words(self, address: int, length: int) -> bytes:
-        """Read contiguous FPGA bytes.
-
-        **Inputs**
-        - `address` (`int`): FPGA word address in the range `0..127`.
-        - `length` (`int`): Number of bytes to read.
-
-        **Returns**
-        - `bytes`: Raw payload bytes returned by the board.
-
-        **Hardware side effects**
-        - Sends a read request to the FPGA over USB serial.
-        """
-
-        last_response: bytes = b""
-        for _ in range(3):
-            response: bytes = self.transfer(encode_read_request(address, length), length + 4)
-            if len(response) == length + 4 and response[0] == 0xAA and response[-1] == 0x55:
-                return response[3:-1]
-            last_response = response
-            time.sleep(0.01)
-        raise RuntimeError(f"bad read_words({address}, {length}) response: {last_response.hex(' ')}")
-
-    def write_word(self, address: int, word_bits: str) -> None:
-        """Write one FPGA word from an eight-bit binary string.
-
-        **Inputs**
-        - `address` (`int`): FPGA word address in the range `0..127`.
-        - `word_bits` (`str`): Binary word string.
-
-        **Returns**
-        - `None`
-
-        **Hardware side effects**
-        - Writes one FPGA control/data word over USB serial.
-        """
-
-        payload: bytes = parse_bits(word_bits).to_bytes(1, "little")
-        self.transfer(encode_write_request(address, payload))
-
-    def write_words(self, address: int, payload: bytes) -> None:
-        """Write one or more payload bytes to an FPGA address.
-
-        **Inputs**
-        - `address` (`int`): FPGA word address in the range `0..127`.
-        - `payload` (`bytes`): Payload bytes. Long payloads are split into
-          256-byte frames.
-
-        **Returns**
-        - `None`
-
-        **Hardware side effects**
-        - Writes one or more FPGA payload frames over USB serial.
-        """
-
-        offset: int = 0
-        while offset < len(payload):
-            chunk: bytes = payload[offset : offset + 256]
-            self.transfer(encode_write_request(address, chunk))
-            offset += len(chunk)
-
-
-class RadiorocMemoryTransport:
-    """In-memory FPGA word transport for non-hardware tests.
-
-    This class implements the small transport surface used by `RadiorocDevice`.
-    It is not a serial emulator for timing-sensitive scan behavior, but it is
-    sufficient for unit tests that need deterministic FPGA word reads/writes.
-
-    **Attributes**
-    - `words` (`dict[int, str]`): FPGA word storage by address.
-    - `payloads` (`dict[int, bytes]`): Multi-byte payload storage by address.
-    """
-
-    def __init__(self, words: dict[int, str] | None = None, payloads: dict[int, bytes] | None = None):
-        """Create a memory-backed transport.
-
-        **Inputs**
-        - `words` (`dict[int, str] | None`): Initial FPGA word values.
-        - `payloads` (`dict[int, bytes] | None`): Initial multi-byte payloads.
-
-        **Returns**
-        - `None`
-        """
-
-        self.words: dict[int, str] = dict(words or {})
-        self.payloads: dict[int, bytes] = dict(payloads or {})
-
-    def read_word(self, address: int) -> str:
-        """Read one memory-backed FPGA word.
-
-        **Inputs**
-        - `address` (`int`): FPGA word address.
-
-        **Returns**
-        - `str`: Eight-bit binary word.
-        """
-
-        return self.words.get(address, "00000000")
-
-    def write_word(self, address: int, word_bits: str) -> None:
-        """Write one memory-backed FPGA word.
-
-        **Inputs**
-        - `address` (`int`): FPGA word address.
-        - `word_bits` (`str`): Eight-bit binary word.
-
-        **Returns**
-        - `None`
-        """
-
-        self.words[address] = word_bits
-
-    def read_words(self, address: int, length: int) -> bytes:
-        """Read bytes from memory-backed payload storage.
-
-        **Inputs**
-        - `address` (`int`): Payload address.
-        - `length` (`int`): Number of bytes requested.
-
-        **Returns**
-        - `bytes`: Stored bytes padded with zeros as needed.
-        """
-
-        payload: bytes = self.payloads.get(address, b"")
-        return payload[:length].ljust(length, b"\x00")
-
-    def write_words(self, address: int, payload: bytes) -> None:
-        """Write bytes to memory-backed payload storage.
-
-        **Inputs**
-        - `address` (`int`): Payload address.
-        - `payload` (`bytes`): Bytes to store.
-
-        **Returns**
-        - `None`
-        """
-
-        self.payloads[address] = payload
 
 
 class RadiorocDevice:
@@ -1409,8 +1054,8 @@ class RadiorocDevice:
         - `subadd` (`int`): ASIC register subaddress.
 
         **Returns**
-        - `str`: Eight-bit register value. If readback fails, the loaded
-          default row value is returned when available.
+        - `str`: Verified eight-bit register value. Transport failures propagate.
+          Only dry-run mode returns a configured fallback without hardware.
 
         **Hardware side effects**
         - Performs one ASIC slow-control read unless `dry_run` is true.
@@ -1420,12 +1065,9 @@ class RadiorocDevice:
         fallback: str = row.data if row is not None else "00000000"
         if self.dry_run:
             return fallback
-        try:
-            data: bytes = self.read_fifo([I2CRow(add, subadd, fallback)])
-        except Exception:
-            return fallback
-        if not data:
-            return fallback
+        data: bytes = self.read_fifo([I2CRow(add, subadd, fallback)])
+        if len(data) != 1:
+            raise TransportProtocolError(f"expected one ASIC register byte, received {len(data)}")
         return bits(data[0], 8)
 
     def apply_default_config(self) -> None:

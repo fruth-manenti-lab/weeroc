@@ -3,13 +3,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import sys
-import time
-
-import serial
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from radioroc_client import DEFAULT_BAUD, DEFAULT_PORT, encode_read_request
+from radioroc_client import DEFAULT_BAUD, DEFAULT_PORT, RadiorocSerial, encode_read_request
 
 
 DEFAULT_PORTS = [DEFAULT_PORT, "/dev/cu.usbserial-RD3_321"]
@@ -17,13 +14,8 @@ DEFAULT_BAUDS = [9600, DEFAULT_BAUD, 921600, 1_000_000, 2_000_000, 3_000_000]
 
 
 def probe_port(port: str, baud: int, frame: bytes, timeout: float) -> bytes:
-    with serial.Serial(port, baudrate=baud, timeout=timeout, write_timeout=timeout) as ser:
-        ser.reset_input_buffer()
-        ser.reset_output_buffer()
-        ser.write(frame)
-        ser.flush()
-        time.sleep(0.15)
-        return ser.read(64)
+    with RadiorocSerial(port, baud=baud, timeout=timeout) as transport:
+        return transport.transfer(frame, read_len=5)
 
 
 def main() -> None:
