@@ -2,10 +2,13 @@
 
 ## Current checkpoint
 
-Delivery 2 (shared protocol/transport and cooperative board ownership) is
-implemented at `6c44092` on `feat/transport-ownership`, package version `0.2.0`.
-The next bounded task is Delivery 3: one threshold workflow through a shared
-job lifecycle. Use `NEXT_SESSION.md` to start that work in a fresh chat.
+Delivery 3 (shared threshold job lifecycle) is implemented on
+`feat/threshold-jobs`, package version `0.3.0`, in the accompanying implementation
+commit. The next bounded task is the desktop threshold workflow in simulation.
+Use `NEXT_SESSION.md` to start that work in a fresh chat.
+
+Delivery 2 remains at `6c44092` on `feat/transport-ownership`; `782014f` recorded
+its validation and threshold-job handoff.
 
 All commits are local; no push, PR or remote CI run has been performed.
 `main` remains at the original `b77f76d` baseline. The development branch
@@ -24,7 +27,74 @@ They are present locally and ignored. Other saved runs remain in `radioroc_runs`
 No separate external backup has been configured. Recovery verifies snapshot
 bytes, not any unrecorded later changes.
 
-## Implemented
+## Delivery 3: implemented and checked
+
+- `ThresholdJob` / `ThresholdJobConfig` provide a synchronous worker-friendly API.
+  The existing threshold CLI and `device.run_threshold_scan` use that runner.
+  Existing arguments, counter sequences, DAC encoding and result columns/rates
+  are retained; validation now rejects invalid DACs, duplicate channels and
+  nonfinite/nonintegral settings before device access or file creation.
+- Structured state/point events, cooperative cancellation including I2C ready
+  polling and counter windows, Ctrl-C exit handling, and immediate rejection of
+  overlapping jobs on one transport session (including multiple device wrappers).
+- A manifest exists before preparation. Completed windows and DAC points are
+  appended/flushed/fsynced to compatible CSVs. Atomic manifests record status,
+  effective table/configuration, snapshots, firmware, source fingerprint, units,
+  version, board identity when available and separate cleanup/storage errors.
+  Existing run files are never truncated by a new job.
+- Captured temporary threshold/gain/mask/Ctest/discriminator and FPGA settings
+  are restored; uncaptured ASIC settings are never invented. Cleanup errors do
+  not replace the primary failure. Explicit initialization/default application
+  remains intentional preparation and persists; interrupted preparation is
+  labelled unknown/possibly partial. Memory-transport results are simulated.
+- Threshold dry-run validates/previews without serial construction/discovery,
+  measurements or output files. Other workflows are unchanged.
+
+Validation on macOS ARM64 / Python 3.13 using `.venv-foundation`:
+
+- All **55 offline tests** pass (30 preceding, 25 threshold lifecycle tests),
+  plus compile checks and all 15 legacy CLI help checks through
+  `python tools/check_development.py`.
+- Tests compare complete API/CLI fake-device command traces and CSV bytes; check
+  known rates/counts, T1/T2, multiple channels, Ctest, gain, explicit preparation,
+  complete captured-state restoration and legacy source execution.
+- Fault tests cover cancellation before acquisition, during I2C polling, during
+  a long counter window, mid-point and after a point; CLI SIGINT; timeout and
+  disconnect; cleanup failure alone/with a primary error; snapshot/preparation
+  failure; disk/manifest failure; output collisions; callback failure; concurrent
+  session jobs. A subprocess abrupt exit retains a readable point and leaves
+  status running with cleanup pending. Existing subprocess board-lock tests pass.
+- Source distribution and wheel build with `python -m build --no-isolation`.
+  The 0.3.0 wheel is installed in `.venv-foundation`; isolated installed-wheel
+  checks outside the checkout pass for resources, all 15 commands, an executed
+  synthetic threshold job, genuinely offline preview and headless PNG rendering.
+- No physical device was opened in this session. The lab environment, ignored
+  experiment folders and `radioroc_runs` were preserved. No remote CI/push/PR.
+
+Delivery 3 limits and follow-ups:
+
+- Physical snapshot/restore behavior, scan timing and throughput remain untested.
+  `restored` means restoration commands succeeded, not verified readback. I2C
+  control word 60 is idled instead of replaying its command strobe.
+- Persistent storage failure can prevent terminal metadata; the result reports
+  persistence errors, while the last manifest may lag. Crashed/incomplete runs
+  must not be shown as completed; recovery readers should validate any unconfirmed
+  CSV tail. There is no resume/recovery service yet.
+- The caller owns transport open/close and must surface connection/close failures.
+  The whole-job lock covers threshold jobs only; unmigrated workflows and direct
+  primitive calls must not run concurrently. Cancellation waits for bounded I/O;
+  cleanup can require many transactions and is not instantaneous.
+- The memory backend and scripted test transport are not an analog simulator.
+  Delivery 4 needs a labelled threshold simulator and a UI worker adapter with
+  a bounded/coalesced event queue. No Qt/UI code is included in this delivery.
+- Existing T1/T2 shared-register write encoding and table-based mask/gain updates
+  were preserved. Compare those semantics with the vendor before broader register
+  refactoring. Other commands' offline dry-run, acquisition/autocalibration jobs,
+  HG/LG mapping, Windows parity and Linux hardware checks remain separate work.
+- Local commit identity follows preceding commits (Tengiz Ibrayev,
+  `tengiz@agqhcqjdw32.tail819d22.ts.net`); confirm it before publication.
+
+## Earlier deliveries: implemented
 
 - Installable shared Python package, retaining original script paths and core
   imports. `radioroc` / `python -m radioroc` now dispatch 15 commands, including
@@ -42,7 +112,7 @@ bytes, not any unrecorded later changes.
 - Offline source and installed-wheel checks; GitHub Actions configuration for
   Ubuntu/macOS and Python 3.11/3.13; development and agent instructions.
 
-## Validation
+## Delivery 2 validation (historical)
 
 Local platform: macOS ARM64, Python 3.13. Development uses `.venv-foundation`.
 The existing `.conda-radioroc` lab environment received the new filelock
@@ -85,18 +155,19 @@ Response metadata bytes 1–2 remain opaque. Without verified correlation fields
 same-shaped stale replies cannot reliably be rejected. The 65536-byte request
 boundary is tested offline only; the vendor wrapper caps it at 65535.
 
-Transaction locking is implemented; whole-job serialization, progress,
-cancellation and durable partial results are next. Some legacy dry-run commands
-still open ports. HG/LG nibble mapping and incomplete state restoration remain
-tracked migration concerns. Do not run concurrent workflows on one session.
+Transaction locking and the threshold job lifecycle are implemented. Other
+workflows still need whole-job migration; some legacy dry-run commands still
+open ports. HG/LG nibble mapping and state restoration outside threshold scans
+remain tracked migration concerns. Do not mix workflows on one session.
 
 ## Next bounded tasks
 
-1. Implement the threshold-scan job lifecycle specified in `NEXT_SESSION.md`.
+1. Build the desktop threshold workflow in simulation, specified in `NEXT_SESSION.md`.
 2. Review/integrate the local branches and run configured CI when publishing is
    authorized; check the intended Git author identity before publication.
 3. Expand the Windows parity inventory into control-level acceptance criteria.
-4. Build a desktop shell consuming the tested threshold job API, after Delivery 3.
+4. Plan an opt-in bare-board threshold snapshot/restore check after reviewing the
+   new register coverage; this session establishes offline behavior only.
 
 At each checkpoint, record the commit, checks, hardware state, limitations and
 one next task. Move unrelated discoveries into this backlog.

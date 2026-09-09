@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import signal
 from pathlib import Path
 import sys
 
@@ -14,7 +16,6 @@ if __package__:
         apply_preset_defaults,
         connection_config_from_args,
         load_preset_from_argv,
-        prepare_device,
         run_metadata,
         settings_from_args,
     )
@@ -25,11 +26,12 @@ else:
         apply_preset_defaults,
         connection_config_from_args,
         load_preset_from_argv,
-        prepare_device,
         run_metadata,
         settings_from_args,
     )
 from radioroc_client import RadiorocDevice, RadiorocSerial, ThresholdScanConfig, default_run_dir, parse_channels
+from radioroc.application import CancellationToken
+from radioroc.application.threshold import ThresholdJob, ThresholdJobConfig
 
 
 def build_parser(preset: dict[str, object] | None = None, preset_path: Path | None = None) -> argparse.ArgumentParser:
@@ -88,20 +90,44 @@ def main() -> int:
         trigger_preamp_gain=args.pat_gain,
         out_dir=out_dir,
     )
-    scan_config.validate()
     try:
-        with RadiorocSerial.from_config(connection) as transport:
-            device = RadiorocDevice(transport, dry_run=not args.execute)
-            firmware = prepare_device(device, args)
-            settings = settings_from_args(args, scan="threshold", out_dir=out_dir)
-            metadata = run_metadata(connection=connection, settings=settings, firmware_word=firmware)
-            result = device.run_threshold_scan(scan_config, metadata=metadata)
+        connection.validate()
+        operation = ThresholdJobConfig(scan_config, config_path=Path(args.config),
+                                       initialize_fpga=not args.skip_fpga_init,
+                                       apply_defaults=args.apply_defaults)
+        preview = ThresholdJob.preview(operation)
+        # Dry-run takes no dependency on transport creation or discovery.
+        if not args.execute:
+            print(json.dumps(preview, indent=2))
+            return 0
+        settings = settings_from_args(args, scan="threshold", out_dir=out_dir)
+        metadata = run_metadata(connection=connection, settings=settings, firmware_word=None)
+        cancellation = CancellationToken()
+
+        def progress(event):
+            if event.kind == "point":
+                values = dict(event.values)
+                print(f"threshold dac={event.dac} hz={[values[f'ch{ch}'] for ch in channels[:8]]}", flush=True)
+
+        # SIGINT only requests cancellation; cleanup is allowed to finish.
+        previous_handler = signal.signal(signal.SIGINT, lambda *_: cancellation.cancel())
+        try:
+            with RadiorocSerial.from_config(connection) as transport:
+                result = ThresholdJob().run(RadiorocDevice(transport), operation, metadata=metadata,
+                                            cancellation=cancellation, on_event=progress)
+        finally:
+            signal.signal(signal.SIGINT, previous_handler)
+        print(f"threshold scan {result.status}: {result.points} points; cleanup={result.cleanup_status}")
         print(f"threshold scan CSV: {result.csv_path}")
-        if result.attempts_csv_path:
-            print(f"threshold attempts CSV: {result.attempts_csv_path}")
-        if result.metadata_path:
-            print(f"metadata: {result.metadata_path}")
-        return 0
+        print(f"threshold attempts CSV: {result.attempts_csv_path}")
+        print(f"metadata: {result.metadata_path}")
+        if result.error is not None:
+            print(f"{type(result.error).__name__}: {result.error}", file=sys.stderr)
+        for error in result.cleanup_errors + result.persistence_errors:
+            print(f"ERROR: {error}", file=sys.stderr)
+        if result.cleanup_errors or result.persistence_errors:
+            return 1
+        return 0 if result.status == "completed" else (130 if result.status == "cancelled" else 1)
     except Exception as exc:
         print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1

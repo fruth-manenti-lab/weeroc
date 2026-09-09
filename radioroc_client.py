@@ -248,14 +248,27 @@ class ThresholdScanConfig:
         - `None`
         """
 
-        validate_channels(self.channels)
+        from radioroc.protocol.frames import validate_integer
+        if not self.channels:
+            raise ValueError("at least one channel is required")
+        for channel in self.channels:
+            validate_integer(channel, 0, 63, "channel")
+        if len(set(self.channels)) != len(self.channels):
+            raise ValueError("channels must be unique")
+        validate_integer(self.dac_min, 0, 1023, "dac_min")
+        validate_integer(self.dac_max, 0, 1023, "dac_max")
+        validate_integer(self.dac_step, 1, 1024, "dac_step")
         validate_scan_range(self.dac_min, self.dac_max, self.dac_step, name="DAC")
-        if self.trigger_window_ms <= 0:
-            raise ValueError("trigger_window_ms must be positive")
-        if self.averages < 1:
-            raise ValueError("averages must be at least 1")
-        if self.trigger_preamp_gain is not None and not 1 <= self.trigger_preamp_gain <= 63:
-            raise ValueError("trigger_preamp_gain must be in range 1..63")
+        if (isinstance(self.trigger_window_ms, bool)
+                or not isinstance(self.trigger_window_ms, (int, float))
+                or not math.isfinite(self.trigger_window_ms) or self.trigger_window_ms <= 0):
+            raise ValueError("trigger_window_ms must be finite and positive")
+        validate_integer(self.averages, 1, 2**31 - 1, "averages")
+        for name in ("t1", "use_mask", "use_ctest"):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be boolean")
+        if self.trigger_preamp_gain is not None:
+            validate_integer(self.trigger_preamp_gain, 1, 63, "trigger_preamp_gain")
 
 
 @dataclass
@@ -477,6 +490,13 @@ class ThresholdScanResult:
     points: int = 0
     channels: list[int] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    status: str = "completed"
+    cleanup_status: str = "not_required"
+    cleanup_errors: list[str] = field(default_factory=list)
+    persistence_errors: list[str] = field(default_factory=list)
+    error: BaseException | None = None
+    attempts: int = 0
+    execution_mode: str = "hardware"
 
 
 @dataclass
@@ -836,6 +856,11 @@ class RadiorocDevice:
         self.chip_id: int = RADIOROC_CHIP_ID
         self.address_bits: int = ASIC_ADDRESS_BITS
         self.subaddress_bits: int = ASIC_SUBADDRESS_BITS
+        self._job_checkpoint = None
+
+    def _checkpoint(self) -> None:
+        if self._job_checkpoint is not None:
+            self._job_checkpoint()
 
     def read_word(self, address: int) -> str:
         """Read one FPGA word.
@@ -847,6 +872,7 @@ class RadiorocDevice:
         - `str`: Eight-bit binary word.
         """
 
+        self._checkpoint()
         return self.transport.read_word(address)
 
     def write_word(self, address: int, word_bits: str) -> None:
@@ -863,6 +889,7 @@ class RadiorocDevice:
         - Writes one FPGA control/data word unless `dry_run` is true.
         """
 
+        self._checkpoint()
         if self.dry_run:
             print(f"DRY write_word address={address} data={word_bits}")
             return
@@ -986,21 +1013,25 @@ class RadiorocDevice:
           bus-active bit afterward unless `dry_run` is true.
         """
 
+        self._checkpoint()
         if self.dry_run:
             kind: str = "read" if read else "write"
             print(f"DRY i2c_{kind}_fifo {len(payload)} bytes")
             return b"" if read else None
 
         word0: str = self.transport.read_word(0)
-        self.transport.write_word(FPGA_I2C_CONTROL_WORD, "00000000")
-        self.transport.write_word(0, word0[0] + "1" + word0[2:8])
+        primary_error = None
         try:
+            self.transport.write_word(FPGA_I2C_CONTROL_WORD, "00000000")
+            self.transport.write_word(0, word0[0] + "1" + word0[2:8])
             for offset in range(0, len(payload), 256):
+                self._checkpoint()
                 chunk: bytes = payload[offset : offset + 256]
                 self.transport.write_words(FPGA_I2C_FIFO_WRITE_WORD, chunk)
                 self.transport.write_word(FPGA_I2C_CONTROL_WORD, "00000000")
                 self.transport.write_word(FPGA_I2C_CONTROL_WORD, "00000010")
                 for _ in range(1000):
+                    self._checkpoint()
                     if self.transport.read_word(FPGA_STATUS_WORD)[7] == "1":
                         break
                 else:
@@ -1009,8 +1040,16 @@ class RadiorocDevice:
             if read:
                 return self.transport.read_words(FPGA_I2C_FIFO_READ_WORD, len(payload) // 4)
             return None
+        except BaseException as exc:
+            primary_error = exc
+            raise
         finally:
-            self.transport.write_word(0, word0[0] + "0" + word0[2:8])
+            try:
+                self.transport.write_word(0, word0[0] + "0" + word0[2:8])
+            except BaseException as cleanup_error:
+                if primary_error is None:
+                    raise
+                primary_error.add_note(f"I2C bus cleanup also failed: {cleanup_error}")
 
     def find_i2c_row(self, add: int, subadd: int) -> I2CRow | None:
         """Find a loaded default I2C row.
@@ -1426,98 +1465,20 @@ class RadiorocDevice:
         config: ThresholdScanConfig,
         *,
         metadata: RadiorocRunMetadata | None = None,
+        cancellation=None,
+        on_event=None,
     ) -> ThresholdScanResult:
-        """Run a threshold-rate scan and return output paths.
+        """Compatibility entry point for the shared threshold job.
 
-        **Inputs**
-        - `config` (`ThresholdScanConfig`): Scan settings.
-        - `metadata` (`RadiorocRunMetadata | None`): Optional metadata to
-          write beside the CSV.
-
-        **Returns**
-        - `ThresholdScanResult`: CSV path, metadata path, channels, and point
-          count.
-
-        **Hardware side effects**
-        - Writes threshold DAC, mask/Ctest bits, and FPGA counter controls.
+        Failures raise ThresholdJobError carrying a durable partial ``result``.
+        The application runner returns that result directly for UI consumers.
         """
-
-        config.validate()
-        if config.trigger_preamp_gain is not None:
-            self.set_trigger_preamp_gain(config.trigger_preamp_gain, channels=config.channels)
-        out_dir: Path = config.out_dir
-        csv_path: Path = write_csv_rows([], out_dir, "thresholdscan.csv")
-        attempts_csv_path: Path = write_csv_rows(
-            [],
-            out_dir,
-            "thresholdscan_attempts.csv",
-            fieldnames=["DAC", "channel", "attempt", "rate_hz", "trigger_count"],
-        )
-        self.prepare_trigger_masks(t1=config.t1, use_mask=config.use_mask, use_ctest=config.use_ctest)
-        saved_w1: str = self.read_word(1) if not self.dry_run else "00000000"
-        rows: list[dict[str, object]] = []
-        attempt_rows: list[dict[str, object]] = []
-        start_time: float = time.perf_counter()
-        try:
-            for dac in scan_values(config.dac_min, config.dac_max, config.dac_step, name="DAC"):
-                self.set_threshold_dac(dac, t1=config.t1)
-                row: dict[str, object] = {"DAC": dac}
-                for channel in config.channels:
-                    self.write_word(6, bits(channel))
-                    if config.use_mask:
-                        self.set_mask_for_channel(channel, t1=config.t1, enabled=True)
-                    if config.use_ctest:
-                        self.set_ctest_for_channel(channel, enabled=True)
-                    rates: list[float] = []
-                    for _ in range(config.averages):
-                        self.write_word(1, "01" + saved_w1[2:8])
-                        self.write_word(1, "00" + saved_w1[2:8])
-                        self.write_word(1, "10" + saved_w1[2:8])
-                        if self.dry_run:
-                            trigger_count = 0
-                        else:
-                            self.accurate_delay_ms(config.trigger_window_ms)
-                            self.write_word(1, "00" + saved_w1[2:8])
-                            trigger_count = int.from_bytes(self.transport.read_words(96, 4), "little")
-                        rate_hz = trigger_count / (config.trigger_window_ms / 1000.0)
-                        rates.append(rate_hz)
-                        attempt_rows.append(
-                            {
-                                "DAC": dac,
-                                "channel": channel,
-                                "attempt": len(rates),
-                                "rate_hz": round(rate_hz, 6),
-                                "trigger_count": trigger_count,
-                            }
-                        )
-                    row[f"ch{channel}"] = round(statistics.mean(rates), 6)
-                    if config.use_mask:
-                        self.set_mask_for_channel(channel, t1=config.t1, enabled=False)
-                    if config.use_ctest:
-                        self.set_ctest_for_channel(channel, enabled=False)
-                rows.append(row)
-                write_csv_rows(rows, out_dir, "thresholdscan.csv")
-                write_csv_rows(
-                    attempt_rows,
-                    out_dir,
-                    "thresholdscan_attempts.csv",
-                    fieldnames=["DAC", "channel", "attempt", "rate_hz", "trigger_count"],
-                )
-                print(f"threshold dac={dac} hz={[row[f'ch{ch}'] for ch in config.channels[:8]]}", flush=True)
-        finally:
-            if config.use_mask or config.use_ctest:
-                self.prepare_trigger_masks(t1=config.t1, use_mask=config.use_mask, use_ctest=config.use_ctest)
-            self.write_word(1, saved_w1)
-            print(f"thresholdscan measurement time: {time.perf_counter() - start_time:.3f} seconds", flush=True)
-        metadata_path = write_metadata_json(metadata, out_dir) if metadata else None
-        return ThresholdScanResult(
-            csv_path=csv_path,
-            attempts_csv_path=attempts_csv_path,
-            metadata_path=metadata_path,
-            metadata=metadata,
-            points=len(rows),
-            channels=list(config.channels),
-        )
+        from radioroc.application.threshold import ThresholdJob, ThresholdJobConfig, ThresholdJobError
+        result = ThresholdJob().run(self, ThresholdJobConfig(config), metadata=metadata,
+                                    cancellation=cancellation, on_event=on_event)
+        if result.status not in ("completed", "cancelled") or result.cleanup_errors or result.persistence_errors:
+            raise ThresholdJobError(result) from result.error
+        return result
 
     def configure_adc_external_hold(
         self,

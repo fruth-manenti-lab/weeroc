@@ -25,6 +25,7 @@ import radioroc_analysis
 from radioroc.__main__ import COMMANDS
 from radioroc.transport import RadiorocSerial
 from radioroc.cli.radioroc_standard_scurves import RadiorocSerial as LegacySerial
+from radioroc.application.threshold import ThresholdJob, ThresholdJobConfig
 
 repo = Path(sys.argv[1]).resolve()
 assert not Path(radioroc_client.__file__).resolve().is_relative_to(repo / 'src')
@@ -40,6 +41,15 @@ assert json.loads(resources.joinpath('presets/threshold_ch4_sipm_dark.json').rea
 assert 'matplotlib.pyplot' not in sys.modules
 assert importlib.util.find_spec('PySide6') is None
 assert importlib.util.find_spec('PyQt6') is None
+# Exercise the packaged workflow/data modules with explicitly synthetic input.
+memory = radioroc_client.RadiorocMemoryTransport({4: '00000001'}, {96: (3).to_bytes(4, 'little')})
+scan = radioroc_client.ThresholdScanConfig([4], dac_min=0, dac_max=0,
+                                         trigger_window_ms=1, out_dir=Path('synthetic-job'))
+result = ThresholdJob().run(radioroc_client.RadiorocDevice(memory), ThresholdJobConfig(scan))
+assert result.status == 'completed' and result.points == 1
+assert result.csv_path.read_text() == 'DAC,ch4\n0,3000.0\n'
+manifest = json.loads(result.metadata_path.read_text())
+assert manifest['status'] == 'completed' and manifest['execution_mode'] == 'simulation'
 print(json.dumps(list(COMMANDS)))
 '''
 
@@ -71,6 +81,10 @@ def main() -> None:
                        check=True, stdout=subprocess.DEVNULL, timeout=30)
         for command in commands:
             run(["-m", "radioroc", command, "--help"])
+        preview = json.loads(run(["-m", "radioroc", "threshold-scan", "--port", "/no/hardware",
+                                  "--out-dir", str(work / "preview")]))
+        assert preview["execution_mode"] == "dry-run"
+        assert not (work / "preview").exists()
         if args.plot:
             scan = work / "thresholdscan.csv"
             scan.write_text("DAC,ch4\n0,100\n5,1000\n10,500\n")
