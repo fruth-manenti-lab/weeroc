@@ -1,7 +1,7 @@
 # RADIOROC 04 — Bare-board threshold validation
 
 RADIOROC 03 added the desktop hardware connection/session slice on
-`feat/desktop-hardware-connection`, package version `0.5.0`. Read `AGENTS.md`,
+`feat/desktop-hardware-connection` at `9235fb8`, package version `0.5.0`. Read `AGENTS.md`,
 `IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md` and
 `docs/hardware/bare_board_threshold_validation.md`, then verify the branch,
 checkpoint and working tree before editing.

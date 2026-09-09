@@ -3,7 +3,7 @@
 ## Current checkpoint
 
 Delivery 4's desktop hardware connection/session slice is implemented on
-`feat/desktop-hardware-connection`, package version `0.5.0`. The next bounded
+`feat/desktop-hardware-connection` at `9235fb8`, package version `0.5.0`. The next bounded
 task is the opt-in bare-board threshold verification helper and bench validation
 specified in `NEXT_SESSION.md`. Hardware threshold Run remains disabled.
 
