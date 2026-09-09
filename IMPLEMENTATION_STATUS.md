@@ -1,71 +1,102 @@
 # Implementation status
 
-## Current delivery
+## Current checkpoint
 
-Delivery 0 is checkpointed at tag `pre-desktop-rebuild` (`603c69b`) on
-`chore/lab-baseline`. Delivery 1's packaging foundation is on
-`build/python-foundation`. All commits are local; no push, PR or CI run has been
-performed. `main` remains at the original `b77f76d` baseline.
+Delivery 2 (shared protocol/transport and cooperative board ownership) is
+implemented at `6c44092` on `feat/transport-ownership`, package version `0.2.0`.
+The next bounded task is Delivery 3: one threshold workflow through a shared
+job lifecycle. Use `NEXT_SESSION.md` to start that work in a fresh chat.
 
-Baseline commits:
+All commits are local; no push, PR or remote CI run has been performed.
+`main` remains at the original `b77f76d` baseline. The development branch
+contains the preceding checkpoints:
 
 - `e3d3b3d`: acquisition, scan and analysis workflows, preset and tests.
 - `352418a`: June/July lab notes and their result figures.
-- `603c69b`: rebuild plan and exclusions for local experiment folders.
+- `603c69b`: rebuild plan and exclusions; tag `pre-desktop-rebuild` on
+  `chore/lab-baseline`.
+- `81ee287`: installable package, CLI and offline development checks on
+  `build/python-foundation`.
 
 The five experiment folders were recovered from local Git snapshot
 `9c1da1e65fe2384f39c680f5b29add8ca341d2b6`: 27 files verified against blob hashes.
 They are present locally and ignored. Other saved runs remain in `radioroc_runs`.
-No separate external backup has been configured.
+No separate external backup has been configured. Recovery verifies snapshot
+bytes, not any unrecorded later changes.
 
-## Implemented in the foundation
+## Implemented
 
-- Installable `radioroc-tools` package and `radioroc` / `python -m radioroc` CLI
-  dispatching all 14 existing user-facing scripts.
-- Original script paths and core module imports retained.
-- Single source for configuration/presets, included in the package; default
-  configuration resolution works independently of the current working directory.
-- Base dependency limited to pySerial; optional analysis/build dependencies.
-- Source and installed-wheel offline checks, including headless plot rendering.
-- GitHub Actions configuration for Ubuntu/macOS and Python 3.11/3.13.
-- Development instructions and repository agent rules.
+- Installable shared Python package, retaining original script paths and core
+  imports. `radioroc` / `python -m radioroc` now dispatch 15 commands, including
+  the new read-only port candidate listing.
+- Packaged default configuration and presets, independent of working directory.
+  Base dependencies are pySerial and filelock; plotting/build tools are optional.
+- One framed serial transport used by the core, legacy autocalibration and
+  serial-probe scripts. Exact existing request bytes and write chunking retained.
+- Validated request bounds, bounded fragmented reads/output waits, explicit
+  timeout/protocol/I/O errors and no automatic request retries. Failed ASIC
+  readback raises instead of returning unmeasured defaults.
+- Cooperative OS-backed ownership across both USB interfaces of a board, keyed
+  by USB identity, acquired before opening serial. Normal close and process exit
+  release ownership; failed close retains ownership for a later close attempt.
+- Offline source and installed-wheel checks; GitHub Actions configuration for
+  Ubuntu/macOS and Python 3.11/3.13; development and agent instructions.
 
-## Validation and limits
+## Validation
 
-Local platform: macOS ARM64, Python 3.13. Existing conda environment is unchanged;
-package validation uses `.venv-foundation`.
+Local platform: macOS ARM64, Python 3.13. Development uses `.venv-foundation`.
+The existing `.conda-radioroc` lab environment received the new filelock
+dependency (3.32.6); the source checks pass there as well.
 
-- Existing nine unit tests pass.
-- Compile checks and all 14 original CLI help commands pass.
-- Source distribution and wheel build successfully.
-- Installed-wheel checks pass outside the checkout: core imports, default table
-  byte equality/677 rows, preset resources, version, console entry point and all
-  14 subcommand help pages, without Qt.
-- Editable installation and source checks pass.
-- Installed CLI rendered a threshold PNG from synthetic CSV data using the
-  headless Matplotlib backend; no hardware was accessed.
+- All 30 unit tests pass (nine existing, 21 new), including malformed/fragmented
+  replies, embedded frame delimiters, timeouts/disconnects, no retries, failed
+  readback, open/close cleanup and real subprocess ownership/release after kill.
+- Compile checks and all 15 CLI help commands pass.
+- Source distribution and wheel build successfully. Editable installation was
+  checked; `.venv-foundation` currently has the built 0.2.0 wheel installed.
+- Installed-wheel checks pass outside the checkout: imports/transport aliases,
+  default table byte equality/677 rows, presets, version and all CLI help pages.
+  A synthetic threshold CSV renders to PNG with the headless Matplotlib backend.
+- Read-only hardware status on `/dev/cu.usbserial-RD3_320` returned address 100
+  as `00000101` (5). While that connection was held, a second process targeting
+  `/dev/cu.usbserial-RD3_321` received `DeviceBusyError` before opening serial.
+  The owner then closed and released the lease. No configuration writes were
+  issued. See `logbooks/2026-09-09.md`.
 
-CI configuration exists but has not run remotely. No Debian validation or new
-hardware testing has occurred. The earlier status-read failure is unresolved.
-The desktop UI, exclusive board ownership, portable automatic device selection,
-and progress/cancellation contracts are not implemented in this delivery.
-Some legacy dry-run commands still open serial ports; use only documented
-offline checks without hardware. Pending protocol assumptions (including HG/LG
-gain nibble mapping), readback error handling and incomplete state restoration
-remain tracked migration concerns, not newly validated behavior.
+## Limits and outstanding work
+
+The earlier planning-time status-read failure did not recur; its cause was not
+established. Successful status and lock checks do not validate scans or Windows
+feature parity. The board is powered, with no SiPM or pulse generator connected
+according to the user; the connection was closed after testing.
+
+CI has not run remotely. Linux/Debian installation, physical USB behavior on
+Linux and desktop packaging remain unvalidated. The desktop UI is not built.
+The feature inventory is preliminary and still needs comparison with the actual
+Windows 2.2.0.5 application.
+
+Ownership coordinates participating programs for the same OS user with a local
+home filesystem. It cannot exclude vendor D2XX programs or other nonparticipating
+clients. Missing USB metadata can prevent grouping both interfaces; duplicate
+USB serial numbers conservatively collide. Candidate discovery does not identify
+the control interface automatically. See `DEVELOPMENT.md` for the full contract.
+
+Response metadata bytes 1–2 remain opaque. Without verified correlation fields,
+same-shaped stale replies cannot reliably be rejected. The 65536-byte request
+boundary is tested offline only; the vendor wrapper caps it at 65535.
+
+Transaction locking is implemented; whole-job serialization, progress,
+cancellation and durable partial results are next. Some legacy dry-run commands
+still open ports. HG/LG nibble mapping and incomplete state restoration remain
+tracked migration concerns. Do not run concurrent workflows on one session.
 
 ## Next bounded tasks
 
-| Task | Inputs | Done when |
-|---|---|---|
-| Review/integrate foundation | Baseline tag, development branch, local check evidence | Reviewed changes integrated; CI passes when pushed |
-| Expand vendor parity inventory | F01–F17 in rebuild plan; Windows 2.2.0.5 application and older guide | Every observed control has defaults/units, source evidence and acceptance criteria |
-| Extract protocol/transport (Delivery 2) | Existing framed transport and fake backend | Existing command bytes preserved; partial/wrong replies, timeout and disconnect tested; explicit errors |
-| Identify and exclusively own a board | Dual FTDI interfaces; agreed session contract | Correct interface selected; two processes cannot use the same board; release on exit tested |
-| Diagnose current board connection | Read-only status command and user-confirmed powered board | Valid status response on identified interface; actual result logged |
+1. Implement the threshold-scan job lifecycle specified in `NEXT_SESSION.md`.
+2. Review/integrate the local branches and run configured CI when publishing is
+   authorized; check the intended Git author identity before publication.
+3. Expand the Windows parity inventory into control-level acceptance criteria.
+4. Build a desktop shell consuming the tested threshold job API, after Delivery 3.
 
-The feature inventory remains preliminary. Full Windows feature parity and
-physical validation must not be inferred from a successful package build.
-
-For each subsequent session: select one bounded task, record its acceptance
-checks and resulting commit, then update this file with the next task.
+At each checkpoint, record the commit, checks, hardware state, limitations and
+one next task. Move unrelated discoveries into this backlog.

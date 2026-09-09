@@ -3,6 +3,11 @@
 Planning baseline: 9 September 2026. This document proposes the implementation;
 the replacement application has not yet been built.
 
+Implementation update: packaging and shared transport/board ownership are now
+committed locally through `6c44092`. Read-only board status returned 5, and
+cross-interface ownership contention was verified. See `IMPLEMENTATION_STATUS.md`
+for current evidence and limits, and `NEXT_SESSION.md` for the next bounded task.
+
 The target is one maintained Python package with a desktop interface and a CLI,
 covering the behavior of the Windows RADIOROC application on macOS, Debian, and
 Ubuntu. Reuse the working board code and measured lab results. Migrate it in
@@ -42,7 +47,7 @@ vendor source would reduce uncertainty; that request is an optional user action,
 and development can continue from the local evidence and Windows comparisons.
 Keep vendor installers/extractions local as the repository already does.
 
-Current checks performed during planning:
+Historical checks performed during planning (before implementation):
 
 - The existing conda environment passed all **9 offline unit tests**.
 - USB enumeration found `PCB_RADIOROC`, VID:PID `0403:6010`, serial `RD3_32`,
@@ -50,8 +55,9 @@ Current checks performed during planning:
 - Two read-only firmware/status checks of the established control port
   `/dev/cu.usbserial-RD3_320`, including a longer timeout, received **no response**.
   No FPGA or ASIC configuration writes were issued. Device enumeration succeeded;
-  current FPGA communication is unconfirmed. Earlier logs report status word 5,
-  but that is historical evidence, not a result from today.
+  FPGA communication was unconfirmed at that point. Later implementation checks
+  returned status word 5; see `logbooks/2026-09-09.md`. The initial failure's
+  cause remains unknown.
 - Existing uncommitted source changes, presets, logs, and run data were preserved.
 
 ## 2. Architecture
@@ -401,8 +407,9 @@ the foundation for every remaining feature without interrupting current lab tool
 Start with a small baseline milestone. The current lab baseline has now been
 committed on `chore/lab-baseline` and tagged `pre-desktop-rebuild` at `603c69b`.
 The initial packaging and development checks are implemented on
-`build/python-foundation`; see `IMPLEMENTATION_STATUS.md` for validation limits
-and the next bounded tasks.
+`build/python-foundation`; shared transport/ownership follows on
+`feat/transport-ownership` at `6c44092`. See `IMPLEMENTATION_STATUS.md` for
+validation limits and the next bounded tasks.
 
 The initial Git audit found `main` at `b77f76d`, seven modified tracked files,
 untracked acquisition/plotting tools, a preset, lab notes/figures, this plan, and
