@@ -39,8 +39,10 @@ assert len(device.i2c_rows) == 677
 resources = files('radioroc.resources')
 assert json.loads(resources.joinpath('presets/threshold_ch4_sipm_dark.json').read_text())['channels'] == '4'
 assert 'matplotlib.pyplot' not in sys.modules
-assert importlib.util.find_spec('PySide6') is None
-assert importlib.util.find_spec('PyQt6') is None
+assert 'PySide6' not in sys.modules and 'PyQt6' not in sys.modules
+if sys.argv[3] != 'gui':
+    assert importlib.util.find_spec('PySide6') is None
+    assert importlib.util.find_spec('PyQt6') is None
 # Exercise the packaged workflow/data modules with explicitly synthetic input.
 memory = radioroc_client.RadiorocMemoryTransport({4: '00000001'}, {96: (3).to_bytes(4, 'little')})
 scan = radioroc_client.ThresholdScanConfig([4], dac_min=0, dac_max=0,
@@ -53,10 +55,44 @@ assert manifest['status'] == 'completed' and manifest['execution_mode'] == 'simu
 print(json.dumps(list(COMMANDS)))
 '''
 
+GUI_PROBE = r'''
+from pathlib import Path
+import time
+from unittest.mock import patch
+from PySide6.QtWidgets import QApplication
+from radioroc.gui.threshold_window import ThresholdWindow
+from radioroc.data.threshold_reader import read_threshold_run
+app = QApplication([])
+window = ThresholdWindow()
+window.output.setText(str(Path('desktop-simulation').resolve()))
+window.dac_max.setValue(50)
+window.window_ms.setValue(1)
+with patch('serial.Serial', side_effect=AssertionError('hardware opened')):
+    window.show()
+    assert window.preview() is not None
+    assert not Path('desktop-simulation').exists()
+    window.start_run()
+    deadline = time.monotonic() + 30
+    while window.worker is not None and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+    assert window.worker is None
+    saved = read_threshold_run(Path('desktop-simulation'))
+    assert saved.status == 'completed' and saved.execution_mode == 'simulation'
+    assert len(saved.rows) == 3
+    window.open_saved(saved.directory)
+    assert 'SIMULATION' in window.status.text()
+    assert len(window.axes.lines) == 2
+    window.close()
+    app.processEvents()
+print('Installed GUI configured, previewed, simulated, plotted and reopened offline.')
+'''
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plot", action="store_true")
+    parser.add_argument("--gui", action="store_true", help="check optional GUI using Qt offscreen")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     digest = hashlib.sha256((root / "configs/radio_default_i2c.csv").read_bytes()).hexdigest()
@@ -72,7 +108,7 @@ def main() -> None:
             return result.stdout
 
         import json
-        commands = json.loads(run(["-c", PROBE, str(root), digest]))
+        commands = json.loads(run(["-c", PROBE, str(root), digest, "gui" if args.gui else "headless"]))
         run(["-m", "radioroc", "--version"])
         run(["-m", "radioroc", "--help"])
         # Exercise the generated console entry point as well as python -m.
@@ -90,6 +126,10 @@ def main() -> None:
             scan.write_text("DAC,ch4\n0,100\n5,1000\n10,500\n")
             run(["-m", "radioroc", "plot-threshold", str(scan), "--out", str(work / "plot.png")])
             assert (work / "plot.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+        run(["-m", "radioroc.gui", "--help"])
+        if args.gui:
+            env["QT_QPA_PLATFORM"] = "offscreen"
+            print(run(["-c", GUI_PROBE]).strip())
         print(f"Installed package resources and {len(commands)} CLI commands passed outside checkout"
               + ("; headless plot rendered." if args.plot else "."))
 

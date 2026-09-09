@@ -36,3 +36,11 @@ jobs:
         run: |
           .venv-wheel/bin/python -m pip install 'radioroc-tools[analysis]'
           .venv-wheel/bin/python tools/check_installed_package.py --plot
+      - name: Verify optional simulation desktop offscreen
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          .venv-wheel/bin/python -m pip install 'radioroc-tools[gui]'
+          .venv-wheel/bin/python tools/check_installed_package.py --gui --plot
+          .venv-wheel/bin/python -m unittest discover -s tests -p 'test_threshold_gui.py' -v

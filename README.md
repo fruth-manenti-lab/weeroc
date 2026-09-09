@@ -5,7 +5,18 @@ serial on macOS.
 
 The cross-platform rebuild has started with an installable CLI/core package.
 See [development setup](DEVELOPMENT.md), [implementation status](IMPLEMENTATION_STATUS.md),
-and the [rebuild plan](CROSS_PLATFORM_REBUILD_PLAN.md). The desktop UI is pending.
+and the [rebuild plan](CROSS_PLATFORM_REBUILD_PLAN.md). The optional desktop now
+supports threshold scans in simulation:
+
+```bash
+.venv-foundation/bin/python -m pip install -e '.[gui,dev]'
+.venv-foundation/bin/radioroc-desktop
+```
+
+Configure channels and DAC settings, preview, run or cancel, and reopen saved
+results. Synthetic runs are labelled **SIMULATION** throughout. Desktop hardware
+execution and application bundles are later milestones; existing CLI commands
+remain available.
 
 This repository intentionally does not include the WEEROC installer, extracted
 binaries, local conda environment, or generated run outputs.

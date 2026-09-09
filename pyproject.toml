@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "radioroc-tools"
-version = "0.3.0"
+version = "0.4.0"
 description = "RADIOROC 2 board workflows and analysis tools"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,16 +12,18 @@ dependencies = ["pyserial>=3.5,<4", "filelock>=3.16,<4"]
 
 [project.optional-dependencies]
 analysis = ["matplotlib>=3.8,<4"]
+gui = ["PySide6>=6.8,<7", "matplotlib>=3.8,<4"]
 dev = ["build>=1.2,<2"]
 
 [project.scripts]
 radioroc = "radioroc.__main__:main"
+radioroc-desktop = "radioroc.gui.__main__:main"
 
 # Transitional mappings preserve the existing scripts/imports without copying
 # the implementation or default configuration. Extract modules incrementally.
 [tool.setuptools]
 py-modules = ["radioroc_client", "radioroc_analysis"]
-packages = ["radioroc", "radioroc.cli", "radioroc.resources", "radioroc.protocol", "radioroc.transport", "radioroc.application", "radioroc.data"]
+packages = ["radioroc", "radioroc.cli", "radioroc.resources", "radioroc.protocol", "radioroc.transport", "radioroc.application", "radioroc.data", "radioroc.gui"]
 include-package-data = false
 
 [tool.setuptools.package-dir]

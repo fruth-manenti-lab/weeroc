@@ -160,6 +160,8 @@ class ThresholdJob:
             "cleanup": {"status": "not_required", "errors": []},
             "device_state": "unobserved",
         })
+        if mode == "simulation" and hasattr(device.transport, "simulation_metadata"):
+            manifest["simulation"] = deepcopy(device.transport.simulation_metadata)
         writer = ThresholdRunWriter(Path(scan.out_dir), scan.channels, manifest)
         result.metadata_path = writer.metadata_path
         result.attempts_csv_path = writer.attempts_path

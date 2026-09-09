@@ -21,8 +21,8 @@ radioroc threshold-scan --help
 
 The base install requires pySerial and filelock; plotting requires `[analysis]`. No Qt,
 vendor installer, D2XX library or connected board is needed for offline checks.
-The GUI is not implemented yet. Future dependencies will be introduced with the
-features that use them. The historical conda environment remains available for
+Install `[gui]` for the optional PySide6/Matplotlib threshold desktop. The
+historical conda environment remains available for
 existing lab work.
 
 ## Commands and compatibility
@@ -64,6 +64,12 @@ python -m venv .venv-wheel
 .venv-wheel/bin/python -m pip install 'radioroc-tools[analysis]'
 .venv-wheel/bin/python tools/check_installed_package.py --plot
 ```
+
+For the optional desktop, install the wheel with `[gui]` and run
+`python tools/check_installed_package.py --gui --plot`. Without `--gui`, the
+check requires an environment with no Qt installed, proving the core remains
+headless. With `--gui`, it exercises configuration, preview, simulation, plotting
+and reopening under Qt's offscreen platform.
 
 The smoke check launches isolated Python processes in a temporary directory,
 checks packaged configuration bytes, all 15 commands, and optional headless plot
@@ -133,6 +139,9 @@ References: [pySerial timeout/exclusive behavior](https://pyserial.readthedocs.i
 and [filelock](https://py-filelock.readthedocs.io/en/latest/).
 
 ## Session scope and handoffs
+
+This continuation is **RADIOROC 02 — Desktop threshold simulation**. Number future
+handoffs sequentially and include the preceding chat label in `NEXT_SESSION.md`.
 
 Use one bounded delivery per chat: define its outcome, allowed modules, tests
 and explicit exclusions before implementation. Put discoveries outside that
@@ -241,3 +250,46 @@ CSV tail; a recovery reader should validate rows before using that tail. No job
 is automatically resumed after interruption. Connection-open/output-initialization
 failures occur before acquisition and may have no complete manifest. Port-close
 errors remain the session owner's responsibility.
+
+## Desktop threshold simulation (Delivery 4, simulation slice)
+
+```bash
+.venv-foundation/bin/python -m pip install -e '.[gui,dev]'
+.venv-foundation/bin/radioroc-desktop
+# Equivalent module entry point; --help works without Qt:
+.venv-foundation/bin/python -m radioroc.gui
+```
+
+Choose channels, DAC range, T1/T2, counter window/averages, masks, Ctest and optional
+trigger gain. Preview validates settings and shows persistent preparation versus
+temporary restoration without opening a session or creating files. Run starts a
+new simulation directory; the default path is under ignored `radioroc_runs/simulation`.
+Hardware mode is visibly unavailable. No desktop action discovers or opens serial.
+
+The synthetic curve has configurable midpoint, width, plateau rate and channel
+spacing. Counts are deterministic and quantized to the selected counter window.
+The model exercises real shared register operations and `ThresholdJob.run` through
+a simulated ASIC FIFO/counter transport. It does not model analog electronics,
+gain/Ctest response, noise or physical timing accuracy. Its parameters/model label
+are recorded in `metadata.json`; plots and reopened manifests label simulation.
+
+`ThresholdWorker` owns one non-daemon Python thread and opens, runs and closes the
+session there. A Qt timer polls its mailbox every 100 ms; widgets and Matplotlib
+stay on the UI thread, following [Qt's threading rules](https://doc.qt.io/qtforpython-6/overviews/qtdoc-threads-qobject.html).
+The mailbox coalesces status events and retains at most 1024 completed DAC rows;
+the shared writer independently saves every completed window and point. The
+terminal display reports coalesced event counts, cleanup and storage errors.
+Terminal delivery waits for session close. Cancel and window-close both request
+cooperative cancellation; closing waits for cleanup and leaves failures visible.
+
+Open saved result accepts a manifest or threshold CSV. The reader checks columns,
+DACs, finite rates and manifest consistency and shows a valid prefix with warnings
+when a tail is malformed. Nonterminal manifests are labelled incomplete; no run
+is resumed or rewritten. Legacy CSVs have unknown provenance. This is a display
+reader, not a crash-recovery or data-repair service.
+
+GUI tests run offscreen when `[gui]` is installed and are skipped on core-only
+installs. `python tools/check_development.py` includes them automatically. A real
+desktop launch must be recorded separately from the offscreen checks. Application
+bundles, Linux desktop launch and hardware snapshot/restore validation remain
+separate tasks.

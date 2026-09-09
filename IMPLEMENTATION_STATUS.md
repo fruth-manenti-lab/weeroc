@@ -2,9 +2,10 @@
 
 ## Current checkpoint
 
-Delivery 3 (shared threshold job lifecycle) is implemented on
-`feat/threshold-jobs` at `8849808`, package version `0.3.0`. The next bounded task is the desktop threshold workflow in simulation.
-Use `NEXT_SESSION.md` to start that work in a fresh chat.
+Delivery 4's simulation slice (desktop threshold workflow) is implemented on
+`feat/desktop-threshold-simulation`, package version `0.4.0`. The final commit is
+recorded below after this status update. The next bounded task is the desktop
+hardware connection/session boundary specified in `NEXT_SESSION.md`.
 
 The user's preference to generally delegate suitable routine work to smaller
 models, with focused context and minimal duplication, is now recorded in
@@ -30,6 +31,45 @@ The five experiment folders were recovered from local Git snapshot
 They are present locally and ignored. Other saved runs remain in `radioroc_runs`.
 No separate external backup has been configured. Recovery verifies snapshot
 bytes, not any unrecorded later changes.
+
+## Delivery 4 simulation slice: implemented and checked
+
+- Optional PySide6/Matplotlib desktop entry point `radioroc-desktop`, while the
+  core/CLI wheel remains importable and usable without Qt or a display server.
+- Configure channels, DAC range/step, counter window, averages, T1/T2, mask,
+  Ctest, gain and preparation options; offline preview exposes persistent versus
+  temporary settings and creates no output/session.
+- A deterministic, configurable logistic threshold simulator drives the actual
+  `ThresholdJob.run` device/register path. Every screen, plot and reopened run
+  labels synthetic data as simulation; model parameters are saved in metadata.
+- A worker owns session create/run/close on one background thread. The UI polls
+  a bounded/coalesced display mailbox while the shared writer independently saves
+  every completed counter window and DAC row. Cancellation and window close wait
+  for cleanup and session release; cleanup/storage/close failures remain visible.
+- Saved-run reading validates manifest/CSV schema, channels, DAC order, point
+  counts and finite nonnegative rates. It salvages only a valid prefix, labels
+  nonterminal/inconsistent runs incomplete and opens legacy CSVs with unknown
+  provenance. It never resumes or rewrites a run.
+
+Validation on macOS ARM64 / Python 3.13 using `.venv-foundation`:
+
+- All **81 offline tests** pass, plus compile checks and all 15 legacy CLI help
+  checks through `python tools/check_development.py`. The 26 added tests cover the
+  simulator, worker/session ownership, coalescing of all 1024 DAC rows, cancellation,
+  close faults, saved-run validation and Qt workflows.
+- Source distribution and 0.4.0 wheel build with `python -m build --no-isolation`.
+  Core-only installed-wheel checks pass in `.venv-wheel-core` with Qt absent.
+  Installed GUI checks pass for configure/preview/run/plot/reopen using Qt offscreen.
+- A native macOS Cocoa launch displayed, completed and reopened a 41-point,
+  two-channel simulation. The window remained responsive and was captured for
+  local visual inspection; the temporary run and screenshot were not added to Git.
+- No physical device was enumerated or opened. Ignored experiment folders and
+  `radioroc_runs` were preserved. No remote CI, push or PR was performed.
+
+Limits: the simulator is a deterministic workflow exerciser, not an analog/noise
+model. Desktop hardware mode is visibly unavailable. Linux desktop launch,
+application bundling and Windows GUI execution remain unvalidated. The saved-run
+reader is for truthful display, not crash repair or resume.
 
 ## Delivery 3: implemented and checked
 
@@ -146,7 +186,8 @@ feature parity. The board is powered, with no SiPM or pulse generator connected
 according to the user; the connection was closed after testing.
 
 CI has not run remotely. Linux/Debian installation, physical USB behavior on
-Linux and desktop packaging remain unvalidated. The desktop UI is not built.
+Linux and desktop bundling remain unvalidated. The desktop supports the threshold
+workflow in simulation; hardware connection/execution is not yet enabled.
 The feature inventory is preliminary and still needs comparison with the actual
 Windows 2.2.0.5 application.
 
@@ -167,12 +208,13 @@ remain tracked migration concerns. Do not mix workflows on one session.
 
 ## Next bounded tasks
 
-1. Build the desktop threshold workflow in simulation, specified in `NEXT_SESSION.md`.
+1. Add the desktop hardware connection/session boundary specified in
+   `NEXT_SESSION.md`, beginning with discovery and read-only status checks.
 2. Review/integrate the local branches and run configured CI when publishing is
    authorized; check the intended Git author identity before publication.
 3. Expand the Windows parity inventory into control-level acceptance criteria.
-4. Plan an opt-in bare-board threshold snapshot/restore check after reviewing the
-   new register coverage; this session establishes offline behavior only.
+4. After the connection slice, review an opt-in bare-board threshold
+   snapshot/restore test card before enabling a physical desktop scan.
 
 At each checkpoint, record the commit, checks, hardware state, limitations and
 one next task. Move unrelated discoveries into this backlog.

@@ -1,79 +1,52 @@
-# Next session: desktop threshold workflow in simulation
+# RADIOROC 03 — Desktop hardware connection
 
-Delivery 3 is committed at `8849808` on `feat/threshold-jobs`, package version
-`0.3.0`. Its following documentation commit records this handoff. All 55 offline
-tests, 15 CLI help checks, source/wheel builds and isolated installed-wheel
-checks (including a synthetic job, offline preview and plot) pass on macOS ARM64 /
-Python 3.13. No hardware was accessed. No commits were pushed.
+RADIOROC 02 completed Delivery 4's simulation desktop slice on
+`feat/desktop-threshold-simulation`, package version `0.4.0`. Read `AGENTS.md`,
+`IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md` and Delivery 4 in
+`CROSS_PLATFORM_REBUILD_PLAN.md`, then verify the recorded branch/commit and
+working tree before editing.
 
----
-
-Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md` (especially
-“Threshold jobs”) and Delivery 4 in `CROSS_PLATFORM_REBUILD_PLAN.md`. Continue
-from `feat/threshold-jobs` on a new local feature branch. Keep this chat limited
-to a minimal desktop threshold workflow in simulation, consuming the shared API.
-
-User preference: generally use smaller model agents for suitable routine work,
-with the aim of reducing total tokens and compute. After defining the shared
-contract, delegate independent bounded documentation, tests/review or small
-implementation tasks. Prefer GPT-5.6 Luna for straightforward tasks and Sol/Terra
-for bounded coding when available. Supply focused context instead of the entire
-chat, keep worker responses concise, and avoid duplicating their work. Keep tiny
-edits local when delegation overhead would exceed the work. The lead retains
-architecture, shared contracts, hardware decisions, review and integration;
-workers stay offline and own non-overlapping files. Do not assume that adding
-agents automatically reduces total token use.
-
-First inspect `radioroc.application.threshold`, its result/event contracts and
-`tests/test_threshold_jobs.py`. Define a small UI/worker boundary and acceptance
-checks before editing. Use an optional PySide6 dependency so core/CLI installs
-remain headless. Implement device/simulation selection, threshold configuration,
-offline preview, run/progress/cancel, a live plot and reopening saved results.
-Keep preparation options and temporary scan restoration visible in the preview.
-The simulator must be explicitly labelled and produce deterministic configurable
-threshold counts through the shared workflow; the existing memory backend and
-scripted unit-test transport are not an analog simulator.
+Keep this chat bounded to the desktop hardware connection and session boundary.
+Build on the same GUI/worker contracts without adding device logic to widgets.
+Start with read-only discovery, explicit control-port selection, connect/status,
+disconnect and truthful errors. The hardware session must be created, owned and
+closed on its worker thread and must use the existing cross-process board lock.
+Simulation must remain available and visibly distinct. Core/CLI installs must
+remain headless and all legacy entry points must keep working.
 
 Acceptance checks:
 
-- The UI submits `ThresholdJobConfig` to `ThresholdJob.run`; it contains no
-  register sequences or duplicate measurement loop.
-- Device I/O runs on an owned worker thread. GUI widgets stay on the UI thread.
-  Event delivery is bounded/coalesced for display while saved data remains complete.
-- Configure → preview → simulated run → progress/plot → cancel/finish → reopen
-  works. Display terminal status, partial points, simulation mode and cleanup /
-  storage failures truthfully. Nonterminal manifests are incomplete runs.
-- Closing during a run requests cancellation and completes cleanup before
-  releasing the worker/session. No automatic resume or silent device opening.
-- Existing API, legacy CLI and offline dry-run behavior stay compatible. Core
-  installation/help checks still run without Qt or a display server.
-- Add focused worker/UI tests using simulation and fault injection; run existing
-  development checks and installed-wheel checks. Record the actual desktop launch
-  evidence separately from headless tests. Check the optional GUI installation
-  and local app launch; multi-OS app bundling is a later bounded task if it grows.
-- Review, update status/handoff and commit locally. Do not push or change main.
+- Port refresh uses the existing discovery API without opening a device. The user
+  explicitly selects a candidate; VID/PID alone is not presented as proof of a
+  RADIOROC control interface.
+- Connect performs the existing read-only status-word check through an owned
+  worker/session. Busy, timeout, protocol, I/O and close errors remain distinct.
+- Widgets stay on the UI thread. Device/session create, status read and close all
+  occur on the worker thread. Closing the window waits for session release and
+  keeps close failures reviewable.
+- Hardware threshold Run remains disabled during this slice unless the physical
+  scan test card below has first been reviewed and its checks can be completed.
+- Add offline tests with fake discovery/transports and fault injection. Tests must
+  never enumerate real hardware. Run `python tools/check_development.py`, build
+  and verify core-only and GUI-installed wheels, and record a native desktop launch.
+- Update `IMPLEMENTATION_STATUS.md`, replace this handoff and commit locally.
+  Do not push or change `main`.
 
-Exclude acquisition/autocalibration migration, complete Windows feature parity,
-full register editors, automatic hardware control-interface detection and release
-packaging across all OSes. Record discoveries instead of broadening this slice.
-If even the simulation desktop workflow grows too large, checkpoint a coherent
-worker/simulator + launchable shell with explicit remaining acceptance checks;
-do not mark Delivery 4 complete prematurely.
+Prepare an opt-in bare-board threshold validation card as a separate reviewable
+document. It must state the exact temporary registers captured/restored, intentional
+preparation behavior, wiring/equipment, expected observations, cancellation points,
+cleanup/readback checks and abort conditions. Do not run a hardware threshold scan
+merely to test the GUI. Enabling desktop hardware Run can follow in its own bounded
+checkpoint after this card is reviewed.
 
-The previous board status check was 5 at `/dev/cu.usbserial-RD3_320`, USB serial
-`RD3_32`, powered with no SiPM or pulse generator. That is historical information,
-not a new connection check. Delivery 3's expanded snapshot/restore register set
-has only offline validation. Do not run a hardware scan as a GUI test. Hardware
-validation needs a separate reviewed test card stating register coverage,
-equipment/wiring, expected observations, cancellation and cleanup. Keep ignored
-experiment folders and `radioroc_runs` local and untouched.
+Historical hardware context only: status word 5 was previously read from
+`/dev/cu.usbserial-RD3_320`, USB serial `RD3_32`. The board was powered with no
+SiPM or pulse generator connected. Treat this as stale until a new read-only check.
+Only the designated operator may access the board. Agent workers use fakes/saved
+data and must not run discovery or hardware diagnostics.
 
-Tell me when the scope is expanding, and recommend another fresh chat after a
-stable committed milestone or before changing subsystem. Persist any unfinished
-work as an explicit WIP checkpoint before handing off.
+Keep acquisition/autocalibration migration, automatic interface detection,
+full register editing, Windows parity expansion, Linux USB validation and release
+bundling outside this chat. Record discoveries instead of expanding scope.
 
----
-
-Other pending work stays in `IMPLEMENTATION_STATUS.md`: physical snapshot/restore
-validation, Linux USB/installation, Windows control-level inventory, other jobs,
-recovery readers, and publication/CI with confirmed Git author identity.
+The preceding chat name is **RADIOROC 02 — Desktop threshold simulation**.
