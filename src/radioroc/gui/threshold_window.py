@@ -15,9 +15,13 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
 from radioroc_client import ThresholdScanConfig
+from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.application.threshold import ThresholdJob, ThresholdJobConfig
 from radioroc.application.threshold_worker import ThresholdWorker
 from radioroc.data.threshold_reader import read_threshold_run
+from radioroc.transport.config import (
+    DEFAULT_BAUD, DEFAULT_TIMEOUT_SECONDS, RadiorocConnectionConfig,
+)
 from radioroc.transport.threshold_simulator import ThresholdSimulationConfig
 
 
@@ -42,12 +46,20 @@ def _new_directory():
 
 
 class ThresholdWindow(QMainWindow):
-    def __init__(self, *, worker_factory=ThresholdWorker):
+    _CONNECTION_BUSY = {"discovering", "connecting", "reading", "disconnecting"}
+    _CONNECTION_LOCKS_MODE = _CONNECTION_BUSY | {"connected", "close_failed"}
+
+    def __init__(self, *, worker_factory=ThresholdWorker,
+                 connection_worker_factory=ConnectionWorker):
         super().__init__()
-        self.setWindowTitle("RADIOROC · Threshold simulation")
+        self.setWindowTitle("RADIOROC · Threshold workflow")
         self.resize(1180, 820)
         self.worker_factory = worker_factory
         self.worker = None
+        self.connection_worker_factory = connection_worker_factory
+        self.connection_worker = None
+        self._connection_ports = ()
+        self._accepted_mode = 0
         self._closing = False
         self._last_rows = ()
         self._active_directory = None
@@ -75,8 +87,40 @@ class ThresholdWindow(QMainWindow):
         self.mode = QComboBox()
         self.mode.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.mode.setMinimumContentsLength(12)
-        self.mode.addItems(["Simulation", "Hardware — unavailable in this delivery"])
+        self.mode.addItems(["Simulation", "Hardware connection"])
         form.addRow("Device / mode", self.mode)
+
+        self.connection_group = QGroupBox("Hardware connection")
+        connection_form = QFormLayout(self.connection_group)
+        connection_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        connection_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        self.port_select = QComboBox()
+        self.port_select.addItem("Select a USB port candidate…", None)
+        self.port_select.currentIndexChanged.connect(self._update_connection_controls)
+        connection_form.addRow("Port", self.port_select)
+        self.baud = _integer(1, 100_000_000, DEFAULT_BAUD)
+        self.timeout_s = _decimal(0.001, 3600, DEFAULT_TIMEOUT_SECONDS)
+        connection_form.addRow("Baud", self.baud)
+        connection_form.addRow("Timeout (s)", self.timeout_s)
+        connection_buttons_top = QHBoxLayout()
+        connection_buttons_bottom = QHBoxLayout()
+        self.refresh_button = QPushButton("Refresh")
+        self.connect_button = QPushButton("Connect")
+        self.read_status_button = QPushButton("Read status")
+        self.disconnect_button = QPushButton("Disconnect")
+        connection_buttons_top.addWidget(self.refresh_button)
+        connection_buttons_top.addWidget(self.connect_button)
+        connection_buttons_bottom.addWidget(self.read_status_button)
+        connection_buttons_bottom.addWidget(self.disconnect_button)
+        connection_form.addRow(connection_buttons_top)
+        connection_form.addRow(connection_buttons_bottom)
+        self.connection_status = QLabel("Not connected · refresh to list USB port candidates")
+        self.connection_status.setWordWrap(True)
+        self.connection_status.setMinimumHeight(42)
+        connection_form.addRow(self.connection_status)
+        self.firmware_status = QLabel("—")
+        connection_form.addRow("Firmware status", self.firmware_status)
+        form.addRow(self.connection_group)
         self.channels = QLineEdit("4,5")
         self.dac_min = _integer(0, 1023, 0)
         self.dac_max = _integer(0, 1023, 1000)
@@ -110,8 +154,8 @@ class ThresholdWindow(QMainWindow):
         self.new_output.clicked.connect(self.choose_output)
         form.addRow(self.new_output)
 
-        sim_group = QGroupBox("Deterministic synthetic curve")
-        sim_form = QFormLayout(sim_group)
+        self.sim_group = QGroupBox("Deterministic synthetic curve")
+        sim_form = QFormLayout(self.sim_group)
         sim_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self.midpoint = _decimal(0, 1023, 500)
         self.width = _decimal(0.001, 1024, 30)
@@ -120,7 +164,7 @@ class ThresholdWindow(QMainWindow):
         for label, field in [("Midpoint (DAC)", self.midpoint), ("Width (DAC)", self.width),
                              ("Plateau (Hz)", self.plateau), ("Channel spacing (DAC)", self.spacing)]:
             sim_form.addRow(label, field)
-        form.addRow(sim_group)
+        form.addRow(self.sim_group)
         split.addWidget(scroll)
 
         right = QWidget()
@@ -155,18 +199,174 @@ class ThresholdWindow(QMainWindow):
         self.cancel_button.clicked.connect(self.cancel_run)
         self.reopen_button.clicked.connect(self.choose_saved)
         self.mode.currentIndexChanged.connect(self._mode_changed)
+        self.refresh_button.clicked.connect(self.refresh_connections)
+        self.connect_button.clicked.connect(self.connect_hardware)
+        self.read_status_button.clicked.connect(self.read_hardware_status)
+        self.disconnect_button.clicked.connect(self.disconnect_hardware)
         self.timer = QTimer(self)
         self.timer.setInterval(100)
         self.timer.timeout.connect(self.poll_worker)
+        self.connection_timer = QTimer(self)
+        self.connection_timer.setInterval(100)
+        self.connection_timer.timeout.connect(self.poll_connection_worker)
         self._mode_changed()
         self._plot((), "Simulation — no data yet")
 
     def _mode_changed(self):
+        requested = self.mode.currentIndex()
+        if requested != self._accepted_mode and self._mode_switch_locked():
+            self.mode.blockSignals(True)
+            self.mode.setCurrentIndex(self._accepted_mode)
+            self.mode.blockSignals(False)
+            self.connection_status.setText(
+                "Finish the active session before changing device mode.")
+        else:
+            self._accepted_mode = requested
         simulation = self.mode.currentIndex() == 0
         self.banner.setText(
             "SIMULATION · Synthetic counts, not measured lab data. No board connection."
-            if simulation else "HARDWARE UNAVAILABLE · This desktop delivery supports simulation only.")
-        self.run_button.setEnabled(simulation and self.worker is None)
+            if simulation else
+            "HARDWARE · USB candidates are unverified; select the control port. "
+            "Connection checks status only. Threshold runs are disabled.")
+        self.run_button.setText("Run simulation" if simulation else "Run unavailable")
+        self.sim_group.setEnabled(simulation and self.worker is None)
+        self._update_connection_controls()
+
+    def _mode_switch_locked(self):
+        if self.worker is not None:
+            return True
+        if self.connection_worker is None:
+            return False
+        return self.connection_worker.snapshot().state in self._CONNECTION_LOCKS_MODE
+
+    def _ensure_connection_worker(self):
+        if self.connection_worker is None:
+            worker = self.connection_worker_factory()
+            worker.start()
+            self.connection_worker = worker
+            self.connection_timer.start()
+        return self.connection_worker
+
+    def _connection_command(self, command):
+        try:
+            command(self._ensure_connection_worker())
+            self.poll_connection_worker()
+        except Exception as exc:
+            self.connection_status.setText(
+                f"Connection error · {type(exc).__name__}: {exc}")
+            self._update_connection_controls()
+
+    def refresh_connections(self):
+        if self.mode.currentIndex() == 1 and self.worker is None:
+            self._connection_command(lambda worker: worker.refresh())
+
+    def connect_hardware(self):
+        candidate = self.port_select.currentData()
+        if self.mode.currentIndex() != 1 or candidate is None or self.worker is not None:
+            return
+        config = RadiorocConnectionConfig(candidate.port, self.baud.value(), self.timeout_s.value())
+        self._connection_command(lambda worker: worker.connect(config))
+
+    def read_hardware_status(self):
+        if self.mode.currentIndex() == 1:
+            self._connection_command(lambda worker: worker.read_status())
+
+    def disconnect_hardware(self):
+        if self.connection_worker is not None:
+            self._connection_command(lambda worker: worker.disconnect())
+
+    def _show_connection_snapshot(self, snapshot):
+        state = snapshot.state
+        if state == "idle":
+            message = "Not connected"
+            if snapshot.ports:
+                message += f" · {len(snapshot.ports)} board candidate(s)"
+            else:
+                message += " · no board candidates found"
+            retained = [problem for problem in (snapshot.error, snapshot.close_error) if problem]
+            if retained:
+                message += " · previous errors: " + "; ".join(retained)
+        elif state == "connected":
+            message = f"Connected · {snapshot.port}"
+        elif state == "close_failed":
+            problems = [problem for problem in (snapshot.error, snapshot.close_error) if problem]
+            message = f"Close failed · {'; '.join(problems)} · retry close"
+        elif state == "error":
+            message = f"Connection error · {snapshot.error}"
+        elif state == "stopped":
+            message = "Connection worker stopped"
+        else:
+            message = state.replace("_", " ").capitalize()
+            if snapshot.port:
+                message += f" · {snapshot.port}"
+        self.connection_status.setText(message)
+        self.firmware_status.setText(
+            "—" if snapshot.status_word is None
+            else f"0x{snapshot.status_word:02X} ({snapshot.status_word})")
+
+    def _sync_connection_ports(self, ports):
+        ports = tuple(ports)
+        if ports == self._connection_ports:
+            return
+        selected = self.port_select.currentData()
+        selected_port = selected.port if selected is not None else None
+        self._connection_ports = ports
+        self.port_select.blockSignals(True)
+        self.port_select.clear()
+        self.port_select.addItem("Select a USB port candidate…", None)
+        selected_index = 0
+        for candidate in ports:
+            label = candidate.port
+            if candidate.description:
+                label += f" — {candidate.description}"
+            self.port_select.addItem(label, candidate)
+            if candidate.port == selected_port:
+                selected_index = self.port_select.count() - 1
+        self.port_select.setCurrentIndex(selected_index)
+        self.port_select.blockSignals(False)
+
+    def poll_connection_worker(self):
+        worker = self.connection_worker
+        if worker is None:
+            return
+        snapshot = worker.snapshot()
+        self._sync_connection_ports(snapshot.ports)
+        self._show_connection_snapshot(snapshot)
+        if snapshot.state == "close_failed" and self._closing:
+            # A failed window-close attempt stays open for review. A later close
+            # event is the explicit request to try shutdown again.
+            self._closing = False
+        if snapshot.state == "stopped" and not worker.is_alive:
+            worker.join()
+            self.connection_worker = None
+            self.connection_timer.stop()
+            self._connection_ports = ()
+            if self._closing:
+                self.close()
+                return
+        self._update_connection_controls()
+
+    def _update_connection_controls(self):
+        hardware = self.mode.currentIndex() == 1
+        state = "idle"
+        if self.connection_worker is not None:
+            state = self.connection_worker.snapshot().state
+        busy = state in self._CONNECTION_BUSY
+        session = state in {"connected", "close_failed"}
+        simulation_available = self.worker is None and not busy and not session
+        commands_available = not self._closing
+        self.mode.setEnabled(commands_available and self.worker is None and not busy and not session)
+        self.connection_group.setEnabled(hardware and self.worker is None)
+        self.port_select.setEnabled(commands_available and not busy and not session)
+        self.baud.setEnabled(commands_available and not busy and not session)
+        self.timeout_s.setEnabled(commands_available and not busy and not session)
+        self.refresh_button.setEnabled(commands_available and not busy and not session)
+        self.connect_button.setEnabled(commands_available and not busy and not session and
+                                       self.port_select.currentData() is not None)
+        self.read_status_button.setEnabled(commands_available and state == "connected")
+        self.disconnect_button.setEnabled(commands_available and state in {"connected", "close_failed"})
+        self.disconnect_button.setText("Retry close" if state == "close_failed" else "Disconnect")
+        self.run_button.setEnabled(self.mode.currentIndex() == 0 and simulation_available)
 
     def operation(self):
         channels = [int(value.strip()) for value in self.channels.text().split(",")]
@@ -194,8 +394,18 @@ class ThresholdWindow(QMainWindow):
         try:
             operation = self.operation()
             data = ThresholdJob.preview(operation)
-            data["selected_mode"] = "simulation" if self.mode.currentIndex() == 0 else "hardware-unavailable"
-            data["simulation"] = self.simulation().as_dict()
+            simulation = self.mode.currentIndex() == 0
+            data["selected_mode"] = "simulation" if simulation else "hardware"
+            if simulation:
+                data["simulation"] = self.simulation().as_dict()
+            else:
+                candidate = self.port_select.currentData()
+                data["hardware"] = {
+                    "port": candidate.port if candidate is not None else None,
+                    "connection_state": (self.connection_worker.snapshot().state
+                                         if self.connection_worker is not None else "idle"),
+                    "threshold_run_available": False,
+                }
             self.details.setPlainText(json.dumps(data, indent=2))
             self.status.setText(f"Preview valid · {data['total_points']} DAC points · no output created")
             return operation
@@ -336,6 +546,19 @@ class ThresholdWindow(QMainWindow):
             event.ignore()
             self._closing = True
             self.cancel_run()
+        elif self.connection_worker is not None:
+            event.ignore()
+            self._closing = True
+            try:
+                self.connection_worker.shutdown()
+                self.connection_timer.start()
+                self._update_connection_controls()
+            except Exception as exc:
+                self._closing = False
+                self.connection_status.setText(
+                    f"Could not close connection · {type(exc).__name__}: {exc}")
+                self._update_connection_controls()
         else:
             self.timer.stop()
+            self.connection_timer.stop()
             event.accept()

@@ -1,10 +1,10 @@
-"""Launch the optional simulation desktop."""
+"""Launch the optional threshold and connection desktop."""
 
 import argparse
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="RADIOROC desktop threshold simulation")
+    parser = argparse.ArgumentParser(description="RADIOROC desktop: threshold simulation and hardware connection")
     parser.parse_args(argv)
     try:
         from PySide6.QtWidgets import QApplication

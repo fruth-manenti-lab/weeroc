@@ -1,15 +1,14 @@
 # RADIOROC desktop and CLI rebuild plan
 
-Planning baseline: 9 September 2026. This document proposes the implementation;
-the replacement application has not yet been built.
+Planning baseline: 9 September 2026. This document defines the target architecture
+and scope; completed slices and remaining validation are tracked separately.
 
-Implementation update: packaging, transport/board ownership and the shared
-threshold job lifecycle are committed locally through `8849808` (version 0.3.0).
-Threshold API/CLI progress, cancellation, partial results and offline preview
-pass 55 offline tests and installed-wheel checks. Earlier read-only board status
-returned 5 and cross-interface ownership was verified; the new scan restoration
-has not been tested on hardware. See `IMPLEMENTATION_STATUS.md` for evidence and
-limits, and `NEXT_SESSION.md` for the simulation desktop task.
+Implementation update: packaging, transport/board ownership, the shared threshold
+job lifecycle, simulation desktop and desktop hardware connection are implemented.
+Hardware threshold Run remains disabled. Earlier read-only board status returned 5
+and cross-interface ownership was verified; scan restoration has not been tested
+on hardware. See `IMPLEMENTATION_STATUS.md` for current versions, evidence and
+limits, and `NEXT_SESSION.md` for the next bounded task.
 
 The target is one maintained Python package with a desktop interface and a CLI,
 covering the behavior of the Windows RADIOROC application on macOS, Debian, and

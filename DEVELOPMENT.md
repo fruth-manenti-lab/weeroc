@@ -140,7 +140,7 @@ and [filelock](https://py-filelock.readthedocs.io/en/latest/).
 
 ## Session scope and handoffs
 
-This continuation is **RADIOROC 02 — Desktop threshold simulation**. Number future
+This continuation is **RADIOROC 03 — Desktop hardware connection**. Number future
 handoffs sequentially and include the preceding chat label in `NEXT_SESSION.md`.
 
 Use one bounded delivery per chat: define its outcome, allowed modules, tests
@@ -264,7 +264,8 @@ Choose channels, DAC range, T1/T2, counter window/averages, masks, Ctest and opt
 trigger gain. Preview validates settings and shows persistent preparation versus
 temporary restoration without opening a session or creating files. Run starts a
 new simulation directory; the default path is under ignored `radioroc_runs/simulation`.
-Hardware mode is visibly unavailable. No desktop action discovers or opens serial.
+Hardware mode supports the separate connection workflow below; threshold Run
+remains disabled in hardware mode.
 
 The synthetic curve has configurable midpoint, width, plateau rate and channel
 spacing. Counts are deterministic and quantized to the selected counter window.
@@ -293,3 +294,24 @@ installs. `python tools/check_development.py` includes them automatically. A rea
 desktop launch must be recorded separately from the offscreen checks. Application
 bundles, Linux desktop launch and hardware snapshot/restore validation remain
 separate tasks.
+
+## Desktop hardware connection (Delivery 4, connection slice)
+
+Select hardware mode, refresh the port candidates and explicitly choose a control
+port before connecting. Refresh lists candidates without opening them; matching
+VID/PID is not proof of the control interface. Connect opens the selected port
+under the existing board lease and reads status word 100. Read status repeats
+that read on request; disconnect releases the session. Status values are displayed
+without inferring a firmware version or board capability from opaque bits.
+
+The application connection worker owns discovery, transport creation, status
+reads and close on one background thread. Widgets poll immutable snapshots.
+Busy, timeout, protocol, I/O and close failures remain visible. A failed close
+retains the session and ownership for an explicit retry; window close waits for
+release. No discovery runs automatically at startup. Simulation and hardware
+connection cannot run concurrently in one window.
+
+Hardware threshold Run remains disabled. Review and complete
+`docs/hardware/bare_board_threshold_validation.md` in a separate opt-in bench
+session before enabling physical scans. Connection tests use injected discovery
+and transports; installed-wheel checks remain offline.

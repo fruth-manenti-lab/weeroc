@@ -26,6 +26,7 @@ from radioroc.__main__ import COMMANDS
 from radioroc.transport import RadiorocSerial
 from radioroc.cli.radioroc_standard_scurves import RadiorocSerial as LegacySerial
 from radioroc.application.threshold import ThresholdJob, ThresholdJobConfig
+from radioroc.application.connection_worker import ConnectionWorker
 
 repo = Path(sys.argv[1]).resolve()
 assert not Path(radioroc_client.__file__).resolve().is_relative_to(repo / 'src')
@@ -40,6 +41,12 @@ resources = files('radioroc.resources')
 assert json.loads(resources.joinpath('presets/threshold_ch4_sipm_dark.json').read_text())['channels'] == '4'
 assert 'matplotlib.pyplot' not in sys.modules
 assert 'PySide6' not in sys.modules and 'PyQt6' not in sys.modules
+# The installed connection service remains usable without Qt or hardware.
+worker = ConnectionWorker(discovery=lambda: ())
+worker.start()
+worker.shutdown()
+worker.join(5)
+assert not worker.is_alive and worker.snapshot().state == 'stopped'
 if sys.argv[3] != 'gui':
     assert importlib.util.find_spec('PySide6') is None
     assert importlib.util.find_spec('PyQt6') is None
@@ -60,10 +67,32 @@ from pathlib import Path
 import time
 from unittest.mock import patch
 from PySide6.QtWidgets import QApplication
+from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.gui.threshold_window import ThresholdWindow
 from radioroc.data.threshold_reader import read_threshold_run
+from radioroc.transport.discovery import BoardPort
 app = QApplication([])
-window = ThresholdWindow()
+class OfflineSession:
+    def __enter__(self):
+        return self
+    def read_word(self, address):
+        assert address == 100
+        return '00000101'
+    def close(self):
+        pass
+candidate = BoardPort('offline-control', 'Offline wheel fixture', 0x0403, 0x6010,
+                      'offline', None, None)
+window = ThresholdWindow(connection_worker_factory=lambda: ConnectionWorker(
+    discovery=lambda: [candidate], session_factory=lambda config: OfflineSession()))
+def wait_connection(state):
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        app.processEvents()
+        if window.connection_worker.snapshot().state == state:
+            window.poll_connection_worker()
+            return
+        time.sleep(0.01)
+    raise AssertionError(f'connection did not reach {state}')
 window.output.setText(str(Path('desktop-simulation').resolve()))
 window.dac_max.setValue(50)
 window.window_ms.setValue(1)
@@ -83,9 +112,25 @@ with patch('serial.Serial', side_effect=AssertionError('hardware opened')):
     window.open_saved(saved.directory)
     assert 'SIMULATION' in window.status.text()
     assert len(window.axes.lines) == 2
+    window.mode.setCurrentIndex(1)
+    assert not window.run_button.isEnabled()
+    window.refresh_connections()
+    wait_connection('idle')
+    assert window.port_select.currentData() is None
+    window.port_select.setCurrentIndex(1)
+    window.connect_hardware()
+    wait_connection('connected')
+    assert window.connection_worker.snapshot().status_word == 5
+    assert not window.run_button.isEnabled()
+    window.disconnect_hardware()
+    wait_connection('idle')
     window.close()
-    app.processEvents()
-print('Installed GUI configured, previewed, simulated, plotted and reopened offline.')
+    deadline = time.monotonic() + 10
+    while window.connection_worker is not None and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+    assert window.connection_worker is None
+print('Installed GUI simulation/reopen and fake hardware connection passed offline.')
 '''
 
 

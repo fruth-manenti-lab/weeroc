@@ -14,8 +14,10 @@
 - Local experiment folders and `radioroc_runs` must remain uncommitted, not deleted.
   Preserve user changes and measured data. Stage explicit paths; no blanket cleanup.
 - Keep vendor artifacts local. Never commit environments or generated build files.
-- User preference: generally delegate suitable routine, bounded work to smaller
-  model agents to limit token use and compute. Use GPT-5.6 Luna for straightforward
+- User preference: default to delegating most implementation, tests and documentation
+  to smaller model agents to limit token use and compute. The lead should primarily
+  orchestrate: define bounded tasks and acceptance checks, settle shared contracts,
+  review results and integrate. Use GPT-5.6 Luna for straightforward
   documentation/tests and Sol or Terra for bounded coding when available. Give
   workers only the context/files they need and request concise results. Avoid
   redundant exploration, duplicate implementation and unnecessary agents; do tiny
@@ -24,3 +26,5 @@
 - Use separate worktrees or non-overlapping files for delegated tasks; one editor
   owns shared API contracts at a time. The lead reviews and integrates.
 - Record completed checks, limitations, and the next task in the status document.
+- Preserve session names as `RADIOROC NN — <bounded task>`; use the title in
+  `NEXT_SESSION.md` for the next chat and increment the number at each handoff.

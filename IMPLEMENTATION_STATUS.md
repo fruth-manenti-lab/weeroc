@@ -2,15 +2,19 @@
 
 ## Current checkpoint
 
-Delivery 4's simulation slice (desktop threshold workflow) is implemented on
-`feat/desktop-threshold-simulation` at `ef92eeb`, package version `0.4.0`. The
-next bounded task is the desktop hardware connection/session boundary specified
-in `NEXT_SESSION.md`.
+Delivery 4's desktop hardware connection/session slice is implemented on
+`feat/desktop-hardware-connection`, package version `0.5.0`. The next bounded
+task is the opt-in bare-board threshold verification helper and bench validation
+specified in `NEXT_SESSION.md`. Hardware threshold Run remains disabled.
 
-The user's preference to generally delegate suitable routine work to smaller
-models, with focused context and minimal duplication, is now recorded in
-`AGENTS.md` and the handoff. This documentation-only update was checked with
-`git diff --check`; the implementation validation and next task are unchanged.
+The user's preference is to delegate most code, tests and documentation to smaller
+models, with the lead primarily orchestrating, reviewing and integrating. Focused
+context, minimal duplication and numbered `RADIOROC NN — <bounded task>` session
+names are recorded in `AGENTS.md` and the handoff. This session is
+**RADIOROC 03 — Desktop hardware connection**; the next is
+**RADIOROC 04 — Bare-board threshold validation**. Terra implemented the worker,
+Sol implemented the GUI/tests, and Luna drafted the validation card; the lead
+reviewed contracts, corrected edge cases and integrated/validated the result.
 
 Delivery 2 remains at `6c44092` on `feat/transport-ownership`; `782014f` recorded
 its validation and threshold-job handoff.
@@ -32,7 +36,53 @@ They are present locally and ignored. Other saved runs remain in `radioroc_runs`
 No separate external backup has been configured. Recovery verifies snapshot
 bytes, not any unrecorded later changes.
 
+## Delivery 4 connection slice: implemented and checked
+
+- Lazy, Qt-independent connection worker with a bounded command mailbox and
+  immutable snapshots. Discovery, transport creation/open, status reads and close
+  stay on its own thread; no startup discovery occurs.
+- Explicit USB candidate refresh/selection, baud/timeout settings, connect,
+  status-word 100 read and disconnect. Candidates are labelled unverified;
+  simulation and hardware session controls cannot overlap in one window.
+- Existing serial transport and board lease are reused. Invalid overlapping
+  operations are rejected atomically. Busy, timeout, protocol, I/O and close
+  errors retain their exception names. Failed close retains the owned session
+  for explicit retry, including failure during partial open. Window shutdown
+  waits for session release and leaves close failures visible.
+- Hardware threshold Run is disabled. The separate card at
+  `docs/hardware/bare_board_threshold_validation.md` specifies the exact register
+  boundary, preparation, cancellation and independent restoration checks. It is
+  **not executed**; a verification helper that restores its own I2C side effects
+  is the next implementation task.
+
+Validation on macOS ARM64 / Python 3.13 using `.venv-foundation`:
+
+- All **95 offline tests** pass, plus compile checks and all 15 legacy CLI help
+  checks through `python tools/check_development.py`. The 14 new tests cover
+  connection ownership, command gating, partial-open/close retry, real transport
+  framing/lease integration with fake serial, GUI selection, error presentation
+  and responsive shutdown. No hardware is enumerated by these checks.
+- Source distribution and 0.5.0 wheel build with `python -m build --no-isolation`.
+  Core-only installed-wheel checks pass in `.venv-wheel-core` with Qt absent.
+  Installed GUI checks pass for simulation/reopen, fake connection/disconnect,
+  disabled hardware Run and headless plotting outside the checkout.
+- Native macOS Cocoa launch passed fake connect/status and owned shutdown. Visual
+  inspection found clipped controls; the corrected layout was launched and
+  inspected again. Screenshot remains local at
+  `/private/tmp/radioroc-connection-native.png`.
+- `git diff --check` passes. No physical board discovery/open or configuration
+  writes occurred. Lab data and environments were preserved; development wheel
+  environments were updated. No push, PR or remote CI run was performed.
+
+Limits: physical desktop connection/disconnect has not been exercised on the
+board. Native validation used a clearly labelled fixture. Linux/Windows GUI,
+USB behavior and bundling remain unvalidated; status bits are not decoded into
+unverified firmware capabilities. Readback-based scan restoration remains pending.
+
 ## Delivery 4 simulation slice: implemented and checked
+
+Committed at `ef92eeb` on `feat/desktop-threshold-simulation`, version `0.4.0`;
+handoff at `cf35315`.
 
 - Optional PySide6/Matplotlib desktop entry point `radioroc-desktop`, while the
   core/CLI wheel remains importable and usable without Qt or a display server.
@@ -187,8 +237,9 @@ according to the user; the connection was closed after testing.
 
 CI has not run remotely. Linux/Debian installation, physical USB behavior on
 Linux and desktop bundling remain unvalidated. The desktop supports the threshold
-workflow in simulation; hardware connection/execution is not yet enabled.
-The feature inventory is preliminary and still needs comparison with the actual
+workflow in simulation. Desktop hardware connection/status is implemented but
+physically unvalidated; hardware scan execution remains disabled. The feature
+inventory is preliminary and still needs comparison with the actual
 Windows 2.2.0.5 application.
 
 Ownership coordinates participating programs for the same OS user with a local
@@ -208,13 +259,13 @@ remain tracked migration concerns. Do not mix workflows on one session.
 
 ## Next bounded tasks
 
-1. Add the desktop hardware connection/session boundary specified in
-   `NEXT_SESSION.md`, beginning with discovery and read-only status checks.
+1. Build the opt-in threshold restoration verifier and prepare the reviewed
+   bare-board validation described in `NEXT_SESSION.md`.
 2. Review/integrate the local branches and run configured CI when publishing is
    authorized; check the intended Git author identity before publication.
 3. Expand the Windows parity inventory into control-level acceptance criteria.
-4. After the connection slice, review an opt-in bare-board threshold
-   snapshot/restore test card before enabling a physical desktop scan.
+4. After reviewed physical threshold snapshot/restore checks pass, enable the
+   desktop hardware threshold workflow in its own bounded slice.
 
 At each checkpoint, record the commit, checks, hardware state, limitations and
 one next task. Move unrelated discoveries into this backlog.
