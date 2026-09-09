@@ -3,10 +3,13 @@
 Planning baseline: 9 September 2026. This document proposes the implementation;
 the replacement application has not yet been built.
 
-Implementation update: packaging and shared transport/board ownership are now
-committed locally through `6c44092`. Read-only board status returned 5, and
-cross-interface ownership contention was verified. See `IMPLEMENTATION_STATUS.md`
-for current evidence and limits, and `NEXT_SESSION.md` for the next bounded task.
+Implementation update: packaging, transport/board ownership and the shared
+threshold job lifecycle are committed locally through `8849808` (version 0.3.0).
+Threshold API/CLI progress, cancellation, partial results and offline preview
+pass 55 offline tests and installed-wheel checks. Earlier read-only board status
+returned 5 and cross-interface ownership was verified; the new scan restoration
+has not been tested on hardware. See `IMPLEMENTATION_STATUS.md` for evidence and
+limits, and `NEXT_SESSION.md` for the simulation desktop task.
 
 The target is one maintained Python package with a desktop interface and a CLI,
 covering the behavior of the Windows RADIOROC application on macOS, Debian, and
@@ -408,8 +411,9 @@ Start with a small baseline milestone. The current lab baseline has now been
 committed on `chore/lab-baseline` and tagged `pre-desktop-rebuild` at `603c69b`.
 The initial packaging and development checks are implemented on
 `build/python-foundation`; shared transport/ownership follows on
-`feat/transport-ownership` at `6c44092`. See `IMPLEMENTATION_STATUS.md` for
-validation limits and the next bounded tasks.
+`feat/transport-ownership` at `6c44092`. Threshold jobs follow on
+`feat/threshold-jobs` at `8849808`. See `IMPLEMENTATION_STATUS.md` for validation
+limits and the next bounded tasks.
 
 The initial Git audit found `main` at `b77f76d`, seven modified tracked files,
 untracked acquisition/plotting tools, a preset, lab notes/figures, this plan, and

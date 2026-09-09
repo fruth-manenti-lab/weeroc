@@ -2,7 +2,8 @@
 
 The lab baseline is tagged `pre-desktop-rebuild` (`603c69b`). The first rebuild
 branch is `build/python-foundation`; transport work continues on
-`feat/transport-ownership`. These commits are local until pushed.
+`feat/transport-ownership`, followed by threshold jobs on `feat/threshold-jobs`.
+These commits are local until pushed.
 
 ## Install
 

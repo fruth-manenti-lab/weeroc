@@ -3,8 +3,7 @@
 ## Current checkpoint
 
 Delivery 3 (shared threshold job lifecycle) is implemented on
-`feat/threshold-jobs`, package version `0.3.0`, in the accompanying implementation
-commit. The next bounded task is the desktop threshold workflow in simulation.
+`feat/threshold-jobs` at `8849808`, package version `0.3.0`. The next bounded task is the desktop threshold workflow in simulation.
 Use `NEXT_SESSION.md` to start that work in a fresh chat.
 
 Delivery 2 remains at `6c44092` on `feat/transport-ownership`; `782014f` recorded
@@ -123,7 +122,8 @@ dependency (3.32.6); the source checks pass there as well.
   readback, open/close cleanup and real subprocess ownership/release after kill.
 - Compile checks and all 15 CLI help commands pass.
 - Source distribution and wheel build successfully. Editable installation was
-  checked; `.venv-foundation` currently has the built 0.2.0 wheel installed.
+  checked; `.venv-foundation` had the built 0.2.0 wheel at that checkpoint
+  (now updated to 0.3.0 above).
 - Installed-wheel checks pass outside the checkout: imports/transport aliases,
   default table byte equality/677 rows, presets, version and all CLI help pages.
   A synthetic threshold CSV renders to PNG with the headless Matplotlib backend.
