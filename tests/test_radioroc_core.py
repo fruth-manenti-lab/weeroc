@@ -9,12 +9,17 @@ from radioroc_analysis import (
     filter_hold_data,
     find_latest_scan,
     has_invalid_internal_zero_point,
+    log_profile_residual_derivative,
     parse_hold_channels,
     parse_threshold_channels,
+    poisson_rate_errors,
     read_hold_csv,
+    read_threshold_attempt_std,
     read_threshold_csv,
     summarize_hold,
     summarize_threshold,
+    threshold_dac_to_mv,
+    threshold_derivative,
 )
 from radioroc_client import (
     HoldScanConfig,
@@ -90,6 +95,31 @@ class RadiorocAnalysisTests(unittest.TestCase):
             summary = summarize_threshold(data)[0]
             self.assertEqual(summary.peak_dac, 5.0)
             self.assertEqual(summary.peak_hz, 1000.0)
+            self.assertEqual(threshold_dac_to_mv(data.dacs), [270.0, 271.25, 272.5])
+            derivative_dacs, derivative_rates = threshold_derivative(data.dacs, data.series["ch4"])
+            self.assertEqual(derivative_dacs, [2.5, 7.5])
+            self.assertEqual(derivative_rates, [-200.0, 100.0])
+            self.assertEqual(poisson_rate_errors([1000.0], window_ms=100.0, averages=4), [50.0])
+            residual_x, residual_derivative = log_profile_residual_derivative(
+                [0.0, 1.0, 2.0, 3.0],
+                [10.0, 100.0, 10.0, 100.0],
+                profile_window=3,
+            )
+            self.assertEqual(residual_x, [0.5, 1.5, 2.5])
+            self.assertEqual(len(residual_derivative), 3)
+            attempts = Path(tmp) / "thresholdscan_attempts.csv"
+            with attempts.open("w", newline="") as fp:
+                writer = csv.writer(fp)
+                writer.writerow(["DAC", "channel", "attempt", "rate_hz", "trigger_count"])
+                writer.writerow([0, 4, 1, 90, 9])
+                writer.writerow([0, 4, 2, 110, 11])
+                writer.writerow([5, 4, 1, 1000, 100])
+                writer.writerow([5, 4, 2, 1000, 100])
+                writer.writerow([10, 4, 1, 400, 40])
+                writer.writerow([10, 4, 2, 600, 60])
+            stdevs = read_threshold_attempt_std(attempts, data)
+            self.assertAlmostEqual(stdevs["ch4"][0], 14.1421356237)
+            self.assertEqual(stdevs["ch4"][1], 0.0)
 
     def test_hold_csv_filter_and_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

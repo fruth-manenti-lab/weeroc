@@ -50,6 +50,7 @@ FPGA_ADC_ACQUISITION_COUNT_WORD: int = 21
 FPGA_SYNCHRO_TRIGGER_WORD: int = 22
 FPGA_IO_MUX_LOW_WORD: int = 77
 FPGA_IO_MUX_HIGH_WORD: int = 78
+ASIC_SHAPER_GAIN_SUBADDRESS: int = 2
 
 INTERNAL_HOLD_ADC_CONTROL_WORD: str = "01110100"
 EXTERNAL_HOLD_TRACK_ADC_CONTROL_WORD: str = "01111000"
@@ -295,6 +296,8 @@ class HoldScanConfig:
     - `use_mask` (`bool`): Mask all but the trigger channel.
     - `use_ctest` (`bool`): Enable Ctest on the trigger channel.
     - `trigger_preamp_gain` (`int | None`): Optional paT gain code `1..63`.
+    - `high_gain_code` (`int | None`): Optional high-gain shaper code `1..15`.
+    - `low_gain_code` (`int | None`): Optional low-gain shaper code `1..15`.
     - `out_dir` (`Path`): Run output directory.
     """
 
@@ -322,6 +325,8 @@ class HoldScanConfig:
     use_mask: bool = True
     use_ctest: bool = False
     trigger_preamp_gain: int | None = None
+    high_gain_code: int | None = None
+    low_gain_code: int | None = None
     out_dir: Path = DEFAULT_RUNS_DIR
 
     def validate(self) -> None:
@@ -365,6 +370,9 @@ class HoldScanConfig:
             raise ValueError("sync_io_mux_index must be in range 0..7")
         if self.trigger_preamp_gain is not None and not 1 <= self.trigger_preamp_gain <= 63:
             raise ValueError("trigger_preamp_gain must be in range 1..63")
+        for name, value in (("high_gain_code", self.high_gain_code), ("low_gain_code", self.low_gain_code)):
+            if value is not None and not 1 <= value <= 15:
+                raise ValueError(f"{name} must be in range 1..15")
 
 
 @dataclass
@@ -462,6 +470,7 @@ class ThresholdScanResult:
 
     **Attributes**
     - `csv_path` (`Path`): Output CSV path.
+    - `attempts_csv_path` (`Path | None`): Per-window attempt CSV path.
     - `metadata_path` (`Path | None`): Output metadata JSON path.
     - `metadata` (`RadiorocRunMetadata | None`): Run metadata.
     - `points` (`int`): Number of DAC points written.
@@ -470,6 +479,7 @@ class ThresholdScanResult:
     """
 
     csv_path: Path
+    attempts_csv_path: Path | None = None
     metadata_path: Path | None = None
     metadata: RadiorocRunMetadata | None = None
     points: int = 0
@@ -1548,9 +1558,63 @@ class RadiorocDevice:
                 continue
             current: int = parse_bits(row.data)
             compensation: int = current & 0xC0
-            rows.append(I2CRow(channel, 1, bits(compensation | gain, 8)))
+            new_data: str = bits(compensation | gain, 8)
+            row.data = new_data
+            rows.append(I2CRow(channel, 1, new_data))
         if not rows:
             raise RuntimeError("no trigger preamp gain rows found for selected channels")
+        self.write_fifo(rows)
+
+    def set_energy_shaper_gain(
+        self,
+        *,
+        channels: list[int],
+        high_gain_code: int | None = None,
+        low_gain_code: int | None = None,
+    ) -> None:
+        """Set selected channels' ADC energy-path shaper gain codes.
+
+        **Inputs**
+        - `channels` (`list[int]`): Channels to modify.
+        - `high_gain_code` (`int | None`): High-gain shaper code `1..15`.
+        - `low_gain_code` (`int | None`): Low-gain shaper code `1..15`.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes selected channel energy gain rows through the ASIC I2C FIFO.
+
+        **Mapping note**
+        - The user guide defines 4-bit high-gain and low-gain shaper codes.
+          The default table stores `10001000` at per-channel subaddress 2,
+          consistent with two default code-8 nibbles. We use the upper nibble
+          for high gain and the lower nibble for low gain.
+        """
+
+        validate_channels(channels)
+        if high_gain_code is None and low_gain_code is None:
+            return
+        if high_gain_code is not None and not 1 <= high_gain_code <= 15:
+            raise ValueError("high_gain_code must be in range 1..15")
+        if low_gain_code is not None and not 1 <= low_gain_code <= 15:
+            raise ValueError("low_gain_code must be in range 1..15")
+
+        rows: list[I2CRow] = []
+        for channel in channels:
+            row: I2CRow | None = self.find_i2c_row(channel, ASIC_SHAPER_GAIN_SUBADDRESS)
+            if row is None:
+                continue
+            current: int = parse_bits(row.data)
+            current_hg: int = (current >> 4) & 0xF
+            current_lg: int = current & 0xF
+            new_hg: int = high_gain_code if high_gain_code is not None else current_hg
+            new_lg: int = low_gain_code if low_gain_code is not None else current_lg
+            new_data = bits((new_hg << 4) | new_lg, 8)
+            row.data = new_data
+            rows.append(I2CRow(channel, ASIC_SHAPER_GAIN_SUBADDRESS, new_data))
+        if not rows:
+            raise RuntimeError("no energy shaper gain rows found for selected channels")
         self.write_fifo(rows)
 
     def set_mask_for_channel(self, channel: int, *, t1: bool, enabled: bool) -> None:
@@ -1738,9 +1802,16 @@ class RadiorocDevice:
             self.set_trigger_preamp_gain(config.trigger_preamp_gain, channels=config.channels)
         out_dir: Path = config.out_dir
         csv_path: Path = write_csv_rows([], out_dir, "thresholdscan.csv")
+        attempts_csv_path: Path = write_csv_rows(
+            [],
+            out_dir,
+            "thresholdscan_attempts.csv",
+            fieldnames=["DAC", "channel", "attempt", "rate_hz", "trigger_count"],
+        )
         self.prepare_trigger_masks(t1=config.t1, use_mask=config.use_mask, use_ctest=config.use_ctest)
         saved_w1: str = self.read_word(1) if not self.dry_run else "00000000"
         rows: list[dict[str, object]] = []
+        attempt_rows: list[dict[str, object]] = []
         start_time: float = time.perf_counter()
         try:
             for dac in scan_values(config.dac_min, config.dac_max, config.dac_step, name="DAC"):
@@ -1763,7 +1834,17 @@ class RadiorocDevice:
                             self.accurate_delay_ms(config.trigger_window_ms)
                             self.write_word(1, "00" + saved_w1[2:8])
                             trigger_count = int.from_bytes(self.transport.read_words(96, 4), "little")
-                        rates.append(trigger_count / (config.trigger_window_ms / 1000.0))
+                        rate_hz = trigger_count / (config.trigger_window_ms / 1000.0)
+                        rates.append(rate_hz)
+                        attempt_rows.append(
+                            {
+                                "DAC": dac,
+                                "channel": channel,
+                                "attempt": len(rates),
+                                "rate_hz": round(rate_hz, 6),
+                                "trigger_count": trigger_count,
+                            }
+                        )
                     row[f"ch{channel}"] = round(statistics.mean(rates), 6)
                     if config.use_mask:
                         self.set_mask_for_channel(channel, t1=config.t1, enabled=False)
@@ -1771,6 +1852,12 @@ class RadiorocDevice:
                         self.set_ctest_for_channel(channel, enabled=False)
                 rows.append(row)
                 write_csv_rows(rows, out_dir, "thresholdscan.csv")
+                write_csv_rows(
+                    attempt_rows,
+                    out_dir,
+                    "thresholdscan_attempts.csv",
+                    fieldnames=["DAC", "channel", "attempt", "rate_hz", "trigger_count"],
+                )
                 print(f"threshold dac={dac} hz={[row[f'ch{ch}'] for ch in config.channels[:8]]}", flush=True)
         finally:
             if config.use_mask or config.use_ctest:
@@ -1780,6 +1867,7 @@ class RadiorocDevice:
         metadata_path = write_metadata_json(metadata, out_dir) if metadata else None
         return ThresholdScanResult(
             csv_path=csv_path,
+            attempts_csv_path=attempts_csv_path,
             metadata_path=metadata_path,
             metadata=metadata,
             points=len(rows),

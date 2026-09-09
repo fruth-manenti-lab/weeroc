@@ -55,6 +55,8 @@ def build_parser(preset: dict[str, object] | None = None, preset_path: Path | No
     parser.add_argument("--rstn-manual", action="store_true", help="Set vendor ADC reset-n manual bit")
     parser.add_argument("--timeout-s", type=float, default=5.0, help="Timeout per ADC batch")
     parser.add_argument("--pat-gain", type=int, help="Optional trigger preamp paT gain code, 1=max, 63=min")
+    parser.add_argument("--hg-gain-code", type=int, help="High-gain ADC shaper gain code, 1..15")
+    parser.add_argument("--lg-gain-code", type=int, help="Low-gain ADC shaper gain code, 1..15")
     parser.add_argument("--t2", action="store_true", help="Use T2 instead of T1")
     parser.add_argument("--no-mask", action="store_true", help="Do not isolate the trigger channel with masks")
     parser.add_argument("--use-ctest", action="store_true", help="Enable Ctest on the trigger channel")
@@ -105,6 +107,8 @@ def main() -> int:
         use_mask=not args.no_mask,
         use_ctest=args.use_ctest,
         trigger_preamp_gain=args.pat_gain,
+        high_gain_code=args.hg_gain_code,
+        low_gain_code=args.lg_gain_code,
         out_dir=out_dir,
     )
     scan_config.validate()
@@ -115,6 +119,13 @@ def main() -> int:
             if args.sync_io_mux_index is not None:
                 mux = device.write_fpga_io_mux(**{args.sync_io: args.sync_io_mux_index})
                 print(f"sync IO mux: {mux}")
+            gain_registers = [(channel, 2) for channel in channels]
+            saved_gain_registers = device.snapshot_asic_registers(gain_registers)
+            device.set_energy_shaper_gain(
+                channels=channels,
+                high_gain_code=args.hg_gain_code,
+                low_gain_code=args.lg_gain_code,
+            )
             settings = settings_from_args(
                 args,
                 scan="hold",
@@ -124,7 +135,10 @@ def main() -> int:
                 hold_step=hold_step,
             )
             metadata = run_metadata(connection=connection, settings=settings, firmware_word=firmware)
-            result = device.run_hold_scan(scan_config, metadata=metadata)
+            try:
+                result = device.run_hold_scan(scan_config, metadata=metadata)
+            finally:
+                device.restore_asic_registers(saved_gain_registers)
         print(f"hold scan CSV: {result.csv_path}")
         if result.metadata_path:
             print(f"metadata: {result.metadata_path}")

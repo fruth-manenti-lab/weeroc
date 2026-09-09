@@ -85,6 +85,8 @@ def main() -> int:
             metadata = run_metadata(connection=connection, settings=settings, firmware_word=firmware)
             result = device.run_threshold_scan(scan_config, metadata=metadata)
         print(f"threshold scan CSV: {result.csv_path}")
+        if result.attempts_csv_path:
+            print(f"threshold attempts CSV: {result.attempts_csv_path}")
         if result.metadata_path:
             print(f"metadata: {result.metadata_path}")
         return 0

@@ -11,11 +11,14 @@ from dataclasses import dataclass
 import math
 import os
 from pathlib import Path
+import statistics
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/radioroc-matplotlib")
 
 
 DEFAULT_RUNS_DIR: Path = Path("radioroc_runs")
+THRESHOLD_DAC_MV_OFFSET: float = 270.0
+THRESHOLD_DAC_MV_PER_CODE: float = 0.25
 
 
 @dataclass
@@ -133,6 +136,27 @@ def read_threshold_csv(path: Path) -> ThresholdScanData:
                 value: str | None = row.get(channel)
                 series[channel].append(float(value) if value not in ("", None) else math.nan)
     return ThresholdScanData(path=path, dacs=dacs, series=series)
+
+
+def read_threshold_attempt_std(path: Path, data: ThresholdScanData) -> dict[str, list[float]]:
+    """Read per-attempt threshold rates and return sample std-dev by DAC."""
+
+    grouped: dict[tuple[float, str], list[float]] = {}
+    with path.open(newline="") as fp:
+        reader = csv.DictReader(fp)
+        required = {"DAC", "channel", "rate_hz"}
+        if reader.fieldnames is None or not required.issubset(set(reader.fieldnames)):
+            raise ValueError(f"{path} does not look like a threshold attempts CSV")
+        for row in reader:
+            dac = float(row["DAC"])
+            channel = f"ch{int(float(row['channel']))}"
+            grouped.setdefault((dac, channel), []).append(float(row["rate_hz"]))
+    stdevs: dict[str, list[float]] = {channel: [] for channel in data.series}
+    for channel in data.series:
+        for dac in data.dacs:
+            values = grouped.get((dac, channel), [])
+            stdevs[channel].append(statistics.stdev(values) if len(values) >= 2 else 0.0)
+    return stdevs
 
 
 def read_hold_csv(path: Path) -> HoldScanData:
@@ -324,6 +348,91 @@ def has_invalid_internal_zero_point(data: HoldScanData) -> bool:
     return data.x_column == "hold_code" and any(value == 0 for value in data.x_values)
 
 
+def moving_average(values: list[float], window: int) -> list[float]:
+    """Return a centered moving average with truncated edge windows."""
+
+    if window < 1:
+        raise ValueError("smooth window must be >= 1")
+    if window == 1 or len(values) <= 1:
+        return list(values)
+    radius = window // 2
+    averaged: list[float] = []
+    for index in range(len(values)):
+        start = max(0, index - radius)
+        stop = min(len(values), index + radius + 1)
+        chunk = values[start:stop]
+        averaged.append(sum(chunk) / len(chunk))
+    return averaged
+
+
+def threshold_dac_to_mv(
+    dacs: list[float],
+    *,
+    offset_mv: float = THRESHOLD_DAC_MV_OFFSET,
+    mv_per_code: float = THRESHOLD_DAC_MV_PER_CODE,
+) -> list[float]:
+    """Convert RADIOROC T1/T2 threshold DAC codes to threshold mV."""
+
+    return [offset_mv + mv_per_code * dac for dac in dacs]
+
+
+def threshold_derivative(x_values: list[float], rates: list[float], *, smooth_window: int = 1) -> tuple[list[float], list[float]]:
+    """Calculate `-d(rate)/dx` at midpoint threshold values."""
+
+    if len(x_values) != len(rates):
+        raise ValueError("threshold and rate series lengths differ")
+    if len(x_values) < 2:
+        return [], []
+    smoothed = moving_average(rates, smooth_window)
+    derivative_dacs: list[float] = []
+    derivative_rates: list[float] = []
+    for left_dac, right_dac, left_rate, right_rate in zip(x_values, x_values[1:], smoothed, smoothed[1:]):
+        step = right_dac - left_dac
+        if step == 0:
+            continue
+        derivative_dacs.append((left_dac + right_dac) / 2.0)
+        derivative_rates.append(-(right_rate - left_rate) / step)
+    return derivative_dacs, derivative_rates
+
+
+def poisson_rate_errors(rates: list[float], *, window_ms: float, averages: int) -> list[float]:
+    """Estimate standard error on mean trigger rate from counting statistics."""
+
+    if window_ms <= 0:
+        raise ValueError("window_ms must be > 0")
+    if averages < 1:
+        raise ValueError("averages must be >= 1")
+    total_time_s = averages * window_ms / 1000.0
+    errors: list[float] = []
+    for rate in rates:
+        if not math.isfinite(rate) or rate < 0:
+            errors.append(math.nan)
+        else:
+            errors.append(math.sqrt(rate / total_time_s))
+    return errors
+
+
+def log_profile_residual_derivative(
+    x_values: list[float],
+    rates: list[float],
+    *,
+    profile_window: int,
+    smooth_window: int = 1,
+) -> tuple[list[float], list[float]]:
+    """Calculate derivative after subtracting a smoothed log-rate profile."""
+
+    if profile_window < 1:
+        raise ValueError("profile_window must be >= 1")
+    floor = 0.5
+    log_rates = [math.log10(max(rate, floor)) if math.isfinite(rate) else math.nan for rate in rates]
+    finite_logs = [value for value in log_rates if math.isfinite(value)]
+    fill_value = min(finite_logs) if finite_logs else math.log10(floor)
+    filled_logs = [value if math.isfinite(value) else fill_value for value in log_rates]
+    profile = moving_average(filled_logs, profile_window)
+    residual = [value - baseline for value, baseline in zip(filled_logs, profile)]
+    return threshold_derivative(x_values, residual, smooth_window=smooth_window)
+
+
 def plot_threshold_scan(
     data: ThresholdScanData,
     *,
@@ -331,6 +440,20 @@ def plot_threshold_scan(
     out: Path,
     yscale: str = "symlog",
     steps: bool = False,
+    dots_only: bool = False,
+    derivative: bool = False,
+    derivative_mode: str = "raw",
+    smooth_window: int = 1,
+    profile_window: int = 31,
+    error_band: str = "none",
+    error_scale: float = 1.0,
+    error_panel: bool = False,
+    window_ms: float | None = None,
+    averages: int | None = None,
+    attempts_csv: Path | None = None,
+    x_unit: str = "dac",
+    threshold_mv_offset: float = THRESHOLD_DAC_MV_OFFSET,
+    threshold_mv_per_code: float = THRESHOLD_DAC_MV_PER_CODE,
     title: str = "RADIOROC threshold scan",
 ) -> Path:
     """Render a threshold scan plot.
@@ -341,6 +464,22 @@ def plot_threshold_scan(
     - `out` (`Path`): Output PNG path.
     - `yscale` (`str`): Matplotlib y-axis scale.
     - `steps` (`bool`): Draw staircase lines when true.
+    - `dots_only` (`bool`): Draw unconnected markers when true.
+    - `derivative` (`bool`): Plot `-d(rate)/dDAC` instead of raw rate.
+    - `derivative_mode` (`str`): `"raw"` or `"log-profile"`.
+    - `smooth_window` (`int`): Moving-average window applied before
+      derivative calculation.
+    - `profile_window` (`int`): Moving-average window for log-profile
+      subtraction.
+    - `error_band` (`str`): `"none"`, `"poisson"`, or `"std"` uncertainty shading.
+    - `error_scale` (`float`): Multiplier applied to the shaded uncertainty band.
+    - `error_panel` (`bool`): Draw relative uncertainty in a lower panel.
+    - `window_ms` (`float | None`): Counter window used for Poisson errors.
+    - `averages` (`int | None`): Number of averaged windows for Poisson errors.
+    - `attempts_csv` (`Path | None`): Per-attempt CSV used for std-dev bands.
+    - `x_unit` (`str`): `"dac"` or `"mv"` threshold x-axis units.
+    - `threshold_mv_offset` (`float`): mV intercept used for DAC conversion.
+    - `threshold_mv_per_code` (`float`): mV per DAC code used for conversion.
     - `title` (`str`): Plot title.
 
     **Returns**
@@ -349,17 +488,90 @@ def plot_threshold_scan(
 
     import matplotlib.pyplot as plt
 
+    if x_unit not in ("dac", "mv"):
+        raise ValueError("x_unit must be 'dac' or 'mv'")
+    if derivative_mode not in ("raw", "log-profile"):
+        raise ValueError("derivative_mode must be 'raw' or 'log-profile'")
+    if error_band not in ("none", "poisson", "std"):
+        raise ValueError("error_band must be 'none', 'poisson', or 'std'")
+    if error_band != "none" and derivative:
+        raise ValueError("error bands are only supported for raw rate plots")
+    if error_band == "poisson" and (window_ms is None or averages is None):
+        raise ValueError("Poisson error bands require window_ms and averages")
+    if error_band == "std" and attempts_csv is None:
+        raise ValueError("std error bands require attempts_csv")
+    if error_scale <= 0:
+        raise ValueError("error_scale must be > 0")
+
     out.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
+    if error_panel and not derivative and error_band != "none":
+        fig, (ax, error_ax) = plt.subplots(2, 1, figsize=(8, 6.5), sharex=True, height_ratios=[3, 1], constrained_layout=True)
+    else:
+        fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
+        error_ax = None
     drawstyle = "steps-post" if steps else "default"
+    threshold_x = (
+        threshold_dac_to_mv(data.dacs, offset_mv=threshold_mv_offset, mv_per_code=threshold_mv_per_code)
+        if x_unit == "mv"
+        else data.dacs
+    )
+    x_label = "Threshold (mV)" if x_unit == "mv" else "Threshold DAC code"
+    derivative_unit = "mV" if x_unit == "mv" else "DAC"
+    attempt_stdevs = read_threshold_attempt_std(attempts_csv, data) if error_band == "std" and attempts_csv is not None else {}
     for channel in channels:
-        ax.plot(data.dacs, data.series[channel], marker="o", linewidth=1.3, markersize=3, drawstyle=drawstyle, label=channel)
+        linestyle = "None" if dots_only else "-"
+        x_values = threshold_x
+        y_values = data.series[channel]
+        if derivative:
+            if derivative_mode == "log-profile":
+                x_values, y_values = log_profile_residual_derivative(
+                    threshold_x,
+                    y_values,
+                    profile_window=profile_window,
+                    smooth_window=smooth_window,
+                )
+            else:
+                x_values, y_values = threshold_derivative(threshold_x, y_values, smooth_window=smooth_window)
+        elif error_band == "poisson":
+            errors = poisson_rate_errors(y_values, window_ms=window_ms or 0, averages=averages or 0)
+            lower = [max(0.0, value - error_scale * error) for value, error in zip(y_values, errors)]
+            upper = [value + error_scale * error for value, error in zip(y_values, errors)]
+            ax.fill_between(x_values, lower, upper, alpha=0.18)
+            if error_ax is not None:
+                relative = [100.0 * error / value if value > 0 else math.nan for value, error in zip(y_values, errors)]
+                error_ax.plot(x_values, relative, marker="o", linestyle="-", linewidth=1.0, markersize=2, label=channel)
+        elif error_band == "std":
+            errors = attempt_stdevs[channel]
+            lower = [max(0.0, value - error_scale * error) for value, error in zip(y_values, errors)]
+            upper = [value + error_scale * error for value, error in zip(y_values, errors)]
+            ax.fill_between(x_values, lower, upper, alpha=0.18)
+            if error_ax is not None:
+                relative = [100.0 * error / value if value > 0 else math.nan for value, error in zip(y_values, errors)]
+                error_ax.plot(x_values, relative, marker="o", linestyle="-", linewidth=1.0, markersize=2, label=channel)
+        ax.plot(
+            x_values,
+            y_values,
+            marker="o",
+            linestyle=linestyle,
+            linewidth=1.3,
+            markersize=3,
+            drawstyle=drawstyle,
+            label=channel,
+        )
     ax.set_title(title)
-    ax.set_xlabel("Threshold DAC code")
-    ax.set_ylabel("Trigger frequency (Hz)")
+    if error_ax is None:
+        ax.set_xlabel(x_label)
+    if derivative and derivative_mode == "log-profile":
+        ax.set_ylabel(f"-d(log10(rate) residual)/d{derivative_unit} (1/{derivative_unit})")
+    else:
+        ax.set_ylabel(f"-d(trigger frequency)/d{derivative_unit} (Hz/{derivative_unit})" if derivative else "Trigger frequency (Hz)")
     ax.set_yscale(yscale)
     ax.grid(True, which="both", alpha=0.3)
     ax.legend(loc="best")
+    if error_ax is not None:
+        error_ax.set_xlabel(x_label)
+        error_ax.set_ylabel("Std / mean (%)" if error_band == "std" else "Error / mean (%)")
+        error_ax.grid(True, which="both", alpha=0.3)
     fig.savefig(out, dpi=160)
     plt.close(fig)
     return out
