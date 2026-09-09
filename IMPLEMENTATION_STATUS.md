@@ -3,9 +3,9 @@
 ## Current checkpoint
 
 Delivery 4's simulation slice (desktop threshold workflow) is implemented on
-`feat/desktop-threshold-simulation`, package version `0.4.0`. The final commit is
-recorded below after this status update. The next bounded task is the desktop
-hardware connection/session boundary specified in `NEXT_SESSION.md`.
+`feat/desktop-threshold-simulation` at `ef92eeb`, package version `0.4.0`. The
+next bounded task is the desktop hardware connection/session boundary specified
+in `NEXT_SESSION.md`.
 
 The user's preference to generally delegate suitable routine work to smaller
 models, with focused context and minimal duplication, is now recorded in

@@ -1,7 +1,7 @@
 # RADIOROC 03 — Desktop hardware connection
 
 RADIOROC 02 completed Delivery 4's simulation desktop slice on
-`feat/desktop-threshold-simulation`, package version `0.4.0`. Read `AGENTS.md`,
+`feat/desktop-threshold-simulation` at `ef92eeb`, package version `0.4.0`. Read `AGENTS.md`,
 `IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md` and Delivery 4 in
 `CROSS_PLATFORM_REBUILD_PLAN.md`, then verify the recorded branch/commit and
 working tree before editing.
