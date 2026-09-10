@@ -1,62 +1,50 @@
-# RADIOROC 05 — Physical threshold restoration checks
+# RADIOROC 06 — Desktop hardware threshold workflow
 
-RADIOROC 04 implemented the opt-in threshold restoration verifier on
-`feat/bare-board-threshold-verification` at `4c6d254`, package version `0.5.0`. Read
-`AGENTS.md`, `IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md` and
-`docs/hardware/bare_board_threshold_validation.md`; verify the recorded
-implementation checkpoint, branch and working tree before editing.
+RADIOROC 05 completed the authorized physical threshold restoration card on
+`test/physical-threshold-restoration`, based on `3c0f82a` and verifier code
+`4c6d254`, version `0.5.0`. Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`,
+`DEVELOPMENT.md`, and `docs/hardware/bare_board_threshold_validation.md`.
+Verify the local branch/checkpoint and working tree before editing.
 
-Delegate bounded code/tests/docs to smaller models (Luna for simple tasks,
-Sol/Terra for coding), with focused context and non-overlapping files. The lead
-owns hardware reasoning, contracts and integration. Keep token use bounded.
+Next task: enable the desktop hardware threshold workflow through the existing
+shared ThresholdJob and owned connection/session model. The GUI currently supports
+hardware connect/status/disconnect but keeps hardware Run disabled. Review the
+physical evidence and define the session ownership contract before implementing.
+Delegate bounded implementation/tests/docs to Sol/Terra and Luna with focused
+context and non-overlapping ownership; lead owns contracts and integration.
 
-The next task is to review and perform the physical card with the designated
-operator. No board was enumerated, opened or scanned in RADIOROC 04. Historical
-port names and status word 5 are stale evidence. Desktop hardware Run remains
-disabled. Do not infer physical validation from passing fake tests.
+Physical card passed all four cases: T1/T2 two-point scans, cancellation during
+an enabled long-window phase, and cancellation after a persisted point. All
+130 ASIC rows and FPGA 0/1/6 matched; cleanup and close succeeded. Evidence stays
+ignored at `radioroc_runs/physical_threshold_20260910T042911Z/`. Cancellation used
+process-local SIGINT instrumentation around the real CLI; see the card for phase
+evidence and limitations. No production source changed in RADIOROC 05.
 
-User confirmation received after the offline checkpoint: the board is powered
-and connected by USB, with no SiPM or pulse generator attached; competing vendor
-software/serial terminals are closed. The user explicitly authorized the lead
-assistant to operate the board from this session after reviewing the proposed
-small channel-4 T1/T2 scans, cancellation checks, temporary-state restoration and
-independent readback, with further testing stopped on mismatch. Carry that
-authorization into this handoff; do not ask for the same confirmation again.
-The next lead is the sole designated software operator; workers remain offline.
-Fresh port/status identification and all physical checks remain unperformed.
+Acceptance checks for this next slice:
 
-The existing threshold CLI now accepts `--verify-restoration`. Default preview
-is offline. With `--execute`, one session owner performs the job, cleanup,
-independent verification and close. Verification compares measured FPGA 0/1/6
-and the exact T1/T2 ASIC snapshot rows under the same job lock. Its ASIC reads
-are followed by idle word 60, restoration of the observed post-job word 0, and
-FPGA rereads. It never repairs a job mismatch. Word 60 readback semantics remain
-unresolved; only its idle write is recorded. The result and metadata.json keep
-a separate verification field; CLI close failures remain console evidence.
+- One worker/session owner handles connected hardware jobs, cleanup, restoration
+  verification and disconnect; no UI-thread device logic or competing workers.
+- Preview stays offline. Distinguish temporary changes from explicit persistent
+  preparation; keep conservative hardware defaults (skip FPGA init, no defaults
+  application), and require restoration verification for hardware jobs.
+- Support live points, responsive cancel, truthful errors/partial results, saved
+  run reopening and safe shutdown. Block overlapping connection/job commands.
+- Treat mismatch, incomplete readback, cleanup/storage/close failure as a visible
+  fault that prevents another scan until reviewed. Never silently repair it.
+- Use fake transports for automated checks; run
+  `.venv-foundation/bin/python tools/check_development.py`. Check installed artifacts after packaging changes.
+  Physical GUI validation requires a separately summarized card within the new
+  scope. The previous authorization covered the completed CLI card; do not infer
+  authorization for broader scans or persistent initialization/default writes.
+- Keep data/vendor files/environments local and intact. Commit explicit source/docs
+  paths locally on a bounded branch; do not push or change `main`.
+- Record checks, limitations, physical hardware state and one next task, and
+  increment the handoff number.
 
-Acceptance checks:
+Historical port/status observations must be refreshed for any future hardware
+check. Only the designated lead accesses hardware; workers remain offline.
+Word 60 readback semantics, analog performance, wider scan configurations,
+acquisition/autocalibration migration, automatic interface detection, register
+editing, Windows parity expansion, Linux USB and bundling remain separate tasks.
 
-- The user reviewed and authorized the summarized card scope above. Identify
-  the fresh control port/status and use the card's commands and unique output
-  paths; revisit approval only if the setup or scope changes. Only one designated operator accesses the
-  board; agent workers use fakes and never run hardware diagnostics.
-- Preview each intended command offline first. Use `--skip-fpga-init`, omit
-  `--apply-defaults`, include `--verify-restoration`, and use unique run folders.
-- Record T1, T2, cancellation inside a long counter window and cancellation after
-  a completed point, including snapshots, comparison, errors and console output.
-  The CLI does not expose exact counter-window start; establish phase evidence
-  before claiming the inside-window case. Do not infer it from Ctrl-C timing alone.
-- Require passing readback and verifier cleanup plus successful job cleanup and
-  close. Treat every mismatch, incomplete read, transport/storage/close failure
-  as an abort; stop subsequent scans and preserve evidence for review.
-- Keep measured data in ignored `radioroc_runs`; do not delete local experiments.
-  If equipment or authorization is unavailable, record physical checks pending.
-- Record actual hardware state, limitations, completed checks and one next task.
-  Commit locally on a bounded branch; do not push or change `main`.
-
-Enabling desktop hardware Run is a separate slice after reviewed physical checks
-pass. Acquisition/autocalibration migration, automatic interface detection,
-register editing, Windows parity expansion, Linux USB validation and application
-bundling remain outside this task.
-
-The preceding chat name is **RADIOROC 04 — Bare-board threshold validation**.
+The preceding chat name is **RADIOROC 05 — Physical threshold restoration checks**.

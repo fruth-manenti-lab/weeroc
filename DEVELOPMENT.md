@@ -140,7 +140,7 @@ and [filelock](https://py-filelock.readthedocs.io/en/latest/).
 
 ## Session scope and handoffs
 
-This continuation is **RADIOROC 04 — Bare-board threshold validation**. Number future
+This continuation is **RADIOROC 05 — Physical threshold restoration checks**. Number future
 handoffs sequentially and include the preceding chat label in `NEXT_SESSION.md`.
 
 Use one bounded delivery per chat: define its outcome, allowed modules, tests

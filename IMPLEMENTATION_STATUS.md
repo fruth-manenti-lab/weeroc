@@ -2,17 +2,70 @@
 
 ## Current checkpoint
 
-The opt-in threshold restoration verification slice is implemented at `4c6d254`
-on `feat/bare-board-threshold-verification`, based on connection checkpoint
-`9235fb8` and handoff `e69acb6`. Package version remains `0.5.0`.
-Hardware threshold Run remains disabled; physical validation is outstanding.
+The physical threshold restoration card passed on 2026-09-10 in
+**RADIOROC 05 — Physical threshold restoration checks**, on
+`test/physical-threshold-restoration`, based on authorization handoff `3c0f82a`
+and verifier implementation `4c6d254`. Package version remains `0.5.0`.
+Desktop hardware Run remains disabled; enabling it is the next bounded slice.
 
-This session is **RADIOROC 04 — Bare-board threshold validation**. Sol implemented
-the helper and CLI integration; Luna workers added focused tests and the card.
-The lead defined the state/readback contract, reviewed and corrected integration
-and test edge cases, and ran the final checks. No hardware was enumerated or
-opened in this session. The next session is **RADIOROC 05 — Physical threshold
-restoration checks**.
+The lead was the sole software board operator, using the authorization recorded
+in the preceding handoff: powered bare board over USB, no SiPM/pulser, competing
+vendor software and terminals closed. Sol reviewed cancellation instrumentation
+and audited saved evidence offline; Luna updated the physical card.
+
+Physical evidence is preserved locally and ignored under
+`radioroc_runs/physical_threshold_20260910T042911Z/`: discovery/status JSON,
+exact preview/execution arguments, preview logs, full console output, exit codes,
+four manifests and CSV pairs, process-local cancellation launcher, audit summary
+and SHA-256 evidence inventory.
+No measured data is committed. Host: macOS 15.1 ARM64. Fresh USB identity:
+`usb:0403:6010:serial:RD3_32`; control port `/dev/cu.usbserial-RD3_320`,
+115200 baud, 0.5 s timeout. Status word 100 read `00000101` (5), and close
+succeeded. This is a status value, not a decoded firmware version. Board revision
+was not independently identified; ambient conditions were not measured.
+
+| Physical case | Completed points / windows | Exit | Restoration verification |
+| --- | --- | --- | --- |
+| T1, DAC 0..1, 10 ms | 2 / 2 | 0 | passed |
+| T2, DAC 0..1, 10 ms | 2 / 2 | 0 | passed |
+| T1, DAC 0, 60000 ms window, cancel during window | 0 / 0 | 130 | passed |
+| T1, DAC 0..2, 1000 ms, cancel after first point | 1 / 1 | 130 | passed |
+
+Every command was previewed offline before execution, used channel 4, one average,
+mask isolation, `--skip-fpga-init` and `--verify-restoration`, and omitted
+`--apply-defaults`. Each run captured 130 ASIC rows (the variant's two DAC rows,
+64 discriminator rows and 64 masks) plus FPGA 0/1/6. Exact FPGA snapshots in every
+case were `00111111` / `00000000` / `00000000`; both verifier FPGA passes and
+ASIC comparison matched. Job/verifier cleanup succeeded, manifests and CSV row
+counts agreed, and there were no persistence or CLI close errors. All completed
+windows had zero counts (0 Hz). Configuration:
+`configs/radio_default_i2c.csv`, SHA-256
+`8ccad20a95c0564e3465a32791348035defeed0231f63c8f7f5702dba13d195e`.
+
+Cancellation used a process-local launcher around the unchanged CLI. The window
+hook raised SIGINT after the first 10 ms delay slice, which the production loop
+reaches after counter enable and before stop/read. The point hook raised SIGINT
+from the event callback after the first point and manifest were persisted. Phase
+markers and exit 130 establish the real CLI signal-handler/cancellation path;
+this was programmatic SIGINT, not a human keystroke. Window phase evidence is
+software call ordering, not independent observation of a counter-active signal.
+
+Checks: all four physical acceptance cases and saved-evidence assertions passed.
+An independent offline audit confirmed byte-for-byte snapshot/expected/observed
+equality, exact variant row coverage, preview/manifest agreement and CSV counts.
+`git diff --check` passed; evidence is ignored and `main` remains at `b77f76d`.
+No production source or packaging changed; no new development-suite or wheel run
+was required (preceding 108-test offline checkpoint remains below). The lab Python
+does not have an installed `radioroc` module, so discovery used the preserved
+`scripts/radioroc_list_ports.py` entry point after module invocation failed before
+hardware access. All physical scans used the documented legacy script entry point.
+
+Limits: word 60 is verified only as a successful idle write; ASIC readback protocol
+semantics and analog behavior are not independently established by equality alone.
+Ctest/gain changes, other channels, wider DAC ranges, detector measurements,
+Linux/Windows USB and native desktop hardware ownership remain outside this card.
+Next: **RADIOROC 06 — Desktop hardware threshold workflow**, with explicit
+preparation choices, shared job ownership, cancellation and readback verification.
 
 Delivery 2 remains at `6c44092` on `feat/transport-ownership`; `782014f` recorded
 its validation and threshold-job handoff.
@@ -49,8 +102,8 @@ bytes, not any unrecorded later changes.
   Close errors are separately printed even when other failures coexist. Save
   console output: close occurs after the manifest's terminal write.
 - The reviewed offline implementation and updated card are ready for operator
-  review. The physical card is **NOT EXECUTED**. Desktop hardware Run remains
-  disabled; no new UI or device workflow was enabled.
+  review. The physical card was not executed at this offline checkpoint; see the
+  RADIOROC 05 results above. Desktop hardware Run remains disabled; no new UI or device workflow was enabled.
 
 Validation on macOS ARM64 with `.venv-foundation`:
 
@@ -74,9 +127,8 @@ claiming readback verification. A passing verifier does not erase job cleanup
 errors. Manual CLI Ctrl-C timing does not prove cancellation inside a counter
 window because that phase has no explicit start event; establish phase evidence
 before accepting the physical cancellation case. Bare-board rates cannot establish
-analog response or detector performance. Review the updated card with the user,
-confirm the designated operator and setup, then run and record the physical
-acceptance matrix as the next bounded task.
+analog response or detector performance. The subsequent RADIOROC 05 physical
+acceptance results are recorded above.
 
 ## Delivery 4 connection slice: implemented and checked
 

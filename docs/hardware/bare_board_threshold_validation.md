@@ -1,10 +1,10 @@
 # Bare-board threshold validation card (review required)
 
-**Status: NOT EXECUTED.** This is an opt-in procedure for the designated
-operator. Hardware threshold Run stays disabled until this card is reviewed,
-the board identity and wiring are confirmed, and every check below can be
-completed. Agent/offline work must use the dry-run or a fake transport; it must
-not discover, open, or scan hardware.
+**Status: EXECUTED — RADIOROC 05 evidence recorded.** This remains an opt-in
+procedure for the designated operator. Hardware threshold Run stays disabled;
+the RADIOROC 05 checks used the reviewed CLI directly on the confirmed bare
+board. Agent/offline work must use the dry-run or a fake transport; it must not
+discover, open, or scan hardware.
 
 ## Scope and equipment
 
@@ -21,6 +21,43 @@ that can be cancelled, a restoration-verification result, and a
 recorded rate trace. With no sensor or pulser, rates may be zero or reflect noise/ambient
 activity. A rate curve, plateau, or threshold code must not be treated as proof
 of analog gain, DAC linearity, timing accuracy, or detector performance.
+
+## RADIOROC 05 executed evidence
+
+On 2026-09-10, the lead assistant was the sole software operator, using the
+user-confirmed powered bare board with USB connected, no SiPM or pulser, and
+competing vendor software/terminals closed. Fresh discovery identified USB
+`usb:0403:6010:serial:RD3_32`. A fresh status read used port `/dev/cu.usbserial-RD3_320`, baud 115200, timeout 0.5 s,
+address 100, and status word `00000101`; status close passed. Ambient was not
+measured and board revision was not independently identified. These setup
+limits are recorded in `radioroc_runs/physical_threshold_20260910T042911Z/`.
+
+All four cases used `configs/radio_default_i2c.csv` with SHA-256
+`8ccad20a95c0564e3465a32791348035defeed0231f63c8f7f5702dba13d195e`, channel
+4, `--skip-fpga-init`, no `--apply-defaults`, `--verify-restoration`, and
+130 captured ASIC rows per case. The exact FPGA snapshot was word 0
+`00111111`, word 1 `00000000`, and word 6 `00000000`.
+
+| Case | Result | Evidence |
+| --- | --- | --- |
+| T1 | 2 points, exit 0; verification passed | `t1/` |
+| T2 | 2 points, exit 0; verification passed | `t2/` |
+| 60 s window cancellation | First 10 ms delay slice, 0 rows, exit 130; verification passed | `cancel_window/` |
+| After-point cancellation | First persisted point, 1 row, exit 130; verification passed | `cancel_after_point/` |
+
+All four cleanups report `restored`; storage, persistence, close, and
+verification errors are absent. Word 60 was written idle (`00000000`) during
+cleanup; its readback semantics were not used as evidence. The recorded rates
+were zero and make no analog or detector-performance claim.
+
+The cancellation cases used `cancel_runner.py`, which instruments the process
+locally and raises SIGINT through the production CLI handler. The window phase
+was established by production ordering after the enable write and first 10 ms
+delay slice, before the stop write; it was not established by an oscilloscope,
+active-bit readback, or a human Ctrl-C. The after-point phase was established
+after the point had been persisted to CSV and manifest. This instrumentation
+does not change production code. Hardware GUI Run remains disabled; the next
+slice is desktop integration.
 
 ## Exact state boundary
 
@@ -187,7 +224,7 @@ Record observed values and command/result metadata: board/firmware identity,
 operator and timestamp, approved port, exact command and config hash, T1/T2
 variant, channels, DAC/window/average settings, preparation flags, snapshot,
 readback comparison, terminal/cleanup/persistence status, CSV and manifest
-paths, cancellation case (if any), and aborts/errors. Mark the card and its
-checks **not executed** until the designated operator performs them. Label all
+paths, cancellation case (if any), and aborts/errors. For a future rerun, mark
+a case pending until the designated operator records fresh evidence. Label all
 conclusions as workflow and register-state validation; this card cannot
 establish analog accuracy or physical detector behavior on a bare board.
