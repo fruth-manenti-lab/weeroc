@@ -21,6 +21,7 @@ from radioroc_client import (
 from radioroc.data.threshold import ThresholdRunWriter
 from radioroc.transport.errors import TransportClosedError, TransportIOError, TransportProtocolError
 from .jobs import CancellationToken, JobBusyError, JobCancelled, JobEvent, session_lock
+from .verification import verify_threshold_restoration
 
 
 def _now():
@@ -109,7 +110,8 @@ class ThresholdJob:
 
     def run(self, device: RadiorocDevice, config: ThresholdJobConfig, *,
             metadata: RadiorocRunMetadata | None = None,
-            cancellation: CancellationToken | None = None, on_event=None) -> ThresholdScanResult:
+            cancellation: CancellationToken | None = None, on_event=None,
+            verify_restoration: bool = False) -> ThresholdScanResult:
         """Return terminal status and partial paths, including on run failure.
 
         Invalid input, an occupied session or output collision raises before any
@@ -117,6 +119,8 @@ class ThresholdJob:
         callback exceptions become warnings, never data loss or device failures.
         """
         config = deepcopy(config)
+        if not isinstance(verify_restoration, bool):
+            raise ValueError("verify_restoration must be boolean")
         rows = config.load_rows(device.i2c_rows)
         scan = config.scan
         total = len(scan_values(scan.dac_min, scan.dac_max, scan.dac_step))
@@ -131,11 +135,13 @@ class ThresholdJob:
             raise JobBusyError("another job is running on this transport session")
         try:
             return self._run_locked(device, config, rows, result, total,
-                                    cancellation or CancellationToken(), on_event)
+                                    cancellation or CancellationToken(), on_event,
+                                    verify_restoration)
         finally:
             lock.release()
 
-    def _run_locked(self, device, config, rows, result, total, token, on_event):
+    def _run_locked(self, device, config, rows, result, total, token, on_event,
+                    verify_restoration):
         scan = config.scan
         mode = "simulation" if isinstance(device.transport, RadiorocMemoryTransport) else "hardware"
         result.execution_mode = mode
@@ -170,6 +176,7 @@ class ThresholdJob:
         scan_started = False
         i2c_started = False
         preparation_failed = False
+        snapshot = None
         previous_checkpoint = device._job_checkpoint
         device._job_checkpoint = token.checkpoint
         started_at = time.perf_counter()
@@ -227,6 +234,7 @@ class ThresholdJob:
             if len(values) != len(keys):
                 raise TransportProtocolError(f"expected {len(keys)} snapshot bytes, received {len(values)}")
             asic = {key: bits(value) for key, value in zip(keys, values)}
+            snapshot = {"fpga": dict(fpga), "asic": dict(asic)}
             manifest["snapshot"] = {"fpga": dict(fpga), "asic": [
                 {"add": a, "subadd": s, "data": value} for (a, s), value in asic.items()]}
             persist()
@@ -310,10 +318,27 @@ class ThresholdJob:
                 cleanup_call("restore FPGA 0", lambda: device.write_word(0, fpga[0]))
             if scan_started:
                 cleanup_call("restore FPGA 1", lambda: device.write_word(1, fpga[1]))
-            device._job_checkpoint = previous_checkpoint
             result.cleanup_status = "failed" if result.cleanup_errors else ("restored" if i2c_started else "not_required")
             if result.cleanup_errors and result.status == "completed":
                 result.status = "failed"
+            try:
+                if verify_restoration:
+                    result.verification = verify_threshold_restoration(
+                        device, snapshot, config.registers(), execution_mode=mode)
+                    manifest["verification"] = deepcopy(result.verification)
+            except BaseException as exc:
+                result.verification = {
+                    "status": "failed", "execution_mode": mode,
+                    "expected": {"fpga": [], "asic": []},
+                    "observed": {"fpga_before_asic": [], "asic": [], "fpga_after_asic": []},
+                    "mismatches": [], "missing": [],
+                    "errors": [f"unexpected verifier failure: {_describe(exc)}"],
+                    "cleanup": {"status": "failed", "word60_idle_attempted": False,
+                                "word0_restore_attempted": False, "errors": []},
+                }
+                manifest["verification"] = deepcopy(result.verification)
+            finally:
+                device._job_checkpoint = previous_checkpoint
             manifest["finished_at"] = _now()
             manifest["elapsed_seconds"] = time.perf_counter() - started_at
             manifest["device_state"] = ("unknown" if result.cleanup_errors else

@@ -481,6 +481,7 @@ class ThresholdScanResult:
     - `points` (`int`): Number of DAC points written.
     - `channels` (`list[int]`): Channels included in the scan.
     - `warnings` (`list[str]`): Non-fatal warnings.
+    - `verification` (`dict | None`): Optional independent restoration report.
     """
 
     csv_path: Path
@@ -497,6 +498,7 @@ class ThresholdScanResult:
     error: BaseException | None = None
     attempts: int = 0
     execution_mode: str = "hardware"
+    verification: dict | None = None
 
 
 @dataclass
@@ -977,8 +979,8 @@ class RadiorocDevice:
         """Read multiple ASIC I2C rows through the vendor FIFO path.
 
         **Inputs**
-        - `rows` (`list[I2CRow]`): Register rows to read. The `data` field is
-          used only as a fallback/default.
+        - `rows` (`list[I2CRow]`): Register addresses to read. The `data` field
+          is ignored; missing readback is never replaced by a default.
 
         **Returns**
         - `bytes`: One data byte per requested row.

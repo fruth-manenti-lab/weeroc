@@ -140,7 +140,7 @@ and [filelock](https://py-filelock.readthedocs.io/en/latest/).
 
 ## Session scope and handoffs
 
-This continuation is **RADIOROC 03 — Desktop hardware connection**. Number future
+This continuation is **RADIOROC 04 — Bare-board threshold validation**. Number future
 handoffs sequentially and include the preceding chat label in `NEXT_SESSION.md`.
 
 Use one bounded delivery per chat: define its outcome, allowed modules, tests
@@ -227,8 +227,19 @@ values come from measured readback, never defaults. If snapshot readback fails,
 no ASIC restoration is invented. I2C control word 60 is idled, not replayed as a
 saved command. Cleanup attempts remaining captured registers after an individual
 failure, records every failure and preserves the original exception. `restored`
-means the restoration commands succeeded; hardware readback verification and
-analog validation are still pending.
+means the restoration commands succeeded. The optional
+`--verify-restoration` pass runs after job cleanup under the same session lock:
+it captures post-job FPGA words 0, 1 and 6, rereads the ASIC snapshot rows,
+idles word 60, restores the exact observed post-job FPGA word 0, and rereads
+FPGA words 0, 1 and 6. Its separate report uses `passed`, `failed`, or
+`incomplete` status and records execution mode, expected/observed values,
+mismatches, missing rows, errors, and cleanup attempts. The verification field
+is separate from the primary scan status/result while remaining in the result
+and manifest; the CLI prints its errors separately. It never repairs or hides
+a mismatch. Word 60 readback semantics remain unresolved; only the idle write
+is recorded. A requested verification that does not pass makes the CLI exit
+with status 1 while preserving the primary job result. This verifier is for
+the reviewed bare-board card and does not establish analog validation.
 
 Each run refuses to overwrite any existing run file. A versioned `metadata.json`
 exists before preparation. The existing `thresholdscan_attempts.csv` receives
