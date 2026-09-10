@@ -2,19 +2,17 @@
 
 ## Current checkpoint
 
-Delivery 4's desktop hardware connection/session slice is implemented on
-`feat/desktop-hardware-connection` at `9235fb8`, package version `0.5.0`. The next bounded
-task is the opt-in bare-board threshold verification helper and bench validation
-specified in `NEXT_SESSION.md`. Hardware threshold Run remains disabled.
+The opt-in threshold restoration verification slice is implemented at `4c6d254`
+on `feat/bare-board-threshold-verification`, based on connection checkpoint
+`9235fb8` and handoff `e69acb6`. Package version remains `0.5.0`.
+Hardware threshold Run remains disabled; physical validation is outstanding.
 
-The user's preference is to delegate most code, tests and documentation to smaller
-models, with the lead primarily orchestrating, reviewing and integrating. Focused
-context, minimal duplication and numbered `RADIOROC NN — <bounded task>` session
-names are recorded in `AGENTS.md` and the handoff. This session is
-**RADIOROC 03 — Desktop hardware connection**; the next is
-**RADIOROC 04 — Bare-board threshold validation**. Terra implemented the worker,
-Sol implemented the GUI/tests, and Luna drafted the validation card; the lead
-reviewed contracts, corrected edge cases and integrated/validated the result.
+This session is **RADIOROC 04 — Bare-board threshold validation**. Sol implemented
+the helper and CLI integration; Luna workers added focused tests and the card.
+The lead defined the state/readback contract, reviewed and corrected integration
+and test edge cases, and ran the final checks. No hardware was enumerated or
+opened in this session. The next session is **RADIOROC 05 — Physical threshold
+restoration checks**.
 
 Delivery 2 remains at `6c44092` on `feat/transport-ownership`; `782014f` recorded
 its validation and threshold-job handoff.
@@ -35,6 +33,50 @@ The five experiment folders were recovered from local Git snapshot
 They are present locally and ignored. Other saved runs remain in `radioroc_runs`.
 No separate external backup has been configured. Recovery verifies snapshot
 bytes, not any unrecorded later changes.
+
+## Threshold restoration verifier: implemented and checked offline
+
+- `ThresholdJob.run(..., verify_restoration=True)` and the existing CLI's
+  `--verify-restoration` opt in to independent readback after scan cleanup,
+  under the same transport owner and job lock. Unflagged behavior is preserved.
+- The verifier compares measured FPGA words 0/1/6 and all configured T1/T2 ASIC
+  snapshot rows. It captures post-job FPGA state before ASIC reads, then idles
+  word 60, restores exact observed word 0 (including its I2C active bit), and
+  rereads FPGA state. It never repairs or hides a scan-restoration mismatch.
+- Missing snapshots and incomplete payloads cannot pass; no missing value is
+  supplied from the configuration table. Verification is a separate report in
+  the result and manifest, preserving primary/scan-cleanup/persistence errors.
+  Close errors are separately printed even when other failures coexist. Save
+  console output: close occurs after the manifest's terminal write.
+- The reviewed offline implementation and updated card are ready for operator
+  review. The physical card is **NOT EXECUTED**. Desktop hardware Run remains
+  disabled; no new UI or device workflow was enabled.
+
+Validation on macOS ARM64 with `.venv-foundation`:
+
+- `python tools/check_development.py`: **108 offline tests** passed, with compile
+  checks and all **15 legacy CLI help checks**. The 13 new verifier tests cover
+  T1/T2 full register sets, exact transport ordering, active-bit restoration,
+  same-session locking, completed/in-window/after-point cancellation, missing
+  snapshots, short readback, FPGA/ASIC mismatches, verification/read/cleanup/close
+  failures and CLI exit statuses/offline isolation.
+- The card's two-point T1 preview passed with `.conda-radioroc/bin/python`, using
+  a placeholder port; it created no output directory. This was a dry-run only.
+- `git diff --check` passed. No packaging configuration changed, so a new wheel
+  build/install check was not required. The development environment now uses an
+  editable checkout; the lab environment and measured data were preserved.
+- No hardware scans, discovery, physical open, diagnostic enumeration, push or
+  remote CI occurred. `main` remains unchanged.
+
+Limits: fake tests establish software behavior, not physical register semantics.
+Word 60 readback remains unresolved; its idle-write success is recorded without
+claiming readback verification. A passing verifier does not erase job cleanup
+errors. Manual CLI Ctrl-C timing does not prove cancellation inside a counter
+window because that phase has no explicit start event; establish phase evidence
+before accepting the physical cancellation case. Bare-board rates cannot establish
+analog response or detector performance. Review the updated card with the user,
+confirm the designated operator and setup, then run and record the physical
+acceptance matrix as the next bounded task.
 
 ## Delivery 4 connection slice: implemented and checked
 
@@ -259,8 +301,8 @@ remain tracked migration concerns. Do not mix workflows on one session.
 
 ## Next bounded tasks
 
-1. Build the opt-in threshold restoration verifier and prepare the reviewed
-   bare-board validation described in `NEXT_SESSION.md`.
+1. Review the updated card with the designated operator and perform the physical
+   threshold restoration checks described in `NEXT_SESSION.md`.
 2. Review/integrate the local branches and run configured CI when publishing is
    authorized; check the intended Git author identity before publication.
 3. Expand the Windows parity inventory into control-level acceptance criteria.
