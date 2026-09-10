@@ -1,7 +1,7 @@
 # RADIOROC 07 — Physical desktop threshold validation
 
 RADIOROC 06 implements the desktop hardware threshold workflow on
-`feat/desktop-hardware-threshold`, based on `b10cf57`, version `0.5.0`.
+`feat/desktop-hardware-threshold` at `e6cddf4`, based on `b10cf57`, version `0.5.0`.
 Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md`, and
 `docs/hardware/desktop_threshold_validation.md`. Verify the local checkpoint and
 working tree before editing or using equipment.

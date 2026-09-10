@@ -3,7 +3,7 @@
 ## Current checkpoint
 
 **RADIOROC 06 — Desktop hardware threshold workflow** is implemented on
-`feat/desktop-hardware-threshold`, based on `b10cf57`. Version remains `0.5.0`;
+`feat/desktop-hardware-threshold` at `e6cddf4`, based on `b10cf57`. Version remains `0.5.0`;
 packaging metadata and legacy entry points are unchanged.
 
 - The persistent `ConnectionWorker` owns the transport, device, shared
