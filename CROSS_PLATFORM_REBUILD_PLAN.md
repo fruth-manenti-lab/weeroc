@@ -5,10 +5,13 @@ and scope; completed slices and remaining validation are tracked separately.
 
 Implementation update: packaging, transport/board ownership, the shared threshold
 job lifecycle, simulation desktop and desktop hardware connection are implemented.
-Hardware threshold Run remains disabled. Earlier read-only board status returned 5
-and cross-interface ownership was verified; scan restoration has not been tested
-on hardware. See `IMPLEMENTATION_STATUS.md` for current versions, evidence and
-limits, and `NEXT_SESSION.md` for the next bounded task.
+Desktop hardware threshold Run is implemented through one `ConnectionWorker`
+owner and the shared `ThresholdJob`; physical GUI validation remains pending.
+Earlier read-only board status returned 5 and cross-interface ownership was
+verified. The executed CLI restoration evidence remains a separate historical
+record; it does not authorize GUI scans. See `IMPLEMENTATION_STATUS.md` for
+current versions, evidence and limits, and `NEXT_SESSION.md` for the next bounded
+task.
 
 The target is one maintained Python package with a desktop interface and a CLI,
 covering the behavior of the Windows RADIOROC application on macOS, Debian, and
@@ -285,6 +288,19 @@ drop these workflows under the label of UI modernization.
 **Gate:** CLI and GUI submit the same configuration object; UI remains responsive;
 closing a window during a run follows the defined stop/cleanup behavior; saved
 results reopen with matching values and metadata. Test the packaged application.
+
+For the hardware vertical slice, one `ConnectionWorker` owns the session,
+connection commands, `ThresholdJob`, cleanup, mandatory restoration verification,
+disconnect and close retry. Preview is offline. Hardware defaults remain
+conservative: FPGA initialization and default application are false unless an
+explicitly reviewed persistent preparation requests them. Live points,
+cancellation during a long window and after a persisted point, truthful partial
+results, and saved-run reopening are required. Any mismatch, incomplete readback,
+cleanup/storage failure or close failure becomes a visible fault that blocks the
+next scan until review and, where applicable, disconnect; automatic repair is
+forbidden. The physical GUI procedure is pending in
+`docs/hardware/desktop_threshold_validation.md`. The earlier CLI card and its
+evidence remain distinct.
 
 ### M4 — Complete the Windows features
 

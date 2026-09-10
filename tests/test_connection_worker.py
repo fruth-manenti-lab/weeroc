@@ -8,14 +8,17 @@ from unittest.mock import patch
 
 # Bootstrap the checkout package when test discovery uses an older installed wheel.
 import radioroc_client  # noqa: F401
+from radioroc_client import ThresholdScanConfig, ThresholdScanResult
 
 from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.application.jobs import JobBusyError
+from radioroc.application.threshold import ThresholdJobConfig
 from radioroc.transport.config import RadiorocConnectionConfig
 from radioroc.transport.discovery import BoardPort
-from radioroc.transport.errors import DeviceBusyError
+from radioroc.transport.errors import DeviceBusyError, TransportIOError
 from radioroc.transport.ownership import BoardLease
 from radioroc.transport.serial import RadiorocSerial
+from tests.test_threshold_jobs import ThresholdTransport
 
 
 PORT = BoardPort("fake-control", "Fake board", 0x0403, 0x6010, "fake", "1-1", None)
@@ -90,6 +93,59 @@ class ScriptedSerial:
         self.closed = True
 
 
+class ThresholdSession:
+    """Persistent fake session around the real job's scripted transport."""
+
+    def __init__(self, transport):
+        self.transport = transport
+        self.thread_ids = []
+        self.close_calls = 0
+
+    def __enter__(self):
+        self.thread_ids.append(threading.get_ident())
+        return self.transport
+
+    def close(self):
+        self.thread_ids.append(threading.get_ident())
+        self.close_calls += 1
+
+
+class OwnedThresholdTransport(ThresholdTransport):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.thread_ids = []
+
+    def read_word(self, address):
+        self.thread_ids.append(threading.get_ident())
+        return super().read_word(address)
+
+    def write_word(self, address, value):
+        self.thread_ids.append(threading.get_ident())
+        return super().write_word(address, value)
+
+    def read_words(self, address, length):
+        self.thread_ids.append(threading.get_ident())
+        return super().read_words(address, length)
+
+    def write_words(self, address, payload):
+        self.thread_ids.append(threading.get_ident())
+        return super().write_words(address, payload)
+
+
+class BlockingCounterFaultTransport(OwnedThresholdTransport):
+    def __init__(self):
+        super().__init__()
+        self.counter_read = threading.Event()
+        self.release_counter = threading.Event()
+
+    def read_words(self, address, length):
+        if address == 96:
+            self.counter_read.set()
+            self.release_counter.wait(3)
+            raise TransportIOError("counter disconnected")
+        return super().read_words(address, length)
+
+
 class ConnectionWorkerTests(unittest.TestCase):
     def wait_for(self, worker, state, timeout=3):
         deadline = time.monotonic() + timeout
@@ -104,8 +160,27 @@ class ConnectionWorkerTests(unittest.TestCase):
         worker = ConnectionWorker(**kwargs)
         self.assertEqual(worker.snapshot().state, "idle")
         worker.start()
-        self.addCleanup(lambda: (worker.shutdown(), worker.join(3)) if worker.is_alive else None)
+        def cleanup():
+            for _ in range(2):
+                if not worker.is_alive:
+                    return
+                try:
+                    worker.shutdown()
+                except JobBusyError:
+                    pass
+                worker.join(3)
+        self.addCleanup(cleanup)
         return worker
+
+    def operation(self, name="run", *, dac_max=0, window_ms=.001):
+        if not hasattr(self, "_threshold_tmp"):
+            self._threshold_tmp = tempfile.TemporaryDirectory()
+            self.addCleanup(self._threshold_tmp.cleanup)
+        return ThresholdJobConfig(ThresholdScanConfig(
+            [4], dac_min=0, dac_max=dac_max, dac_step=1,
+            trigger_window_ms=window_ms, averages=1,
+            out_dir=Path(self._threshold_tmp.name) / name,
+        ))
 
     def test_refresh_is_worker_thread_only_and_does_not_open_session(self):
         discovery_threads = []
@@ -145,10 +220,17 @@ class ConnectionWorkerTests(unittest.TestCase):
         snap = self.wait_for(worker, "close_failed")
         self.assertIn("OSError: read failed", snap.error)
         self.assertIn("OSError: close failed", snap.close_error)
+        self.assertIn("OSError: close failed", snap.fault)
         worker.disconnect()
         snap = self.wait_for(worker, "idle")
         self.assertIn("OSError: read failed", snap.error)
         self.assertIn("OSError: close failed", snap.close_error)
+        self.assertIn("OSError: close failed", snap.fault)
+        worker.review_fault()
+        reviewed = worker.snapshot()
+        self.assertIsNone(reviewed.fault)
+        self.assertIn("OSError: read failed", reviewed.error)
+        self.assertIn("OSError: close failed", reviewed.close_error)
 
     def test_failed_enter_keeps_session_for_close_retry(self):
         session = FakeSession(enter_error=OSError("open failed"), close_error=OSError("close failed"))
@@ -250,6 +332,146 @@ class ConnectionWorkerTests(unittest.TestCase):
             worker.disconnect()
             self.wait_for(worker, "idle")
             self.assertEqual(fake.close_calls, 2)
+
+    def test_threshold_job_uses_persistent_owner_and_publishes_verified_rows(self):
+        transport = OwnedThresholdTransport(counts=(10,))
+        session = ThresholdSession(transport)
+        worker = self.started(session_factory=lambda config: session)
+        worker.connect(RadiorocConnectionConfig(port="fake-control"))
+        self.wait_for(worker, "connected")
+
+        worker.run_threshold(self.operation())
+        self.assertEqual(worker.snapshot().state, "scanning")
+        with self.assertRaises(JobBusyError):
+            worker.read_status()
+        with self.assertRaises(JobBusyError):
+            worker.disconnect()
+        snap = self.wait_for(worker, "connected", timeout=10)
+        threshold = worker.threshold_snapshot()
+
+        self.assertIsNone(snap.fault)
+        self.assertEqual(threshold.outcome.result.status, "completed")
+        self.assertEqual(threshold.outcome.result.verification["status"], "passed")
+        self.assertEqual(len(threshold.rows), 1)
+        self.assertEqual(set(transport.thread_ids + session.thread_ids),
+                         {worker._thread.ident})
+        self.assertEqual(session.close_calls, 0)
+
+    def test_verified_cancellation_returns_to_connected_after_cleanup(self):
+        transport = OwnedThresholdTransport(counts=(10,))
+        session = ThresholdSession(transport)
+        worker = self.started(session_factory=lambda config: session)
+        worker.connect(RadiorocConnectionConfig(port="fake-control"))
+        self.wait_for(worker, "connected")
+        worker.run_threshold(self.operation(window_ms=1000))
+        self.assertTrue(transport.counter_started.wait(5))
+        worker.cancel_threshold()
+
+        snap = self.wait_for(worker, "connected", timeout=10)
+        result = worker.threshold_snapshot().outcome.result
+        self.assertEqual((result.status, result.cleanup_status,
+                          result.verification["status"]),
+                         ("cancelled", "restored", "passed"))
+        self.assertIsNone(snap.fault)
+
+    def test_threshold_fault_latches_until_disconnected_and_reviewed(self):
+        transport = OwnedThresholdTransport()
+        transport.fail_snapshot = True
+        session = ThresholdSession(transport)
+        worker = self.started(session_factory=lambda config: session)
+        config = RadiorocConnectionConfig(port="fake-control")
+        worker.connect(config)
+        self.wait_for(worker, "connected")
+        worker.run_threshold(self.operation("fault"))
+
+        snap = self.wait_for(worker, "faulted", timeout=10)
+        self.assertIn("threshold status: failed", snap.fault)
+        self.assertIsNotNone(worker.threshold_snapshot().outcome)
+        for command in (worker.refresh, lambda: worker.connect(config),
+                        lambda: worker.run_threshold(self.operation("blocked"))):
+            with self.assertRaises(JobBusyError):
+                command()
+        with self.assertRaises(JobBusyError):
+            worker.review_fault()
+
+        worker.disconnect()
+        idle = self.wait_for(worker, "idle")
+        self.assertIsNotNone(idle.fault)
+        saved = worker.threshold_snapshot()
+        saved.outcome.result.status = "changed by caller"
+        self.assertEqual(worker.threshold_snapshot().outcome.result.status, "failed")
+        with self.assertRaises(JobBusyError):
+            worker.connect(config)
+        worker.review_fault()
+        self.assertIsNone(worker.snapshot().fault)
+        self.assertEqual(worker.threshold_snapshot().outcome.result.status, "failed")
+
+    def test_shutdown_during_job_waits_for_verified_cleanup_then_closes(self):
+        transport = OwnedThresholdTransport(counts=(10,))
+        session = ThresholdSession(transport)
+        worker = self.started(session_factory=lambda config: session)
+        worker.connect(RadiorocConnectionConfig(port="fake-control"))
+        self.wait_for(worker, "connected")
+        worker.run_threshold(self.operation("shutdown", window_ms=1000))
+        self.assertTrue(transport.counter_started.wait(5))
+        worker.shutdown()
+        worker.join(10)
+
+        self.assertFalse(worker.is_alive)
+        self.assertEqual(worker.snapshot().state, "stopped")
+        self.assertEqual(worker.threshold_snapshot().outcome.result.status, "cancelled")
+        self.assertEqual(session.close_calls, 1)
+
+    def test_new_job_fault_during_shutdown_stays_alive_for_explicit_retry(self):
+        transport = BlockingCounterFaultTransport()
+        session = ThresholdSession(transport)
+        worker = self.started(session_factory=lambda config: session)
+        worker.connect(RadiorocConnectionConfig(port="fake-control"))
+        self.wait_for(worker, "connected")
+        worker.run_threshold(self.operation("shutdown-fault"))
+        self.assertTrue(transport.counter_read.wait(5))
+        worker.shutdown()
+        transport.release_counter.set()
+
+        snap = self.wait_for(worker, "faulted", timeout=10)
+        self.assertTrue(worker.is_alive)
+        self.assertIn("counter disconnected", snap.fault)
+        self.assertEqual(session.close_calls, 0)
+        worker.shutdown()
+        worker.join(10)
+        self.assertFalse(worker.is_alive)
+        self.assertEqual(worker.snapshot().state, "stopped")
+        self.assertEqual(session.close_calls, 1)
+
+    def test_fault_classifier_covers_each_terminal_safety_boundary(self):
+        cases = (
+            (ThresholdScanResult(Path("run.csv"), status="completed",
+                                 cleanup_status="restored", error=ValueError("primary"),
+                                 verification={"status": "passed"}), "ValueError: primary"),
+            (ThresholdScanResult(Path("run.csv"), status="completed",
+                                 cleanup_status="failed",
+                                 verification={"status": "passed"}), "cleanup status: failed"),
+            (ThresholdScanResult(Path("run.csv"), status="completed",
+                                 cleanup_status="restored", cleanup_errors=["restore failed"],
+                                 verification={"status": "passed"}), "cleanup: restore failed"),
+            (ThresholdScanResult(Path("run.csv"), status="completed",
+                                 cleanup_status="restored", persistence_errors=["disk full"],
+                                 verification={"status": "passed"}), "persistence: disk full"),
+            (ThresholdScanResult(Path("run.csv"), status="completed",
+                                 cleanup_status="restored", verification=None),
+             "restoration verification is absent"),
+            (ThresholdScanResult(Path("run.csv"), status="completed",
+                                 cleanup_status="restored",
+                                 verification={"status": "incomplete"}),
+             "restoration verification incomplete"),
+            (ThresholdScanResult(Path("run.csv"), status="completed",
+                                 cleanup_status="restored",
+                                 verification={"status": "failed"}),
+             "restoration verification failed"),
+        )
+        for result, expected in cases:
+            with self.subTest(expected=expected):
+                self.assertIn(expected, ConnectionWorker._threshold_fault(result, None))
 
 
 if __name__ == "__main__":

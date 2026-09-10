@@ -71,19 +71,19 @@ from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.gui.threshold_window import ThresholdWindow
 from radioroc.data.threshold_reader import read_threshold_run
 from radioroc.transport.discovery import BoardPort
+from radioroc.transport.threshold_simulator import create_threshold_simulator
+from radioroc.application.threshold import ThresholdJobConfig
+from radioroc_client import ThresholdScanConfig
 app = QApplication([])
-class OfflineSession:
-    def __enter__(self):
-        return self
-    def read_word(self, address):
-        assert address == 100
-        return '00000101'
-    def close(self):
-        pass
+fixture_operation = ThresholdJobConfig(ThresholdScanConfig(
+    [4], dac_min=0, dac_max=1, dac_step=1, trigger_window_ms=10,
+    out_dir=Path('desktop-hardware-fixture')),
+    initialize_fpga=False, apply_defaults=False)
 candidate = BoardPort('offline-control', 'Offline wheel fixture', 0x0403, 0x6010,
                       'offline', None, None)
 window = ThresholdWindow(connection_worker_factory=lambda: ConnectionWorker(
-    discovery=lambda: [candidate], session_factory=lambda config: OfflineSession()))
+    discovery=lambda: [candidate],
+    session_factory=lambda config: create_threshold_simulator(fixture_operation)))
 def wait_connection(state):
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
@@ -121,7 +121,20 @@ with patch('serial.Serial', side_effect=AssertionError('hardware opened')):
     window.connect_hardware()
     wait_connection('connected')
     assert window.connection_worker.snapshot().status_word == 5
-    assert not window.run_button.isEnabled()
+    assert window.run_button.isEnabled()
+    assert not window.initialize.isChecked() and not window.defaults.isChecked()
+    window.channels.setText('4')
+    window.dac_max.setValue(1)
+    window.dac_step.setValue(1)
+    window.window_ms.setValue(10)
+    window.output.setText(str(Path('desktop-hardware-fixture').resolve()))
+    window.start_run()
+    wait_connection('connected')
+    outcome = window.connection_worker.threshold_snapshot().outcome
+    assert outcome.result.verification['status'] == 'passed'
+    reopened = read_threshold_run(Path('desktop-hardware-fixture'))
+    assert len(reopened.rows) == 2 and reopened.status == 'completed'
+    assert reopened.execution_mode == 'simulation'  # Injected transport stays truthful.
     window.disconnect_hardware()
     wait_connection('idle')
     window.close()
@@ -130,7 +143,7 @@ with patch('serial.Serial', side_effect=AssertionError('hardware opened')):
         app.processEvents()
         time.sleep(0.01)
     assert window.connection_worker is None
-print('Installed GUI simulation/reopen and fake hardware connection passed offline.')
+print('Installed GUI simulation/reopen and owned hardware workflow with fake transport passed offline.')
 '''
 
 

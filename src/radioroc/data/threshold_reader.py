@@ -72,6 +72,16 @@ def read_threshold_run(path: Path) -> SavedThresholdRun:
         status = "incomplete"
 
     inconsistencies: list[str] = []
+    verification = manifest.get("verification")
+    if "verification" in manifest:
+        verification_status = verification.get("status") if isinstance(verification, dict) else None
+        if verification_status != "passed":
+            inconsistencies.append(f"restoration verification did not pass ({verification_status!r})")
+            if status in {"completed", "cancelled"}:
+                status = "incomplete"
+        if isinstance(verification, dict):
+            for error in verification.get("errors", ()):
+                warnings.append(f"verification error: {error}")
     for index, row in enumerate(rows):
         if index >= len(expected_dacs) or row["DAC"] != expected_dacs[index]:
             warnings.append(

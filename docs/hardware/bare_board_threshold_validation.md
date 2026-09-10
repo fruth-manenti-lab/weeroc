@@ -1,10 +1,11 @@
 # Bare-board threshold validation card (review required)
 
 **Status: EXECUTED — RADIOROC 05 evidence recorded.** This remains an opt-in
-procedure for the designated operator. Hardware threshold Run stays disabled;
-the RADIOROC 05 checks used the reviewed CLI directly on the confirmed bare
-board. Agent/offline work must use the dry-run or a fake transport; it must not
-discover, open, or scan hardware.
+procedure for the designated operator. For RADIOROC 05, hardware threshold Run
+was disabled; those checks used the reviewed CLI directly on the confirmed bare
+board. Desktop GUI validation is a separate pending procedure in
+`desktop_threshold_validation.md`. Agent/offline work must use the dry-run or a
+fake transport; it must not discover, open, or scan hardware.
 
 ## Scope and equipment
 
@@ -56,8 +57,8 @@ was established by production ordering after the enable write and first 10 ms
 delay slice, before the stop write; it was not established by an oscilloscope,
 active-bit readback, or a human Ctrl-C. The after-point phase was established
 after the point had been persisted to CSV and manifest. This instrumentation
-does not change production code. Hardware GUI Run remains disabled; the next
-slice is desktop integration.
+does not change production code. Hardware GUI Run was outside the RADIOROC 05
+card; the next slice is the separate pending desktop integration card.
 
 ## Exact state boundary
 

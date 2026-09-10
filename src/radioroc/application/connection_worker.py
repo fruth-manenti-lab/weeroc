@@ -12,11 +12,14 @@ from dataclasses import dataclass
 from queue import Queue
 from threading import Lock, Thread
 
+from radioroc_client import RadiorocDevice
 from radioroc.transport.config import RadiorocConnectionConfig
 from radioroc.transport.discovery import BoardPort, list_board_ports
 from radioroc.transport.serial import RadiorocSerial
 
-from .jobs import JobBusyError
+from .jobs import CancellationToken, JobBusyError, JobCancelled
+from .threshold import ThresholdJob, ThresholdJobConfig
+from .threshold_worker import WorkerOutcome, WorkerSnapshot
 
 
 @dataclass(frozen=True)
@@ -27,6 +30,7 @@ class ConnectionSnapshot:
     status_word: int | None
     error: str | None
     close_error: str | None
+    fault: str | None = None
 
 
 class ConnectionWorker:
@@ -44,7 +48,16 @@ class ConnectionWorker:
         self._status_word: int | None = None
         self._error: str | None = None
         self._close_error: str | None = None
+        self._fault: str | None = None
         self._session = None  # Owned and touched only by _run.
+        self._device = None  # Constructed and touched only by _run.
+        self._threshold_token: CancellationToken | None = None
+        self._threshold_event = None
+        self._threshold_rows = []
+        self._threshold_unread = False
+        self._threshold_coalesced = 0
+        self._threshold_outcome = None
+        self._hold_shutdown_for_job_fault = False
         self._pending = False
         self._shutdown_queued = False
         self._started = False
@@ -68,7 +81,16 @@ class ConnectionWorker:
     def snapshot(self):
         with self._lock:
             return ConnectionSnapshot(self._state, self._ports, self._port,
-                                      self._status_word, self._error, self._close_error)
+                                      self._status_word, self._error, self._close_error,
+                                      self._fault)
+
+    def threshold_snapshot(self):
+        with self._lock:
+            self._threshold_unread = False
+            return deepcopy(WorkerSnapshot(self._threshold_event,
+                                           tuple(self._threshold_rows),
+                                           self._threshold_coalesced,
+                                           self._threshold_outcome))
 
     def refresh(self):
         self._submit("refresh", None, "discovering", {"idle", "error"})
@@ -82,7 +104,47 @@ class ConnectionWorker:
         self._submit("read_status", None, "reading", {"connected"})
 
     def disconnect(self):
-        self._submit("disconnect", None, "disconnecting", {"connected", "close_failed"})
+        self._submit("disconnect", None, "disconnecting",
+                     {"connected", "faulted", "close_failed"})
+
+    def run_threshold(self, operation: ThresholdJobConfig):
+        """Run one verified threshold job on the persistent owned session."""
+        operation = deepcopy(operation)
+        ThresholdJob.preview(operation)
+        with self._lock:
+            if not self._started:
+                raise RuntimeError("connection worker has not been started")
+            if (self._shutdown_queued or self._pending or self._state != "connected"
+                    or self._fault is not None or self._device is None):
+                raise JobBusyError(f"cannot run_threshold while connection is {self._state}")
+            self._pending = True
+            self._state = "scanning"
+            self._error = None
+            self._close_error = None
+            self._threshold_token = CancellationToken()
+            self._threshold_event = None
+            self._threshold_rows = []
+            self._threshold_unread = False
+            self._threshold_coalesced = 0
+            self._threshold_outcome = None
+            self._commands.put(("run_threshold", operation))
+
+    def cancel_threshold(self):
+        """Request cooperative cancellation without touching the transport."""
+        with self._lock:
+            if self._state != "scanning" or self._threshold_token is None:
+                raise JobBusyError(f"cannot cancel_threshold while connection is {self._state}")
+            self._threshold_token.cancel()
+
+    def review_fault(self):
+        """Clear a visible fault after the session has been released."""
+        with self._lock:
+            if (not self._started or self._pending or self._shutdown_queued
+                    or self._session is not None or self._state not in {"idle", "error"}):
+                raise JobBusyError(f"cannot review_fault while connection is {self._state}")
+            if self._fault is None:
+                raise JobBusyError("there is no connection fault to review")
+            self._fault = None
 
     def shutdown(self):
         """Request session release then stop; a failed close remains retryable."""
@@ -98,6 +160,8 @@ class ConnectionWorker:
             # it lets a window close while connect is still in progress.
             if not self._pending:
                 self._state = "disconnecting"
+            if self._threshold_token is not None:
+                self._threshold_token.cancel()
             self._commands.put(("shutdown", None))
 
     def _submit(self, command, argument, busy_state, allowed_states):
@@ -105,16 +169,18 @@ class ConnectionWorker:
             if not self._started:
                 raise RuntimeError("connection worker has not been started")
             if (self._shutdown_queued or self._pending
-                    or self._state not in allowed_states):
+                    or self._state not in allowed_states
+                    or (command in {"refresh", "connect"} and self._fault is not None)):
                 raise JobBusyError(f"cannot {command} while connection is {self._state}")
-            was_close_failed = self._state == "close_failed"
+            preserve_failure = (command == "disconnect"
+                                and self._state in {"faulted", "close_failed"})
             self._pending = True
             # Publish before enqueueing so a UI cannot submit a second operation
             # during the interval before the worker wakes up.
             self._state = busy_state
             # A successful retry must leave an earlier failure reviewable until
             # the user starts a new connect/refresh operation.
-            if not (command == "disconnect" and was_close_failed):
+            if not preserve_failure:
                 self._error = None
                 self._close_error = None
             self._commands.put((command, argument))
@@ -143,14 +209,37 @@ class ConnectionWorker:
                 and session.ser is None and session._lease is None):
             with self._lock:
                 self._session = None
+                self._device = None
             return None
         try:
             session.close()
         except Exception as exc:
-            return self._describe(exc)
+            error = self._describe(exc)
+            self._latch_fault(error)
+            return error
         with self._lock:
             self._session = None
+            self._device = None
         return None
+
+    def _latch_fault(self, message: str):
+        with self._lock:
+            if self._fault is None:
+                self._fault = message
+            elif message not in self._fault:
+                self._fault = f"{self._fault}; {message}"
+
+    def _publish_threshold(self, event):
+        with self._lock:
+            if self._threshold_unread:
+                self._threshold_coalesced += 1
+            self._threshold_event = event
+            self._threshold_unread = True
+            if event.kind == "point":
+                if len(self._threshold_rows) < 1024:
+                    self._threshold_rows.append(event.values)
+                else:
+                    self._threshold_coalesced += 1
 
     def _run(self):
         while True:
@@ -163,7 +252,16 @@ class ConnectionWorker:
                 self._read_status()
             elif command == "disconnect":
                 self._disconnect(stop=False)
+            elif command == "run_threshold":
+                self._run_threshold(argument)
             elif command == "shutdown":
+                with self._lock:
+                    hold = self._hold_shutdown_for_job_fault
+                    self._hold_shutdown_for_job_fault = False
+                if hold:
+                    with self._lock:
+                        self._shutdown_queued = False
+                    continue
                 if self._disconnect(stop=True):
                     with self._lock:
                         error, close_error = self._error, self._close_error
@@ -206,6 +304,8 @@ class ConnectionWorker:
                 close_error = primary_error
             else:
                 close_error = self._close_session()
+            if close_error:
+                self._latch_fault(close_error)
             if not close_error:
                 with self._lock:
                     self._port = None
@@ -216,11 +316,74 @@ class ConnectionWorker:
         with self._lock:
             self._port = config.port
             self._status_word = status_word
+            self._device = RadiorocDevice(transport)
         self._publish("connected")
+
+    @staticmethod
+    def _threshold_fault(result, error):
+        problems = []
+        if error:
+            problems.append(error)
+        if result is None:
+            if not problems:
+                problems.append("threshold job returned no result")
+            return "; ".join(problems)
+        expected_cancel = (result.status == "cancelled"
+                           and isinstance(result.error, JobCancelled))
+        if result.error is not None and not expected_cancel:
+            problems.append(f"{type(result.error).__name__}: {result.error}")
+        if result.status in {"failed", "disconnected"}:
+            problems.append(f"threshold status: {result.status}")
+        if result.cleanup_status not in {"restored", "not_required"}:
+            problems.append(f"cleanup status: {result.cleanup_status}")
+        problems.extend(f"cleanup: {item}" for item in result.cleanup_errors)
+        problems.extend(f"persistence: {item}" for item in result.persistence_errors)
+        verification = result.verification
+        if not verification:
+            problems.append("restoration verification is absent")
+        elif verification.get("status") != "passed":
+            problems.append(
+                f"restoration verification {verification.get('status', 'absent')}"
+            )
+        return "; ".join(problems) or None
+
+    def _run_threshold(self, operation):
+        result = None
+        error = None
+        with self._lock:
+            token = self._threshold_token
+            device = self._device
+        try:
+            result = ThresholdJob().run(
+                device, operation, cancellation=token,
+                on_event=self._publish_threshold, verify_restoration=True,
+            )
+        except Exception as exc:
+            error = self._describe(exc)
+        outcome = WorkerOutcome(result, error, None)
+        fault = self._threshold_fault(result, error)
+        with self._lock:
+            self._threshold_outcome = outcome
+            self._threshold_token = None
+            if fault:
+                if self._fault is None:
+                    self._fault = fault
+                elif fault not in self._fault:
+                    self._fault = f"{self._fault}; {fault}"
+                self._state = "faulted"
+                self._error = fault
+                self._close_error = None
+                if self._shutdown_queued:
+                    self._hold_shutdown_for_job_fault = True
+            else:
+                self._state = "connected"
+                self._error = None
+                self._close_error = None
+            self._pending = False
 
     def _read_status(self):
         try:
-            status_word = int(self._session.read_word(100), 2)
+            status_word = int(self._device.read_word(100), 2)
         except Exception as exc:
             primary_error = self._describe(exc)
             close_error = self._close_session()
@@ -239,6 +402,7 @@ class ConnectionWorker:
     def _disconnect(self, *, stop: bool) -> bool:
         close_error = self._close_session()
         if close_error:
+            self._latch_fault(close_error)
             with self._lock:
                 primary_error = self._error
             self._publish("close_failed", error=primary_error, close_error=close_error)
@@ -248,6 +412,6 @@ class ConnectionWorker:
             self._status_word = None
         if not stop:
             with self._lock:
-                error, close_error = self._error, self._close_error
+                error, close_error, fault = self._error, self._close_error, self._fault
             self._publish("idle", error=error, close_error=close_error)
         return True

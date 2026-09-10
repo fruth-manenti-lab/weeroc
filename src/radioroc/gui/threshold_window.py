@@ -40,14 +40,14 @@ def _decimal(low, high, value):
     return field
 
 
-def _new_directory():
+def _new_directory(execution_mode="simulation"):
     name = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid4().hex[:8]
-    return str(Path.cwd() / "radioroc_runs" / "simulation" / name)
+    return str(Path.cwd() / "radioroc_runs" / execution_mode / name)
 
 
 class ThresholdWindow(QMainWindow):
-    _CONNECTION_BUSY = {"discovering", "connecting", "reading", "disconnecting"}
-    _CONNECTION_LOCKS_MODE = _CONNECTION_BUSY | {"connected", "close_failed"}
+    _CONNECTION_BUSY = {"discovering", "connecting", "reading", "disconnecting", "scanning"}
+    _CONNECTION_LOCKS_MODE = _CONNECTION_BUSY | {"connected", "close_failed", "faulted"}
 
     def __init__(self, *, worker_factory=ThresholdWorker,
                  connection_worker_factory=ConnectionWorker):
@@ -63,6 +63,7 @@ class ThresholdWindow(QMainWindow):
         self._closing = False
         self._last_rows = ()
         self._active_directory = None
+        self._hardware_running = False
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -108,10 +109,12 @@ class ThresholdWindow(QMainWindow):
         self.connect_button = QPushButton("Connect")
         self.read_status_button = QPushButton("Read status")
         self.disconnect_button = QPushButton("Disconnect")
+        self.review_fault_button = QPushButton("Acknowledge fault review")
         connection_buttons_top.addWidget(self.refresh_button)
         connection_buttons_top.addWidget(self.connect_button)
         connection_buttons_bottom.addWidget(self.read_status_button)
         connection_buttons_bottom.addWidget(self.disconnect_button)
+        connection_buttons_bottom.addWidget(self.review_fault_button)
         connection_form.addRow(connection_buttons_top)
         connection_form.addRow(connection_buttons_bottom)
         self.connection_status = QLabel("Not connected · refresh to list USB port candidates")
@@ -203,6 +206,7 @@ class ThresholdWindow(QMainWindow):
         self.connect_button.clicked.connect(self.connect_hardware)
         self.read_status_button.clicked.connect(self.read_hardware_status)
         self.disconnect_button.clicked.connect(self.disconnect_hardware)
+        self.review_fault_button.clicked.connect(self.review_hardware_fault)
         self.timer = QTimer(self)
         self.timer.setInterval(100)
         self.timer.timeout.connect(self.poll_worker)
@@ -213,6 +217,7 @@ class ThresholdWindow(QMainWindow):
         self._plot((), "Simulation — no data yet")
 
     def _mode_changed(self):
+        previous_mode = self._accepted_mode
         requested = self.mode.currentIndex()
         if requested != self._accepted_mode and self._mode_switch_locked():
             self.mode.blockSignals(True)
@@ -226,9 +231,15 @@ class ThresholdWindow(QMainWindow):
         self.banner.setText(
             "SIMULATION · Synthetic counts, not measured lab data. No board connection."
             if simulation else
-            "HARDWARE · USB candidates are unverified; select the control port. "
-            "Connection checks status only. Threshold runs are disabled.")
-        self.run_button.setText("Run simulation" if simulation else "Run unavailable")
+            "HARDWARE · USB candidates are unverified. FPGA initialization and apply-defaults "
+            "are off by default; masking/Ctest/gain are temporary scan settings. Restoration readback "
+            "verification is mandatory. Initialization and defaults are persistent changes.")
+        if not simulation and previous_mode != self._accepted_mode:
+            self.initialize.setChecked(False)
+            self.defaults.setChecked(False)
+            if "radioroc_runs" in Path(self.output.text()).parts:
+                self.output.setText(_new_directory("hardware"))
+        self.run_button.setText("Run simulation" if simulation else "Run hardware threshold")
         self.sim_group.setEnabled(simulation and self.worker is None)
         self._update_connection_controls()
 
@@ -257,12 +268,13 @@ class ThresholdWindow(QMainWindow):
             self._update_connection_controls()
 
     def refresh_connections(self):
-        if self.mode.currentIndex() == 1 and self.worker is None:
+        if self.mode.currentIndex() == 1 and self.worker is None and not self._hardware_running:
             self._connection_command(lambda worker: worker.refresh())
 
     def connect_hardware(self):
         candidate = self.port_select.currentData()
-        if self.mode.currentIndex() != 1 or candidate is None or self.worker is not None:
+        if (self.mode.currentIndex() != 1 or candidate is None or self.worker is not None
+                or self._hardware_running):
             return
         config = RadiorocConnectionConfig(candidate.port, self.baud.value(), self.timeout_s.value())
         self._connection_command(lambda worker: worker.connect(config))
@@ -274,6 +286,10 @@ class ThresholdWindow(QMainWindow):
     def disconnect_hardware(self):
         if self.connection_worker is not None:
             self._connection_command(lambda worker: worker.disconnect())
+
+    def review_hardware_fault(self):
+        if self.connection_worker is not None:
+            self._connection_command(lambda worker: worker.review_fault())
 
     def _show_connection_snapshot(self, snapshot):
         state = snapshot.state
@@ -288,6 +304,8 @@ class ThresholdWindow(QMainWindow):
                 message += " · previous errors: " + "; ".join(retained)
         elif state == "connected":
             message = f"Connected · {snapshot.port}"
+        elif state == "faulted":
+            message = f"Hardware fault · {snapshot.fault or snapshot.error or 'review required'}"
         elif state == "close_failed":
             problems = [problem for problem in (snapshot.error, snapshot.close_error) if problem]
             message = f"Close failed · {'; '.join(problems)} · retry close"
@@ -299,6 +317,8 @@ class ThresholdWindow(QMainWindow):
             message = state.replace("_", " ").capitalize()
             if snapshot.port:
                 message += f" · {snapshot.port}"
+        if getattr(snapshot, "fault", None) and state != "faulted":
+            message += f" · fault review required: {snapshot.fault}"
         self.connection_status.setText(message)
         self.firmware_status.setText(
             "—" if snapshot.status_word is None
@@ -329,6 +349,11 @@ class ThresholdWindow(QMainWindow):
         worker = self.connection_worker
         if worker is None:
             return
+        # A persistent worker can stop immediately after a shutdown queued
+        # behind a scan.  Consume its terminal threshold snapshot before
+        # dropping the owner and losing the partial-result/fault summary.
+        if self._hardware_running:
+            self.poll_worker()
         snapshot = worker.snapshot()
         self._sync_connection_ports(snapshot.ports)
         self._show_connection_snapshot(snapshot)
@@ -352,21 +377,29 @@ class ThresholdWindow(QMainWindow):
         if self.connection_worker is not None:
             state = self.connection_worker.snapshot().state
         busy = state in self._CONNECTION_BUSY
-        session = state in {"connected", "close_failed"}
+        fault = getattr(self.connection_worker.snapshot(), "fault", None) if self.connection_worker else None
+        session = state in {"connected", "close_failed", "faulted"}
         simulation_available = self.worker is None and not busy and not session
         commands_available = not self._closing
         self.mode.setEnabled(commands_available and self.worker is None and not busy and not session)
         self.connection_group.setEnabled(hardware and self.worker is None)
-        self.port_select.setEnabled(commands_available and not busy and not session)
-        self.baud.setEnabled(commands_available and not busy and not session)
-        self.timeout_s.setEnabled(commands_available and not busy and not session)
-        self.refresh_button.setEnabled(commands_available and not busy and not session)
-        self.connect_button.setEnabled(commands_available and not busy and not session and
+        selectable = commands_available and not busy and not session and not fault
+        self.port_select.setEnabled(selectable)
+        self.baud.setEnabled(selectable)
+        self.timeout_s.setEnabled(selectable)
+        self.refresh_button.setEnabled(selectable)
+        self.connect_button.setEnabled(selectable and
                                        self.port_select.currentData() is not None)
         self.read_status_button.setEnabled(commands_available and state == "connected")
-        self.disconnect_button.setEnabled(commands_available and state in {"connected", "close_failed"})
+        self.disconnect_button.setEnabled(commands_available and state in {"connected", "close_failed", "faulted"})
         self.disconnect_button.setText("Retry close" if state == "close_failed" else "Disconnect")
-        self.run_button.setEnabled(self.mode.currentIndex() == 0 and simulation_available)
+        self.review_fault_button.setEnabled(commands_available and not busy and bool(fault) and
+                                            state in {"idle", "error"})
+        hardware_run_available = (self.worker is None and not self._hardware_running and
+                                  state == "connected" and not fault
+                                  and not self._closing)
+        self.run_button.setEnabled((self.mode.currentIndex() == 0 and simulation_available) or
+                                   (self.mode.currentIndex() == 1 and hardware_run_available))
 
     def operation(self):
         channels = [int(value.strip()) for value in self.channels.text().split(",")]
@@ -404,7 +437,10 @@ class ThresholdWindow(QMainWindow):
                     "port": candidate.port if candidate is not None else None,
                     "connection_state": (self.connection_worker.snapshot().state
                                          if self.connection_worker is not None else "idle"),
-                    "threshold_run_available": False,
+                    "threshold_run_available": (self.connection_worker is not None and
+                                                self.connection_worker.snapshot().state == "connected" and
+                                                not getattr(self.connection_worker.snapshot(), "fault", None)),
+                    "restoration_verification": "mandatory",
                 }
             self.details.setPlainText(json.dumps(data, indent=2))
             self.status.setText(f"Preview valid · {data['total_points']} DAC points · no output created")
@@ -414,10 +450,30 @@ class ThresholdWindow(QMainWindow):
             return None
 
     def start_run(self):
-        if self.worker is not None or self.mode.currentIndex() != 0:
+        if self.worker is not None or self._hardware_running:
             return
         operation = self.preview()
         if operation is None:
+            return
+        if self.mode.currentIndex() == 1:
+            worker = self.connection_worker
+            if (worker is None or worker.snapshot().state != "connected" or
+                    getattr(worker.snapshot(), "fault", None)):
+                return
+            try:
+                self._last_rows = ()
+                self._active_directory = Path(operation.scan.out_dir)
+                self.progress.setValue(0)
+                self._plot((), "HARDWARE · running threshold rates")
+                self._hardware_running = True
+                self._set_running(True)
+                self.status.setText("Hardware · preparing · mandatory restoration verification")
+                worker.run_threshold(operation)
+                self.timer.start()
+            except Exception as exc:
+                self._hardware_running = False
+                self._set_running(False)
+                self.status.setText(f"Could not start hardware scan: {exc}")
             return
         try:
             worker = self.worker_factory(operation, self.simulation())
@@ -440,59 +496,98 @@ class ThresholdWindow(QMainWindow):
         self.controls.setEnabled(not running)
         self.preview_button.setEnabled(not running)
         self.reopen_button.setEnabled(not running)
-        self.run_button.setEnabled(not running and self.mode.currentIndex() == 0)
+        self.run_button.setEnabled(not running and ((self.mode.currentIndex() == 0) or
+                                   (self.connection_worker is not None and
+                                    self.connection_worker.snapshot().state == "connected" and
+                                    not getattr(self.connection_worker.snapshot(), "fault", None))))
         self.cancel_button.setEnabled(running)
 
     def cancel_run(self):
         if self.worker:
             self.worker.cancel()
+        elif self.connection_worker is not None:
+            try:
+                self.connection_worker.cancel_threshold()
+            except Exception:
+                return
+        else:
+            return
+
+        if self.worker or self.connection_worker is not None:
             self.cancel_button.setEnabled(False)
-            self.status.setText("Cancelling · waiting for scan cleanup and session close…")
+            suffix = ("cleanup, restoration verification and disconnect…" if self._closing
+                      else "scan cleanup and restoration verification…")
+            self.status.setText(f"Cancelling · waiting for {suffix}")
 
     def poll_worker(self):
-        if self.worker is None:
+        if self.worker is not None:
+            snapshot = self.worker.snapshot()
+            mode = "SIMULATION"
+            alive = self.worker.is_alive
+        elif self.connection_worker is not None and self._hardware_running:
+            snapshot = self.connection_worker.threshold_snapshot()
+            mode = "HARDWARE"
+            # ConnectionWorker stays alive for review/retry after the one job.
+            alive = snapshot.outcome is None
+        else:
             return
-        snapshot = self.worker.snapshot()
         if snapshot.rows != self._last_rows:
             self._last_rows = snapshot.rows
-            self._plot(tuple(dict(row) for row in snapshot.rows), "SIMULATION · synthetic threshold rates")
+            title = "SIMULATION · synthetic threshold rates" if mode == "SIMULATION" else "HARDWARE · live threshold rates"
+            self._plot(tuple(dict(row) for row in snapshot.rows), title)
         if snapshot.event:
             event = snapshot.event
             self.progress.setRange(0, event.total_points)
             self.progress.setValue(event.completed_points)
             if self.cancel_button.isEnabled():
                 state = event.status
-                if state in {"completed", "cancelled", "failed", "disconnected"}:
+                if mode == "SIMULATION" and state in {"completed", "cancelled", "failed", "disconnected"}:
                     state = "closing session"
-                self.status.setText(f"Simulation · {state} · {event.completed_points}/{event.total_points} points")
-        if snapshot.outcome is None or self.worker.is_alive:
+                self.status.setText(f"{mode.title()} · {state} · {event.completed_points}/{event.total_points} points")
+        if snapshot.outcome is None or alive:
             return
-        self.worker.join()
-        self.worker = None
+        if self.worker is not None:
+            self.worker.join()
+            self.worker = None
         self.timer.stop()
         self._set_running(False)
+        self._hardware_running = False
         outcome = snapshot.outcome
         result = outcome.result
+        hardware_fault = (getattr(self.connection_worker.snapshot(), "fault", None)
+                          if mode == "HARDWARE" and self.connection_worker else None)
         problems = [p for p in (outcome.error, outcome.close_error) if p]
         if result:
             problems += result.cleanup_errors + result.persistence_errors
             if result.error:
                 problems.append(f"{type(result.error).__name__}: {result.error}")
-            terminal = "failed" if outcome.close_error else result.status
-            self.status.setText(f"SIMULATION · {terminal} · {result.points} points / {result.attempts} windows · "
+            terminal = "failed" if (outcome.close_error or hardware_fault) else result.status
+            verification = getattr(result, "verification", None)
+            verification_summary = (verification.as_dict() if hasattr(verification, "as_dict") else verification)
+            self.status.setText(f"{mode} · {terminal} · {result.points} points / {result.attempts} windows · "
                                 f"cleanup: {result.cleanup_status}")
             summary = {"status": terminal, "execution_mode": result.execution_mode,
                        "directory": str(self._active_directory), "points": result.points,
                        "attempts": result.attempts, "cleanup": result.cleanup_status,
+                       "verification": verification_summary,
                        "problems": problems, "warnings": result.warnings,
                        "display_events_coalesced": snapshot.coalesced_events,
                        "saved_data": "All completed windows and points are saved independently of display updates."}
             self.details.setPlainText(json.dumps(summary, indent=2))
         else:
-            self.status.setText("Simulation did not acquire data: " + "; ".join(problems))
+            self.status.setText(f"{mode.title()} did not acquire data: " + "; ".join(problems))
             self.details.setPlainText("\n".join(problems))
-        self.output.setText(_new_directory())
+        self.output.setText(_new_directory("simulation" if self.mode.currentIndex() == 0 else "hardware"))
+        self._update_connection_controls()
         if self._closing:
+            if mode == "HARDWARE":
+                # A queued worker shutdown owns the close path.  If the job
+                # faulted, leave the window open for its explicit review.
+                if outcome.error or outcome.close_error or hardware_fault or (result and
+                        (result.cleanup_errors or result.persistence_errors or
+                         result.status in {"failed", "disconnected"})):
+                    self._closing = False
+                return
             # Keep cleanup/storage failures reviewable instead of closing over them.
             if outcome.error or outcome.close_error or (result and
                     (result.cleanup_errors or result.persistence_errors or result.status in {"failed", "disconnected"})):
@@ -515,7 +610,8 @@ class ThresholdWindow(QMainWindow):
         self.canvas.draw_idle()
 
     def choose_output(self):
-        directory = QFileDialog.getExistingDirectory(self, "Choose parent for a new simulation run")
+        label = "simulation" if self.mode.currentIndex() == 0 else "hardware"
+        directory = QFileDialog.getExistingDirectory(self, f"Choose parent for a new {label} run")
         if directory:
             self.output.setText(str(Path(directory) / Path(_new_directory()).name))
 
@@ -526,7 +622,7 @@ class ThresholdWindow(QMainWindow):
             self.open_saved(Path(path))
 
     def open_saved(self, path):
-        if self.worker is not None:
+        if self.worker is not None or self._hardware_running:
             return
         try:
             saved = read_threshold_run(Path(path))

@@ -2,11 +2,65 @@
 
 ## Current checkpoint
 
+**RADIOROC 06 — Desktop hardware threshold workflow** is implemented on
+`feat/desktop-hardware-threshold`, based on `b10cf57`. Version remains `0.5.0`;
+packaging metadata and legacy entry points are unchanged.
+
+- The persistent `ConnectionWorker` owns the transport, device, shared
+  `ThresholdJob`, mandatory restoration verification, disconnect and close retry
+  on one thread. Hardware Run uses this owner rather than a competing worker.
+- Preview stays offline. Entering hardware mode defaults FPGA initialization
+  and ASIC defaults application off; their controls identify persistent changes.
+  Temporary scan settings are restored and independently verified.
+- Live points, cancellation, saved results and shutdown use the shared job.
+  Normal terminal delivery retains the connection after cleanup/verification.
+  Shutdown cancels and waits; a new job fault holds shutdown for visible review.
+- Job, cleanup, persistence, verification and close faults block another scan.
+  Disconnect and explicit fault-review acknowledgement are required before a
+  new connection. Failed close retains ownership for an explicit retry.
+- Reopening a manifest with failed/incomplete verification preserves its data
+  and shows an incomplete result, even if the primary scan completed/cancelled.
+
+Sol implemented/tested the owner, Terra implemented/tested the GUI, and Luna
+updated workflow documentation and the separate pending physical GUI card. The
+lead reviewed ownership/publication contracts and integrated saved-reader and
+installed-artifact checks. No hardware discovery/open/scan, environment diagnostic,
+persistent configuration write, push or change to `main` occurred.
+
+Validation on macOS ARM64 / Python 3.13:
+
+- `.venv-foundation/bin/python tools/check_development.py`: **117 offline tests**,
+  compile checks and all **15 legacy CLI help checks** passed. New coverage
+  includes same-thread session/job/verifier ownership, cancellation and queued
+  shutdown, fault latching/review, defensive snapshots, GUI gating and terminal
+  delivery order, and saved verification-fault visibility.
+- Source distribution and `0.5.0` wheel built with `python -m build --no-isolation`.
+  Installed core-only checks passed with Qt absent in `.venv-wheel-core`.
+  Installed GUI/plot checks passed outside the checkout using a temporary venv
+  with development dependency paths; the wheel itself was installed there.
+  The GUI check completed/reopened simulation and exercised the persistent
+  hardware job route with a fake transport and passing mandatory verification.
+- `git diff --check` passed. Logs and built artifacts remain local under
+  `/private/tmp/radioroc06-*`; no generated files or measurement data are committed.
+  The foundation editable installation and lab environment were preserved.
+
+Hardware state was not refreshed: the last physical evidence is RADIOROC 05
+below, whose historical port/status must not be treated as current. Native GUI
+hardware behavior and physical GUI restoration remain unvalidated. Fake transport
+tests establish software behavior only; word 60 semantics and analog performance
+remain outside this slice.
+
+Next: **RADIOROC 07 — Physical desktop threshold validation**, using
+`docs/hardware/desktop_threshold_validation.md`. Its fresh equipment summary and
+operator authorization are separate from the completed CLI card.
+
+## RADIOROC 05 — Physical threshold restoration checks
+
 The physical threshold restoration card passed on 2026-09-10 in
 **RADIOROC 05 — Physical threshold restoration checks**, on
 `test/physical-threshold-restoration`, based on authorization handoff `3c0f82a`
 and verifier implementation `4c6d254`. Package version remains `0.5.0`.
-Desktop hardware Run remains disabled; enabling it is the next bounded slice.
+Desktop hardware Run was disabled at that checkpoint; RADIOROC 06 above enables it.
 
 The lead was the sole software board operator, using the authorization recorded
 in the preceding handoff: powered bare board over USB, no SiPM/pulser, competing

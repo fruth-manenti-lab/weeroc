@@ -91,6 +91,20 @@ class ThresholdReaderTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             read_threshold_run(self.directory / "metadata.json")
 
+    def test_verification_fault_remains_visible_when_reopened(self):
+        self.write_csv([{"DAC": 0, "ch4": 1}, {"DAC": 5, "ch4": 2}, {"DAC": 10, "ch4": 3}])
+        for terminal in ("completed", "cancelled"):
+            for report in ({"status": "failed", "errors": ["ASIC mismatch"]},
+                           {"status": "incomplete"}, None):
+                with self.subTest(terminal=terminal, report=report):
+                    self.write_manifest(status=terminal, verification=report)
+                    saved = read_threshold_run(self.directory)
+                    self.assertEqual(saved.status, "incomplete")
+                    self.assertEqual(len(saved.rows), 3)
+                    self.assertTrue(any("verification did not pass" in w for w in saved.warnings))
+        self.write_manifest(verification={"status": "passed", "errors": []})
+        self.assertEqual(read_threshold_run(self.directory).status, "completed")
+
     def test_failed_run_surfaces_manifest_error(self):
         self.write_csv([{"DAC": 0, "ch4": 1}])
         self.write_manifest(status="disconnected", completed_points=1, error="TransportIOError: unplugged")

@@ -7,6 +7,7 @@ import threading
 import time
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 # Bootstrap the checkout package when discovery sees an older installed wheel.
 import radioroc_client  # noqa: F401
@@ -98,7 +99,7 @@ class ConnectionGuiTests(unittest.TestCase):
         config, session = self.sessions[0]
         self.assertEqual(config.port, "fake-control")
         self.assertEqual(window.firmware_status.text(), "0x05 (5)")
-        self.assertFalse(window.run_button.isEnabled())
+        self.assertTrue(window.run_button.isEnabled())
 
         session.status = "00001010"
         window.read_hardware_status()
@@ -112,6 +113,8 @@ class ConnectionGuiTests(unittest.TestCase):
         self.assertEqual(preview["selected_mode"], "hardware")
         self.assertNotIn("simulation", preview)
         self.assertEqual(preview["hardware"]["port"], "fake-control")
+        self.assertTrue(preview["hardware"]["threshold_run_available"])
+        self.assertEqual(preview["hardware"]["restoration_verification"], "mandatory")
 
         window.mode.setCurrentIndex(0)
         self.assertEqual(window.mode.currentIndex(), 1)
@@ -169,6 +172,54 @@ class ConnectionGuiTests(unittest.TestCase):
         self.assertIsNone(window.connection_worker)
         self.assertEqual(session.calls.count("close"), 2)
 
+    def test_hardware_run_uses_connection_worker_and_fault_requires_disconnected_review(self):
+        worker = FakeHardwareWorker()
+        window = self.make_window(discovery=lambda: [], session_factory=self.session_factory)
+        window.connection_worker = worker
+        window.mode.setCurrentIndex(1)
+        worker.state = "connected"
+        window._update_connection_controls()
+        self.assertTrue(window.run_button.isEnabled())
+        self.assertIn("hardware", window.output.text())
+
+        window.start_run()
+        self.assertEqual(worker.run_calls, 1)
+        self.assertEqual(worker.snapshot().state, "scanning")
+        self.assertFalse(window.reopen_button.isEnabled())
+        window.cancel_run()
+        self.assertEqual(worker.cancel_calls, 1)
+
+        worker.finish_fault()
+        window.poll_worker()
+        self.assertIn("failed", window.status.text())
+        self.assertFalse(window.run_button.isEnabled())
+        window.disconnect_hardware()
+        self.assertEqual(worker.snapshot().state, "idle")
+        self.assertTrue(window.review_fault_button.isEnabled())
+        window.review_hardware_fault()
+        self.assertIsNone(worker.snapshot().fault)
+
+        worker.state = "scanning"
+        window._hardware_running = True
+        window.close()
+        self.assertGreaterEqual(worker.shutdown_calls, 1)
+
+    def test_shutdown_consumes_hardware_terminal_before_releasing_stopped_worker(self):
+        worker = FakeHardwareWorker()
+        window = self.make_window()
+        window.connection_worker = worker
+        window.mode.setCurrentIndex(1)
+        worker.state = "connected"
+        window._update_connection_controls()
+        window.start_run()
+        worker.finish_fault()
+        worker.state = "stopped"
+        window._closing = True
+        window.poll_connection_worker()
+        self.assertIsNone(window.connection_worker)
+        self.assertIn('"verification"', window.details.toPlainText())
+        self.assertFalse(window._closing)
+
 
 class FakeSession:
     def __init__(self, *, status="00000101", read_error=None, entered=None,
@@ -198,6 +249,61 @@ class FakeSession:
         self.calls.append("close")
         if self.close_errors:
             raise self.close_errors.pop(0)
+
+
+class FakeHardwareWorker:
+    """UI seam: no transport or threshold job is created in this test."""
+
+    def __init__(self):
+        self.state = "idle"
+        self.fault = None
+        self.run_calls = self.cancel_calls = self.shutdown_calls = 0
+        self.outcome = None
+
+    @property
+    def is_alive(self):
+        return self.state != "stopped"
+
+    def start(self):
+        pass
+
+    def join(self, timeout=None):
+        pass
+
+    def snapshot(self):
+        return SimpleNamespace(state=self.state, ports=(), port="fake-control",
+                               status_word=5, error=None, close_error=None, fault=self.fault)
+
+    def run_threshold(self, operation):
+        self.run_calls += 1
+        self.state = "scanning"
+
+    def cancel_threshold(self):
+        self.cancel_calls += 1
+
+    def threshold_snapshot(self):
+        return SimpleNamespace(event=None, rows=(), coalesced_events=0, outcome=self.outcome)
+
+    def finish_fault(self):
+        result = SimpleNamespace(status="completed", points=0, attempts=0,
+                                 cleanup_status="restored", cleanup_errors=(),
+                                 persistence_errors=(), error=None, warnings=(),
+                                 execution_mode="hardware", verification={"status": "failed"})
+        self.outcome = SimpleNamespace(result=result, error=None, close_error=None)
+        self.state = "faulted"
+        self.fault = "restoration verification did not pass"
+
+    def disconnect(self):
+        self.state = "idle"
+
+    def review_fault(self):
+        self.fault = None
+
+    def shutdown(self):
+        self.shutdown_calls += 1
+        if self.state == "scanning":
+            self.cancel_threshold()
+        self.state = "stopped"
 
 
 if __name__ == "__main__":

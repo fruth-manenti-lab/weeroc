@@ -140,7 +140,7 @@ and [filelock](https://py-filelock.readthedocs.io/en/latest/).
 
 ## Session scope and handoffs
 
-This continuation is **RADIOROC 05 — Physical threshold restoration checks**. Number future
+This continuation is **RADIOROC 06 — Desktop hardware threshold workflow**. Number future
 handoffs sequentially and include the preceding chat label in `NEXT_SESSION.md`.
 
 Use one bounded delivery per chat: define its outcome, allowed modules, tests
@@ -276,7 +276,7 @@ trigger gain. Preview validates settings and shows persistent preparation versus
 temporary restoration without opening a session or creating files. Run starts a
 new simulation directory; the default path is under ignored `radioroc_runs/simulation`.
 Hardware mode supports the separate connection workflow below; threshold Run
-remains disabled in hardware mode.
+uses the owned hardware workflow rather than the simulation transport.
 
 The synthetic curve has configurable midpoint, width, plateau rate and channel
 spacing. Counts are deterministic and quantized to the selected counter window.
@@ -322,7 +322,30 @@ retains the session and ownership for an explicit retry; window close waits for
 release. No discovery runs automatically at startup. Simulation and hardware
 connection cannot run concurrently in one window.
 
-Hardware threshold Run remains disabled. Review and complete
-`docs/hardware/bare_board_threshold_validation.md` in a separate opt-in bench
-session before enabling physical scans. Connection tests use injected discovery
-and transports; installed-wheel checks remain offline.
+## Desktop hardware threshold workflow (RADIOROC 06)
+
+Hardware Run is implemented through the existing single `ConnectionWorker`
+session owner. The worker owns the connected device, submits the shared
+`ThresholdJob`, forwards live point/state events to the UI, performs cleanup and
+restoration verification, and closes the session. The UI never performs device
+I/O and cannot start a second connection or job while one is active. Preview
+remains offline and creates no session or run files.
+
+Hardware jobs must use conservative preparation (`initialize_fpga=False` and
+`apply_defaults=False`) unless a separately reviewed operation explicitly asks
+for those persistent changes. `verify_restoration=True` is mandatory for every
+hardware job. The verifier runs in the same owned session after cleanup; a
+mismatch, incomplete readback, cleanup/storage failure, or close failure is a
+visible fault. A fault blocks another scan until the operator disconnects and
+explicitly acknowledges review. The application does not automatically repair or
+retry device state. A failed close retains the session and ownership for an
+explicit retry; shutdown reports the failure and waits for bounded cleanup.
+
+The worker exposes live completed points, responsive cancellation during a long
+window and after a persisted point, truthful partial results, and saved-run
+reopening. Cancellation waits for cleanup and verification before terminal
+delivery; the connected session remains open until explicit Disconnect or
+window shutdown. Use fake transports for automated checks.
+Physical GUI validation is pending and is specified separately in
+`docs/hardware/desktop_threshold_validation.md`; it does not inherit the
+authorization or evidence from the earlier CLI card.

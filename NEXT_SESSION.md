@@ -1,50 +1,51 @@
-# RADIOROC 06 — Desktop hardware threshold workflow
+# RADIOROC 07 — Physical desktop threshold validation
 
-RADIOROC 05 completed the authorized physical threshold restoration card on
-`test/physical-threshold-restoration`, based on `3c0f82a` and verifier code
-`4c6d254`, version `0.5.0`. Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`,
-`DEVELOPMENT.md`, and `docs/hardware/bare_board_threshold_validation.md`.
-Verify the local branch/checkpoint and working tree before editing.
+RADIOROC 06 implements the desktop hardware threshold workflow on
+`feat/desktop-hardware-threshold`, based on `b10cf57`, version `0.5.0`.
+Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md`, and
+`docs/hardware/desktop_threshold_validation.md`. Verify the local checkpoint and
+working tree before editing or using equipment.
 
-Next task: enable the desktop hardware threshold workflow through the existing
-shared ThresholdJob and owned connection/session model. The GUI currently supports
-hardware connect/status/disconnect but keeps hardware Run disabled. Review the
-physical evidence and define the session ownership contract before implementing.
-Delegate bounded implementation/tests/docs to Sol/Terra and Luna with focused
-context and non-overlapping ownership; lead owns contracts and integration.
+Next task: review and, after fresh operator authorization, execute the bounded
+physical desktop threshold card. The previous authorization covered the completed
+RADIOROC 05 CLI card; it does not authorize new GUI scans or persistent writes.
+First summarize the exact new card and confirm the present equipment/ownership
+conditions. No broader acquisition, calibration, initialization or defaults writes.
 
-Physical card passed all four cases: T1/T2 two-point scans, cancellation during
-an enabled long-window phase, and cancellation after a persisted point. All
-130 ASIC rows and FPGA 0/1/6 matched; cleanup and close succeeded. Evidence stays
-ignored at `radioroc_runs/physical_threshold_20260910T042911Z/`. Cancellation used
-process-local SIGINT instrumentation around the real CLI; see the card for phase
-evidence and limitations. No production source changed in RADIOROC 05.
+The desktop now uses one persistent ConnectionWorker for connect/status, hardware
+ThresholdJob, mandatory restoration verification and disconnect. Normal job or
+Cancel completion keeps the session open after cleanup/verification. Shutdown
+requests cancellation and releases the session after cleanup; a newly discovered
+job fault holds shutdown for review. Faults block scans/reconnect until explicit
+disconnect and acknowledgement; failed close retains ownership for retry.
+Preview remains offline. Hardware entry defaults initialization/defaults off.
 
-Acceptance checks for this next slice:
+Acceptance for this physical slice:
 
-- One worker/session owner handles connected hardware jobs, cleanup, restoration
-  verification and disconnect; no UI-thread device logic or competing workers.
-- Preview stays offline. Distinguish temporary changes from explicit persistent
-  preparation; keep conservative hardware defaults (skip FPGA init, no defaults
-  application), and require restoration verification for hardware jobs.
-- Support live points, responsive cancel, truthful errors/partial results, saved
-  run reopening and safe shutdown. Block overlapping connection/job commands.
-- Treat mismatch, incomplete readback, cleanup/storage/close failure as a visible
-  fault that prevents another scan until reviewed. Never silently repair it.
-- Use fake transports for automated checks; run
-  `.venv-foundation/bin/python tools/check_development.py`. Check installed artifacts after packaging changes.
-  Physical GUI validation requires a separately summarized card within the new
-  scope. The previous authorization covered the completed CLI card; do not infer
-  authorization for broader scans or persistent initialization/default writes.
-- Keep data/vendor files/environments local and intact. Commit explicit source/docs
-  paths locally on a bounded branch; do not push or change `main`.
-- Record checks, limitations, physical hardware state and one next task, and
-  increment the handoff number.
+- One designated lead operates the board; all smaller-model workers use saved
+  evidence, fake transports or documentation. Prefer Sol/Terra for bounded code
+  or evidence review, Luna for docs; give focused context and concise outputs.
+- Refresh identity/control port/status. Historical USB `RD3_32`, port
+  `/dev/cu.usbserial-RD3_320` and status 5 are not current evidence.
+- Follow the separate GUI card exactly: powered bare board, USB only, no SiPM or
+  pulser; T1/T2 channel 4, DAC 0..1 step 1, 10 ms, one average, masks on,
+  Ctest off, gain unchanged, no FPGA initialization/default application.
+- Record live/terminal GUI results, manifests/CSV, exact snapshots and verifier
+  results, cancellation during a long window and after a persisted point, and
+  close-during-run behavior. UI running alone does not prove counter-window
+  timing; establish instrumentation evidence or state the limitation.
+- Stop on mismatch/incomplete readback, cleanup/storage/close failure or other
+  unexpected behavior. Never silently repair configuration or continue scans.
+- Save evidence under ignored `radioroc_runs`; preserve all data and environments.
+  Run offline development checks for any source fixes, and installed-wheel
+  checks for packaging changes. Never enumerate hardware as an offline test.
+- Commit explicit source/docs paths locally; do not push or change `main`.
+  Record checks, limitations, hardware state and one next task; increment the
+  handoff number. If equipment/authorization is unavailable, keep the card pending.
 
-Historical port/status observations must be refreshed for any future hardware
-check. Only the designated lead accesses hardware; workers remain offline.
-Word 60 readback semantics, analog performance, wider scan configurations,
-acquisition/autocalibration migration, automatic interface detection, register
-editing, Windows parity expansion, Linux USB and bundling remain separate tasks.
+RADIOROC 05 evidence remains at
+`radioroc_runs/physical_threshold_20260910T042911Z/`. Word 60 readback semantics,
+analog performance, wider scans, acquisition/calibration migration, register
+editing, platform parity and bundling remain separate tasks.
 
-The preceding chat name is **RADIOROC 05 — Physical threshold restoration checks**.
+The preceding chat name is **RADIOROC 06 — Desktop hardware threshold workflow**.
