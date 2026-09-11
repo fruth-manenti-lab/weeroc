@@ -1,51 +1,36 @@
-# RADIOROC 07 — Physical desktop threshold validation
+# RADIOROC 08 — Investigate desktop pre-scan timeout
 
-RADIOROC 06 implements the desktop hardware threshold workflow on
-`feat/desktop-hardware-threshold` at `e6cddf4`, based on `b10cf57`, version `0.5.0`.
-Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md`, and
-`docs/hardware/desktop_threshold_validation.md`. Verify the local checkpoint and
-working tree before editing or using equipment.
+RADIOROC 07 is stopped after the first long-window GUI case faulted before a
+complete pre-scan snapshot. Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`,
+`DEVELOPMENT.md`, and `docs/hardware/desktop_threshold_validation.md`. Review
+the saved evidence under
+`radioroc_runs/physical_desktop_20260911T015835Z/` offline.
 
-Next task: review and, after fresh operator authorization, execute the bounded
-physical desktop threshold card. The previous authorization covered the completed
-RADIOROC 05 CLI card; it does not authorize new GUI scans or persistent writes.
-First summarize the exact new card and confirm the present equipment/ownership
-conditions. No broader acquisition, calibration, initialization or defaults writes.
+The branch is `feat/desktop-hardware-threshold`, based on handoff `086d304`
+and implementation `e6cddf4`, version `0.5.0`. RADIOROC 07 changes documentation
+only. Verify the current local commit and working tree before editing.
 
-The desktop now uses one persistent ConnectionWorker for connect/status, hardware
-ThresholdJob, mandatory restoration verification and disconnect. Normal job or
-Cancel completion keeps the session open after cleanup/verification. Shutdown
-requests cancellation and releases the session after cleanup; a newly discovered
-job fault holds shutdown for review. Faults block scans/reconnect until explicit
-disconnect and acknowledgement; failed close retains ownership for retry.
-Preview remains offline. Hardware entry defaults initialization/defaults off.
+Next task: investigate the pre-scan timeout and improve local phase-wait fault
+detection/evidence. Use saved JSON, event logs, screenshots, fake transports,
+and offline tests only. Do not access hardware, auto-retry scans, or change
+device configuration. Also assess the stale saved-result banner visible in the
+T2 terminal capture. End with a concrete status-only recovery card; physical
+recovery requires fresh operator authorization.
 
-Acceptance for this physical slice:
+Acceptance for RADIOROC 08:
 
-- One designated lead operates the board; all smaller-model workers use saved
-  evidence, fake transports or documentation. Prefer Sol/Terra for bounded code
-  or evidence review, Luna for docs; give focused context and concise outputs.
-- Refresh identity/control port/status. Historical USB `RD3_32`, port
-  `/dev/cu.usbserial-RD3_320` and status 5 are not current evidence.
-- Follow the separate GUI card exactly: powered bare board, USB only, no SiPM or
-  pulser; T1/T2 channel 4, DAC 0..1 step 1, 10 ms, one average, masks on,
-  Ctest off, gain unchanged, no FPGA initialization/default application.
-- Record live/terminal GUI results, manifests/CSV, exact snapshots and verifier
-  results, cancellation during a long window and after a persisted point, and
-  close-during-run behavior. UI running alone does not prove counter-window
-  timing; establish instrumentation evidence or state the limitation.
-- Stop on mismatch/incomplete readback, cleanup/storage/close failure or other
-  unexpected behavior. Never silently repair configuration or continue scans.
-- Save evidence under ignored `radioroc_runs`; preserve all data and environments.
-  Run offline development checks for any source fixes, and installed-wheel
-  checks for packaging changes. Never enumerate hardware as an offline test.
-- Commit explicit source/docs paths locally; do not push or change `main`.
-  Record checks, limitations, hardware state and one next task; increment the
-  handoff number. If equipment/authorization is unavailable, keep the card pending.
+- Confirm the timeout path, phase-marker gap, fault latching, disconnect and
+  shutdown evidence from the saved run without touching the board.
+- Keep harness fixes local unless production changes are independently justified;
+  preserve old CLI entry points and shared behavior.
+- Run the relevant offline development checks; do not run hardware discovery or
+  the environment diagnostic script.
+- Record checks, limitations, and one status-only recovery task. No physical
+  retry, wider scan, repair, persistent write, push, or change to `main`.
 
-RADIOROC 05 evidence remains at
-`radioroc_runs/physical_threshold_20260910T042911Z/`. Word 60 readback semantics,
+RADIOROC 07 evidence and the exact physical procedure remain in
+`docs/hardware/desktop_threshold_validation.md`. Word 60 readback semantics,
 analog performance, wider scans, acquisition/calibration migration, register
 editing, platform parity and bundling remain separate tasks.
 
-The preceding chat name is **RADIOROC 06 — Desktop hardware threshold workflow**.
+The preceding chat name is **RADIOROC 07 — Physical desktop threshold validation**.

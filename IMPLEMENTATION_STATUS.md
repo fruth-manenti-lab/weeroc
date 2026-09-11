@@ -1,5 +1,77 @@
 # Implementation status
 
+## RADIOROC 07 — Physical desktop threshold validation (STOPPED)
+
+On 2026-09-11, the user confirmed the powered bare board, USB only, no
+SiPM/pulser and competing software closed, and authorized the lead as sole
+software operator for the five-case desktop card. Starting tree was clean on
+`feat/desktop-hardware-threshold` at handoff `086d304` (implementation `e6cddf4`).
+Sol prepared a local harness and reviewed saved evidence; workers used no hardware.
+No production source or packaging changed; version remains `0.5.0`.
+
+Native macOS Cocoa GUI discovery/connect/repeat status/disconnect passed using
+`.venv-foundation`. Fresh identity was `usb:0403:6010:serial:RD3_32`, control port
+`/dev/cu.usbserial-RD3_320`, baud 115200, timeout 0.5 s; both status reads returned
+5. Status is not a decoded firmware version. Five actual offscreen GUI previews
+passed without creating a worker or run directory before physical execution.
+Config was the explicit `configs/radio_default_i2c.csv`, SHA-256
+`8ccad20a95c0564e3465a32791348035defeed0231f63c8f7f5702dba13d195e`.
+
+| Native GUI case | Points / windows | Result | Verification |
+| --- | --- | --- | --- |
+| T1, channel 4, DAC 0..1, 10 ms | 2 / 2 | completed | passed |
+| T2, channel 4, DAC 0..1, 10 ms | 2 / 2 | completed | passed |
+| T1, DAC 0, 60000 ms, intended in-window Cancel | 0 / 0 | failed before measurement | incomplete |
+| T1, DAC 0..2, 1000 ms, Cancel after first point | — | not executed | — |
+| T1, DAC 0, 60000 ms, close during run | — | not executed | — |
+
+All submitted cases used one average, masks on, Ctest off, gain unchanged,
+FPGA initialization/default application off and mandatory verification. Normal
+T1/T2 terminal displays and saved reopening passed; the session stayed connected.
+Their 130 ASIC rows exactly match snapshot/expected/observed values. FPGA words
+0/1/6 were `00111111` / `00000000` / `00000000`, matching both verifier passes.
+Manifest/CSV counts agree; all four measured rates were 0 Hz. No cleanup,
+persistence or verifier errors occurred in these two cases.
+
+The third job recorded `TransportTimeoutError: no response from
+/dev/cu.usbserial-RD3_320 within 0.5s; request not retried` during snapshot
+acquisition. Status, preparation and FPGA 0/1/6 reads completed; the 130-row
+ASIC `read_fifo` did not return a complete snapshot. No trigger-mask, DAC,
+channel-selection or counter operation was reached. The exact failed serial
+request within `read_fifo` is not recorded. Cleanup commands succeeded (`restored`), but verification was
+`incomplete` because all snapshot entries were absent. This does not establish
+verified restoration. No counter-window phase marker or GUI Cancel request
+occurred; the intended cancellation test did not reach measurement.
+
+The GUI latched the fault. The local harness was still waiting for its phase
+marker, so the lead interrupted that wait with SIGINT after the job had already
+failed. Its error handler explicitly disconnected through the owning worker:
+state became idle with port/status cleared and no close error, then stopped on
+window shutdown; process exit was 1. This SIGINT is not GUI cancellation evidence.
+No subsequent scan, repair, initialization/default write or retry occurred.
+Hardware configuration was not re-verified after the fault.
+
+Evidence remains local and ignored under
+`radioroc_runs/physical_desktop_20260911T015835Z/`: setup and previews, native
+widget screenshots/text, timestamped GUI/worker records, three manifests and CSV
+pairs, console log, exact local harnesses, two-run equality audit, stopped
+summary and SHA-256 inventory. Native controls were driven programmatically;
+there was no continuous screen recording or independent electrical observation.
+Completed plots were captured, but intermediate point display was not separately
+captured. An observed UI issue remains: starting hardware Run after reopening a
+saved result leaves the prior saved-result banner visible over the new plot.
+The harness phase wait also needs immediate fault detection before future use.
+
+Checks: actual GUI previews, native connection preflight, two successful physical
+runs/reopens, exact offline saved-data audit, and `git diff --check`. No new
+production-source suite or wheel check was needed; prior 117-test evidence below
+is unchanged. Main, lab environments and all measurements were preserved.
+
+Next: **RADIOROC 08 — Investigate desktop pre-scan timeout**. Review the saved
+failure offline, improve fault/evidence handling, and prepare a bounded
+status-only recovery card before further physical access. The timeout cause is
+unresolved; cancellation and close-during-run acceptance remain pending.
+
 ## Current checkpoint
 
 **RADIOROC 06 — Desktop hardware threshold workflow** is implemented on

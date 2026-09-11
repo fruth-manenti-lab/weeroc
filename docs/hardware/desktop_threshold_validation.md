@@ -1,4 +1,4 @@
-# Desktop hardware threshold validation card (PENDING)
+# Desktop hardware threshold validation card (PENDING / STOPPED)
 
 This card is pending designated-operator review and execution. It covers the
 desktop `ConnectionWorker` hardware workflow only. The earlier
@@ -76,6 +76,56 @@ the exact settings.
 Do not start a wider scan, change Ctest or gain, apply defaults, initialize the
 FPGA, connect detector/pulser hardware, or claim analog/detector performance.
 
-**Disposition:** PENDING until the designated operator records fresh GUI
-evidence for T1, T2, both cancellation cases, close during a long scan, safe
-shutdown, and any exercised fault/close-retry path.
+## RADIOROC 07 stopped execution record
+
+On 2026-09-11, the designated lead was the sole board operator. The authorized
+setup was a powered bare board over USB only, with no SiPM or pulser and no
+competing software. Evidence is preserved locally and ignored under
+`radioroc_runs/physical_desktop_20260911T015835Z/`. The configuration hash was
+`8ccad20a95c0564e3465a32791348035defeed0231f63c8f7f5702dba13d195e`.
+
+Native Cocoa preflight discovery, connect, repeated status reads and disconnect
+passed. It found USB identity `usb:0403:6010:serial:RD3_32`, control port
+`/dev/cu.usbserial-RD3_320`, and status word `5`; the status word is recorded
+without a firmware interpretation.
+
+The actual GUI was driven by the local harness. T1 and T2 normal DAC 0..1,
+channel 4, 10 ms cases each completed 2 points / 2 windows, restored the
+temporary configuration, retained the connection, passed mandatory verification,
+and reopened successfully. Each
+verification matched the exact 130 ASIC rows and FPGA words 0/1/6
+`00111111` / `00000000` / `00000000`; all observed rates were 0 Hz. The T2
+terminal screenshot also retains the previous T1 saved-result banner while
+showing the correct T2 live plot/details. This is an evidence/UI presentation
+issue for offline investigation, not a completed physical acceptance criterion.
+
+The next T1 case used DAC 0 and a 60000 ms window. It failed at
+2026-09-11 02:07:02.014 UTC, after about 0.639 s, with
+`TransportTimeoutError` after the 0.5 s
+transport timeout, before a complete snapshot: 0 points, 0 windows, no
+counter-window marker, and incomplete verification. No GUI Cancel was
+requested, so this is not cancellation evidence. The lead interrupted the
+harness with SIGINT at 02:07:27.651 UTC while it waited for a marker after the
+board fault had already finished. The emergency GUI Disconnect then succeeded with idle
+`port=None` and `close_error=None`; shutdown stopped the worker and the process
+exited 1. No later cases, retry, repair, wider scan, or close-during-run case
+was attempted.
+
+Offline audit shows preparation succeeded and FPGA words 0/1/6 were read;
+the timeout occurred during the 130-row ASIC `read_fifo` before its snapshot
+was assigned. No trigger-mask, DAC, channel or counter operation was reached.
+Outer cleanup's word-60 idle write and word-0 restore succeeded, but the
+verifier remained incomplete with all 3 FPGA and 130 ASIC expected snapshot
+entries missing. The saved evidence does not identify which underlying device
+request caused the timeout.
+
+The card remains pending/stopped. The successful T1/T2 normal cases are
+recorded physical evidence, but the two cancellation cases and successful
+close-during-run acceptance remain untested. Explicit Disconnect and shutdown
+after the fault did succeed. The failure leaves restoration verification
+incomplete because the required pre-scan snapshot was incomplete.
+
+**Disposition:** STOPPED after the first long-window transport fault. Do not
+claim cancellation or close-during-run acceptance and do not auto-retry scans.
+Next work is offline diagnosis and improved local phase-wait fault detection
+and evidence, followed by a concrete status-only recovery card.
