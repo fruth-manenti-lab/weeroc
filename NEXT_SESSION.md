@@ -1,52 +1,57 @@
-# RADIOROC 12 — Decide and authorize the next physical step
+# RADIOROC 13 — Decide and authorize the next hardware slice
 
 Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md`,
-`CROSS_PLATFORM_REBUILD_PLAN.md`, and `docs/hardware/desktop_status_recovery.md`.
-The preceding chat is **RADIOROC 11 — Evidenced status-only re-verification**.
+`CROSS_PLATFORM_REBUILD_PLAN.md`, `docs/hardware/desktop_status_recovery.md`,
+and `docs/hardware/desktop_threshold_validation.md`. The preceding chat is
+**RADIOROC 12 — Desktop threshold validation card complete**.
 
 Branch: `feat/desktop-hardware-threshold`, version `0.5.0`. Verify current
-commit and working tree. RADIOROC 11 reran the RADIOROC 09 status-only harness
-after the operator's reported power-cycle recovery, with fresh authorization
-and a pre-Connect USB-presence check. It **passed**: two matching status-100
-reads (value 5) and a clean Disconnect/shutdown, meeting the status-only
-card's acceptance criteria for the first time since the RADIOROC 07 fault.
-Evidence is local under `radioroc_runs/physical_status_20260911T070909Z/`.
-Source hashes for the transport/connection-worker code are unchanged from the
-faulting run, so the recovery is attributed (as support, not proof) to the
-operator's power-cycle rather than a code fix.
+commit and working tree. RADIOROC 12 reran the full (unmodified)
+`desktop_threshold_validation.md` card after RADIOROC 11's status-only
+recovery, and **all five required cases passed**, including the two
+cancellation cases and the close-during-run case that RADIOROC 07 never
+reached: `cleanup=restored` and `verification.status=passed` (exact
+expected/observed match against FPGA words 0/1/6 and all 130 ASIC rows) for
+every case. Evidence is local under
+`radioroc_runs/physical_desktop_20260911T075002Z/`. Source hashes confirm no
+code changed since RADIOROC 07 — the fix is attributed to the operator's
+power-cycle (RADIOROC 10/11), not a software change.
 
-What remains unverified: configuration restoration after the RADIOROC 07 fault
-(the earlier interrupted `t1_cancel_window` job's cleanup was recorded as
-"restored" but never independently confirmed by readback), scan/threshold
-behavior on the recovered board, and whether the recovery is durable (only one
-status-only pass has been run since the power-cycle).
+The desktop hardware threshold workflow's originally-required case set is now
+fully evidenced on a bare board. Everything still untested and out of scope
+for every card so far: wider DAC/channel/scan ranges, Ctest/gain variation,
+FPGA initialization/defaults, and any detector (SiPM or pulser) connection —
+none of that has physical evidence yet on this branch.
 
-Next bounded task: with the designated operator, decide the next physical
-step and get fresh, explicit authorization for exactly that scope before doing
-anything. Reasonable options, in increasing order of scope:
+Next bounded task: with the designated operator, choose and authorize the
+next concrete hardware slice. Do not default to the largest option. Candidates
+to put to the operator, smallest scope first:
 
-1. A second status-only pass after some idle time, to check the recovery is
-   stable and not itself intermittent.
-2. A bounded physical threshold-scan validation (the option already queued in
-   `IMPLEMENTATION_STATUS.md`'s general backlog — "physical threshold
-   restoration checks") now that status communication is evidenced-recovered.
-3. Further offline work only (no new hardware access) if the operator wants
-   more confidence first.
+1. A modest wider-range DAC scan on the still-bare board (e.g. a few more DAC
+   points, still no detector), to build confidence before real signal input.
+2. Multi-channel behavior (still bare board) if the current cards only ever
+   exercised channel 4.
+3. First detector connection (SiPM) for a real dark-count/threshold run —
+   materially larger scope: new safety considerations (bias voltage, ESD,
+   detector damage risk) that none of the existing cards cover. This needs a
+   new card written and reviewed before authorization, not just a rerun of an
+   existing script.
+4. Non-hardware work instead: e.g. reviewing/integrating local branches for
+   publishing, or expanding the Windows-parity inventory (both already queued
+   in `IMPLEMENTATION_STATUS.md`'s "Next bounded tasks" backlog).
 
-Do not default to the largest-scope option without the operator's explicit
-choice. Whatever is chosen, follow the same discipline as RADIOROC 09-11:
-confirm board/app preconditions, get an explicit authorization statement
-(operator, host, UTC start time, scope), run through a bounded, evidenced
-harness (reuse/extend existing scripts under `radioroc_runs/` rather than
-writing new ones from scratch where they already fit), and stop immediately on
-any error or unexpected value rather than retrying or improvising.
+Whatever is chosen, follow the RADIOROC 09-12 discipline: confirm
+preconditions, get an explicit authorization statement (operator, host, UTC
+start time, scope), reuse/extend an existing bounded, evidenced harness where
+one already fits, and stop immediately on any error or unexpected value.
 
-Acceptance: the chosen next step is authorized, run (or explicitly deferred),
-and its outcome — pass, stop, or offline-only findings — is recorded with the
-same evidence rigor as RADIOROC 09-11 in both `IMPLEMENTATION_STATUS.md` and
-this file, along with the next task. No ASIC/FIFO access, verifier, scan,
-configuration write, defaults, repair, or power-cycle beyond what is
-explicitly authorized for that exact action; no push or change to `main`. Use
-a smaller-model agent for bounded, well-scoped pieces (drafting an evidence
-checklist, adapting a harness script offline) while the lead retains protocol
-reasoning, authorization tracking, and the physical-run decision itself.
+Acceptance: the chosen next step is authorized, run (or explicitly deferred
+in favor of non-hardware work), and its outcome is recorded with the same
+evidence rigor as RADIOROC 09-12 in both `IMPLEMENTATION_STATUS.md` and this
+file, along with the next task. No ASIC/FIFO access, verifier, scan,
+configuration write, defaults, repair, power-cycle, or detector connection
+beyond what is explicitly authorized for that exact action; no push or change
+to `main`. Use a smaller-model agent for bounded, well-scoped pieces (drafting
+a new card's text, an evidence checklist, offline script prep) while the lead
+retains protocol reasoning, authorization tracking, and the physical-run
+decision itself.

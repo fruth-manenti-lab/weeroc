@@ -1,5 +1,41 @@
 # Implementation status
 
+## RADIOROC 12 — Desktop threshold validation card complete (PASSED)
+
+Continuation on `feat/desktop-hardware-threshold` at `33fb47a26323b6babc29ff8b8b717abd4fcdb81f`
+(clean tree before this run). With preconditions confirmed (powered bare
+board, no SiPM/pulser, no competing software) and explicit authorization to
+run `docs/hardware/desktop_threshold_validation.md`'s full case set exactly as
+written, the lead reran the unmodified RADIOROC 07 harness
+(`radioroc07_gui_card.py`, byte-identical) as sole software operator.
+
+All five required cases passed: `t1_normal`, `t2_normal` (2/2 points each, as
+before), and — the exact scope RADIOROC 07 never reached —
+`t1_cancel_window` (cancel during a 60000 ms window), `t1_cancel_after_point`
+(cancel after one persisted point, 1000 ms window), and `t1_close_window`
+(native window closed mid-scan, 60000 ms window). Every case reported
+`cleanup.status == "restored"` and `verification.status == "passed"` with
+empty mismatches/missing/errors against the expected FPGA words 0/1/6 and all
+130 ASIC snapshot rows; the harness itself raises on any mismatch, so these are
+checked results, not self-reports. The worker reached `stopped` cleanly with
+no `close_failed` state at any point. `source_provenance.json` for this run
+confirms the transport/threshold-job source is unchanged from RADIOROC 07, so
+the successful outcome is attributable to the board/bridge recovery
+(RADIOROC 11), not a code change.
+
+Evidence (77 files) is local and ignored under
+`radioroc_runs/physical_desktop_20260911T075002Z/`. This completes the
+desktop threshold validation card's required case set for the first time.
+Not covered: wider DAC/scan ranges, Ctest/gain variation, FPGA
+initialization/defaults, or any detector (SiPM/pulser) connection — the board
+remained bare throughout, and each of those needs its own bounded,
+separately authorized card. No push or change to `main` occurred.
+
+Next: with the designated operator, decide the next bounded hardware slice —
+for example a small wider-range DAC scan, or moving toward first detector
+(SiPM) connection — and get fresh, exact-scope authorization before running
+it, following the same discipline as RADIOROC 09-12.
+
 ## RADIOROC 11 — Evidenced status-only re-verification (PASSED)
 
 Continuation on `feat/desktop-hardware-threshold` at `b4706777fed7a8380dc5baa8f84dc683cb630a62`
@@ -700,13 +736,18 @@ remain tracked migration concerns. Do not mix workflows on one session.
 
 ## Next bounded tasks
 
-1. Review the updated card with the designated operator and perform the physical
-   threshold restoration checks described in `NEXT_SESSION.md`.
+1. Done as of RADIOROC 12: physical threshold restoration checks (including
+   both cancellation cases and close-during-run) passed on the desktop GUI
+   workflow with independent readback verification. See RADIOROC 12 above and
+   `docs/hardware/desktop_threshold_validation.md`.
 2. Review/integrate the local branches and run configured CI when publishing is
    authorized; check the intended Git author identity before publication.
 3. Expand the Windows parity inventory into control-level acceptance criteria.
-4. After reviewed physical threshold snapshot/restore checks pass, enable the
-   desktop hardware threshold workflow in its own bounded slice.
+4. Done: the desktop hardware threshold workflow is enabled (`e6cddf4`) and its
+   full required case set now has physical evidence (RADIOROC 12). Remaining
+   desktop-hardware work is wider DAC/scan ranges, Ctest/gain variation, and
+   any detector (SiPM/pulser) connection — each needs its own bounded,
+   separately authorized card.
 
 At each checkpoint, record the commit, checks, hardware state, limitations and
 one next task. Move unrelated discoveries into this backlog.

@@ -1,9 +1,12 @@
-# Desktop hardware threshold validation card (PENDING / STOPPED)
+# Desktop hardware threshold validation card (RADIOROC 12 — PASSED, all cases)
 
-This card is pending designated-operator review and execution. It covers the
-desktop `ConnectionWorker` hardware workflow only. The earlier
-`bare_board_threshold_validation.md` records RADIOROC 05 CLI evidence; that
-authorization and evidence do not authorize these GUI scans.
+**State: PASSED.** All five required GUI cases (T1, T2, cancel-in-window,
+cancel-after-point, close-during-run) completed with `cleanup=restored` and
+`verification.status=passed` (exact expected/observed match) on 2026-09-11.
+See "RADIOROC 12 execution record" below. This card covers the desktop
+`ConnectionWorker` hardware workflow only. The earlier
+`bare_board_threshold_validation.md` records RADIOROC 05 CLI evidence,
+separate from this GUI authorization.
 
 ## Setup and preflight
 
@@ -139,3 +142,41 @@ with offline regression coverage. See `IMPLEMENTATION_STATUS.md` for checks.
 The physical card stays stopped. The next bounded procedure is
 [status-only recovery](desktop_status_recovery.md), requiring fresh operator
 authorization; it does not authorize resuming these scan cases.
+
+## RADIOROC 12 execution record
+
+On 2026-09-11, after RADIOROC 11's evidenced status-only recovery, the user
+confirmed the preconditions (powered bare board, no SiPM/pulser, no competing
+software) and authorized rerunning this exact card, unmodified, via the
+existing `radioroc07_gui_card.py` harness (same script used for the RADIOROC 07
+attempt, byte-identical). The lead was sole software operator. Evidence is
+local and ignored under `radioroc_runs/physical_desktop_20260911T075002Z/`.
+
+The harness ran the full sequence: offline preview, connect/status (status 5),
+`t1_normal` and `t2_normal` (2 points/2 windows each, as in RADIOROC 07),
+`t1_cancel_window` (DAC 0..0, 60000 ms window, Cancel requested after the
+instrumented long-window marker fired), `t1_cancel_after_point` (DAC 0..2,
+1000 ms window, Cancel requested after the first point was visibly persisted),
+an explicit Disconnect/reconnect between the fourth and fifth case, and
+`t1_close_window` (60000 ms window, native window closed while scanning).
+
+All five cases passed. For every case, `cleanup.status == "restored"` with no
+cleanup errors, and `verification.status == "passed"` with empty
+`mismatches`/`missing`/`errors` against the expected FPGA words 0/1/6 and all
+130 ASIC snapshot rows. The two cancellation cases and the close-during-run
+case — the exact scope left untested when RADIOROC 07 stopped — are now
+positively verified: cancellation during a long counter window, cancellation
+after a completed point, and window-close during an active scan all leave the
+board's temporary configuration independently confirmed restored, not just
+self-reported. The harness script itself raises on any mismatch before
+declaring a case passed, so no result here is inferred without that check.
+The worker reached `stopped` cleanly at the end with no close error and no
+`close_failed` state at any point; `git status`/source hashes recorded in
+`source_provenance.json` for this run confirm the transport/threshold-job code
+is unchanged from RADIOROC 07.
+
+This completes the required case set defined earlier in this document. Not
+covered by this card, still requiring separate authorization: wider DAC/scan
+ranges, Ctest/gain variation, FPGA initialization/defaults, detector
+(SiPM/pulser) connection, and any analog/detector performance claim — the
+board remained bare throughout.
