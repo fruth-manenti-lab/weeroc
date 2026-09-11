@@ -1,19 +1,18 @@
-# Desktop status-only recovery card (RADIOROC 09/10)
+# Desktop status-only recovery card (RADIOROC 09/10/11)
 
-**State: RECOVERED by an operator power-cycle, outside this card's bounded
-harness.** Connect's first status-100 request timed out on 2026-09-11 at
-05:16:23 UTC (RADIOROC 09). The designated operator power-cycled the board
-immediately afterward and reports a subsequent native-GUI Connect succeeded,
-firmware status `0x05` (5) on `/dev/cu.usbserial-RD3_320` (operator-provided
-screenshot; see "Operator power-cycle recovery" below). This was not run
-through the bounded evidence harness used elsewhere in this document, so no
-saved run directory, timestamps, or request-level trace exist for it, and the
-two-read acceptance defined below is still not confirmed by that standard.
-Prior stopped-card evidence remains local under
-`radioroc_runs/physical_status_20260911T051700Z/`; see `IMPLEMENTATION_STATUS.md`.
-Any further physical access (including the "RADIOROC 11 candidate" card below,
-or resuming the bounded two-read acceptance sequence) still requires fresh,
-explicit authorization for that exact action.
+**State: PASSED under the bounded evidence harness (RADIOROC 11).** After the
+RADIOROC 09 timeout (05:16:23 UTC) and the operator's reported power-cycle
+recovery, the lead ran this exact status-only card end-to-end at
+2026-09-11T07:09:24-07:09:26 UTC: fresh candidate refresh/select, Connect
+(status-100 read #1, value 5), one gated repeat (read #2, value 5), explicit
+Disconnect, then shutdown, with no error and no close error. This meets the
+"Acceptance" criteria defined below. A pre-Connect USB enumeration snapshot
+(`system_profiler SPUSBDataType`, no port opened) confirmed the board was
+present beforehand. Evidence is local under
+`radioroc_runs/physical_status_20260911T070909Z/`. This still does not accept
+configuration restoration, ASIC/FPGA readback, scan behavior, cancellation, or
+close-during-run behavior; any further physical access for those still
+requires fresh, explicit authorization for that exact action.
 
 This card is a
 read-only recovery check after the RADIOROC 07 desktop pre-scan fault, reviewed
@@ -182,12 +181,43 @@ before the fault, strongly supports **H1** from the RADIOROC 10 comparison
 below (the board or USB bridge was left in a state that required a power-cycle
 to clear) over **H2** (an unrelated transient/environmental fault). This is
 support, not proof: no independent control (for example, retrying without a
-power-cycle first) was run, and the "RADIOROC 11 candidate" card proposed below
-was written specifically to test this discrimination in a bounded, evidenced
-way. Its USB-presence-before-Connect step is now less critical given this
-result, but the card is still worth running under the bounded harness if
-further physical access is authorized, so the record has verified timestamps,
-a captured repeat status read, and a clean Disconnect/shutdown.
+power-cycle first) was run. The "RADIOROC 11 candidate" card below was written
+specifically to test this discrimination in a bounded, evidenced way, and was
+in fact run next (see "RADIOROC 11 evidenced re-verification" below).
+
+## RADIOROC 11 evidenced re-verification (PASSED)
+
+With fresh authorization confirming the board powered/bare, no SiPM/pulser,
+and the operator's manual GUI session closed, the lead ran this exact card
+end-to-end through the same harness used in RADIOROC 09
+(`radioroc_runs/physical_status_20260911T051700Z/status_card.py`, source
+unchanged, hash `d721df6e...880b0`), preceded by a `system_profiler
+SPUSBDataType` snapshot (no port opened) confirming `PCB_RADIOROC` /
+`RD3_32` still enumerated on the bus.
+
+Results, from `radioroc_runs/physical_status_20260911T070909Z/run/`:
+
+- Candidate refresh/select and Connect succeeded; status-100 read #1 at
+  `07:09:24.139-07:09:24.154 UTC` returned `00000101` (5) in 11.2 ms.
+- The gated repeat, status-100 read #2 at `07:09:24.247-07:09:24.249 UTC`,
+  also returned `00000101` (5), in 1.6 ms.
+- Explicit Disconnect and shutdown both completed cleanly: `terminal_summary.json`
+  records `status: passed`, `accepted: true`, `error: null`, `worker_alive: false`.
+- `source_provenance.json` for this run records the same
+  `connection_worker.py` / `serial.py` / `ownership.py` hashes as the
+  RADIOROC 09 stopped run, confirming no source change explains the
+  difference in outcome.
+
+This satisfies the card's "Acceptance" criteria (two matching successful
+status reads, clean owner-mediated disconnect and shutdown, complete
+timestamped evidence) and is further evidence for **H1** over **H2**: the same
+board, port, and unmodified code that timed out at RADIOROC 09 now answers
+promptly and correctly, consistent with an intervening power-cycle having
+cleared a stuck state rather than a persistent environmental fault. It remains
+support, not formal proof (no controlled A/B test isolating the power-cycle as
+the sole variable was performed). This card still does not accept
+configuration restoration, ASIC/FPGA readback, scan behavior, cancellation, or
+close-during-run behavior — those remain separately authorized, bounded tasks.
 
 ## Offline diagnosis from RADIOROC 08
 

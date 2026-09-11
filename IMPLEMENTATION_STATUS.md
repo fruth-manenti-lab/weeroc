@@ -1,5 +1,48 @@
 # Implementation status
 
+## RADIOROC 11 — Evidenced status-only re-verification (PASSED)
+
+Continuation on `feat/desktop-hardware-threshold` at `b4706777fed7a8380dc5baa8f84dc683cb630a62`
+(clean tree before this run; no source changes). The user confirmed the board
+powered/bare with no SiPM/pulser and closed the manual GUI session used for
+their earlier power-cycle test, then authorized exactly the existing
+status-only sequence (refresh/select, Connect, one gated repeat, explicit
+Disconnect, shutdown; stop on any error/unexpected value). The lead acted as
+sole software operator.
+
+Before Connect, `system_profiler SPUSBDataType` (no port opened) confirmed
+`PCB_RADIOROC` / `RD3_32` still enumerated. The lead then reran the unmodified
+RADIOROC 09 harness (`status_card.py`, same hash as before) against a new
+output directory. Result: **passed**. Status-100 read #1 at
+`07:09:24.140-07:09:24.154 UTC` and read #2 at `07:09:24.247-07:09:24.249 UTC`
+both returned `00000101` (5); Disconnect and shutdown completed with no error
+and no close error (`terminal_summary.json`: `status: passed`,
+`accepted: true`). `source_provenance.json` for this run matches RADIOROC 09's
+transport/connection-worker hashes exactly, ruling out a source-code
+explanation for the improved outcome.
+
+This meets the status-only card's "Acceptance" criteria for the first time
+since the RADIOROC 07 fault, and is further evidence for **H1** (the board or
+USB bridge was in a stuck state that the operator's power-cycle cleared) over
+**H2** (unrelated transient fault) — support, not formal proof, since no
+controlled A/B isolating the power-cycle was run. Evidence, including the
+pre-Connect USB snapshot, screenshots, request/event traces, and a
+12-file `complete_inventory.json`, is local under
+`radioroc_runs/physical_status_20260911T070909Z/`. Full narrative in
+`docs/hardware/desktop_status_recovery.md` under "RADIOROC 11 evidenced
+re-verification (PASSED)".
+
+No ASIC/FIFO access, verifier, scan, configuration write, defaults, repair,
+power-cycle, push, or change to `main` occurred in this session. Configuration
+restoration, scan behavior, and cancellation/close-during-run behavior remain
+unverified and out of scope for this card.
+
+Next: with the designated operator, decide whether to proceed to a fresh,
+separately authorized physical threshold restoration/scan check now that
+status-only communication is evidenced-recovered, or to run further
+verification (for example, a repeated status-only pass after a longer idle
+period) before trusting the board for scan work.
+
 ## RADIOROC 10 — Investigate status-only timeout (offline, STOPPED card unchanged)
 
 Offline-only continuation on `feat/desktop-hardware-threshold`, working tree
