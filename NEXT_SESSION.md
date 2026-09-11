@@ -1,36 +1,31 @@
-# RADIOROC 08 — Investigate desktop pre-scan timeout
+# RADIOROC 09 — Status-only desktop recovery
 
-RADIOROC 07 is stopped after the first long-window GUI case faulted before a
-complete pre-scan snapshot. Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`,
-`DEVELOPMENT.md`, and `docs/hardware/desktop_threshold_validation.md`. Review
-the saved evidence under
-`radioroc_runs/physical_desktop_20260911T015835Z/` offline.
+Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md`, and
+`docs/hardware/desktop_status_recovery.md` before continuing. The preceding
+chat is **RADIOROC 08 — Investigate desktop pre-scan timeout**.
 
-The branch is `feat/desktop-hardware-threshold`, based on handoff `086d304`
-and implementation `e6cddf4`, version `0.5.0`. RADIOROC 07 changes documentation
-only. Verify the current local commit and working tree before editing.
+Branch: `feat/desktop-hardware-threshold`, version `0.5.0`. Verify the current
+commit and working tree. RADIOROC 08 started at `a1b17e6`, audited the saved
+failure offline, improved local phase waits and corrected stale GUI provenance.
+The original 49 inventoried evidence files are intact under
+`radioroc_runs/physical_desktop_20260911T015835Z/`.
 
-Next task: investigate the pre-scan timeout and improve local phase-wait fault
-detection/evidence. Use saved JSON, event logs, screenshots, fake transports,
-and offline tests only. Do not access hardware, auto-retry scans, or change
-device configuration. Also assess the stale saved-result banner visible in the
-T2 terminal capture. End with a concrete status-only recovery card; physical
-recovery requires fresh operator authorization.
+Next bounded task: obtain fresh designated-operator authorization for the exact
+status-only card, then execute only that authorized card. The prior scan
+permission does not carry forward. Until authorization, use saved evidence,
+fake transports and offline checks only; do not discover or access hardware.
 
-Acceptance for RADIOROC 08:
+Acceptance: fresh setup/identity and owner recorded; Connect's single status-100
+read and one explicit repeat pass as specified; explicit Disconnect and shutdown
+release the owner with no close error; timestamped evidence is preserved.
+Stop on the first error or unexpected status. No automatic retry, scan, ASIC
+FIFO access, verifier, initialization/defaults, repair, persistent configuration
+write, power-cycle, wider scan, push or change to `main`.
 
-- Confirm the timeout path, phase-marker gap, fault latching, disconnect and
-  shutdown evidence from the saved run without touching the board.
-- Keep harness fixes local unless production changes are independently justified;
-  preserve old CLI entry points and shared behavior.
-- Run the relevant offline development checks; do not run hardware discovery or
-  the environment diagnostic script.
-- Record checks, limitations, and one status-only recovery task. No physical
-  retry, wider scan, repair, persistent write, push, or change to `main`.
+Local harness/report: `radioroc_runs/radioroc08_offline/`. Its derivative is a
+scan harness, not the status-only procedure; do not run it for this task.
 
-RADIOROC 07 evidence and the exact physical procedure remain in
-`docs/hardware/desktop_threshold_validation.md`. Word 60 readback semantics,
-analog performance, wider scans, acquisition/calibration migration, register
-editing, platform parity and bundling remain separate tasks.
-
-The preceding chat name is **RADIOROC 07 — Physical desktop threshold validation**.
+The pre-scan timeout cause and exact failed serial request remain unresolved.
+Successful status reads would establish communication only, not configuration
+restoration or permission to resume the pending GUI cancellation/close cases.
+Record results, limits and one subsequent bounded task in the status document.

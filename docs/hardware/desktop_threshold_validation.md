@@ -129,3 +129,13 @@ incomplete because the required pre-scan snapshot was incomplete.
 claim cancellation or close-during-run acceptance and do not auto-retry scans.
 Next work is offline diagnosis and improved local phase-wait fault detection
 and evidence, followed by a concrete status-only recovery card.
+
+## RADIOROC 08 offline follow-up
+
+The original 49 inventoried files were verified unchanged. The timeout remains
+unlocalized within ASIC snapshot acquisition; no hardware was accessed. Local
+phase-wait handling was improved and the stale saved-result banner corrected
+with offline regression coverage. See `IMPLEMENTATION_STATUS.md` for checks.
+The physical card stays stopped. The next bounded procedure is
+[status-only recovery](desktop_status_recovery.md), requiring fresh operator
+authorization; it does not authorize resuming these scan cases.

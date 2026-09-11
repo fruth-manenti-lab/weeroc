@@ -228,12 +228,7 @@ class ThresholdWindow(QMainWindow):
         else:
             self._accepted_mode = requested
         simulation = self.mode.currentIndex() == 0
-        self.banner.setText(
-            "SIMULATION · Synthetic counts, not measured lab data. No board connection."
-            if simulation else
-            "HARDWARE · USB candidates are unverified. FPGA initialization and apply-defaults "
-            "are off by default; masking/Ctest/gain are temporary scan settings. Restoration readback "
-            "verification is mandatory. Initialization and defaults are persistent changes.")
+        self._show_mode_banner()
         if not simulation and previous_mode != self._accepted_mode:
             self.initialize.setChecked(False)
             self.defaults.setChecked(False)
@@ -242,6 +237,19 @@ class ThresholdWindow(QMainWindow):
         self.run_button.setText("Run simulation" if simulation else "Run hardware threshold")
         self.sim_group.setEnabled(simulation and self.worker is None)
         self._update_connection_controls()
+
+    def _show_mode_banner(self):
+        self.banner.setText(
+            "SIMULATION · Synthetic counts, not measured lab data. No board connection."
+            if self.mode.currentIndex() == 0 else
+            "HARDWARE · USB candidates are unverified. FPGA initialization and apply-defaults "
+            "are off by default; masking/Ctest/gain are temporary scan settings. Restoration readback "
+            "verification is mandatory. Initialization and defaults are persistent changes.")
+
+    def _show_run_banner(self, mode, directory):
+        self.banner.setText(
+            f"{mode} · RUN · {directory} · Results shown here are from this run."
+        )
 
     def _mode_switch_locked(self):
         if self.worker is not None:
@@ -464,6 +472,7 @@ class ThresholdWindow(QMainWindow):
                 self._last_rows = ()
                 self._active_directory = Path(operation.scan.out_dir)
                 self.progress.setValue(0)
+                self._show_run_banner("HARDWARE", self._active_directory)
                 self._plot((), "HARDWARE · running threshold rates")
                 self._hardware_running = True
                 self._set_running(True)
@@ -481,6 +490,7 @@ class ThresholdWindow(QMainWindow):
             self._active_directory = Path(operation.scan.out_dir)
             self._mode_changed()
             self.progress.setValue(0)
+            self._show_run_banner("SIMULATION", self._active_directory)
             self._plot((), "SIMULATION · running")
             self.worker = worker
             self._set_running(True)

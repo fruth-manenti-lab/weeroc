@@ -3,6 +3,8 @@
 import importlib.util
 import json
 import os
+from pathlib import Path
+import tempfile
 import threading
 import time
 import unittest
@@ -204,6 +206,51 @@ class ConnectionGuiTests(unittest.TestCase):
         window.close()
         self.assertGreaterEqual(worker.shutdown_calls, 1)
 
+    def test_hardware_run_replaces_saved_result_banner_before_plot_is_cleared(self):
+        worker = FakeHardwareWorker()
+        window = self.make_window()
+        window.connection_worker = worker
+        window.mode.setCurrentIndex(1)
+        worker.state = "connected"
+        window._update_connection_controls()
+        with tempfile.TemporaryDirectory() as temp:
+            saved = Path(temp) / "saved"
+            saved.mkdir()
+            (saved / "thresholdscan.csv").write_text("DAC,ch4\n0,1\n")
+            (saved / "metadata.json").write_text(json.dumps({
+                "schema_version": 1,
+                "status": "completed",
+                "execution_mode": "simulation",
+                "operation": {"scan": {"channels": [4], "dac_min": 0,
+                                       "dac_max": 0, "dac_step": 1}},
+                "total_points": 1,
+                "completed_points": 1,
+                "cleanup": {"status": "restored", "errors": []},
+                "persistence_errors": [],
+            }))
+            window.open_saved(saved)
+            self.assertIn("SAVED RESULT · SIMULATION", window.banner.text())
+
+            window.output.setText(str(Path(temp) / "current-hardware"))
+            window.start_run()
+            self.assertEqual(worker.run_calls, 1)
+            self.assertIn("HARDWARE · RUN", window.banner.text())
+            self.assertNotIn("SAVED RESULT", window.banner.text())
+            self.assertIn("current-hardware", window.banner.text())
+
+            worker.finish_fault()
+            window.poll_worker()
+
+            window.open_saved(saved)
+            worker.state = "connected"
+            worker.fault = None
+            worker.run_error = RuntimeError("submission rejected")
+            window.start_run()
+            self.assertEqual(worker.run_calls, 2)
+            self.assertIn("HARDWARE · RUN", window.banner.text())
+            self.assertNotIn("SAVED RESULT", window.banner.text())
+            self.assertIn("Could not start hardware scan", window.status.text())
+
     def test_shutdown_consumes_hardware_terminal_before_releasing_stopped_worker(self):
         worker = FakeHardwareWorker()
         window = self.make_window()
@@ -259,6 +306,7 @@ class FakeHardwareWorker:
         self.fault = None
         self.run_calls = self.cancel_calls = self.shutdown_calls = 0
         self.outcome = None
+        self.run_error = None
 
     @property
     def is_alive(self):
@@ -276,6 +324,8 @@ class FakeHardwareWorker:
 
     def run_threshold(self, operation):
         self.run_calls += 1
+        if self.run_error is not None:
+            raise self.run_error
         self.state = "scanning"
 
     def cancel_threshold(self):

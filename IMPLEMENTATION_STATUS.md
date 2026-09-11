@@ -1,5 +1,57 @@
 # Implementation status
 
+## RADIOROC 08 — Investigate desktop pre-scan timeout
+
+Offline investigation continued on `feat/desktop-hardware-threshold` from clean
+`a1b17e6`. Version remains `0.5.0`. No hardware discovery/open, configuration
+change, scan retry, repair, push or change to `main` occurred.
+
+All 49 files in the original RADIOROC 07 SHA-256 inventory match their recorded
+hashes and sizes. Source ordering and saved evidence place the failure inside
+ASIC `read_fifo`, after FPGA 0/1/6 reads and before complete snapshot assignment
+or any measurement. The transport error means no response bytes were received
+for one unidentified read within 0.5 s. Initial word-0 read, status polling and
+final FIFO read remain possible sites; there is no per-request trace to decide
+which, or establish a board/USB/firmware root cause. The 60000 ms measurement
+window was never reached and does not explain this pre-scan failure.
+
+The failed manifest finished at 02:07:02.013701 UTC with 0 points/windows.
+The verifier had no complete snapshot (all 3 FPGA and 130 ASIC expected entries
+missing); successful cleanup commands do not establish verified restoration.
+The harness recorded the latched fault at 02:07:27.651320 after SIGINT interrupted
+its marker-only wait. Disconnect recorded idle with port/status cleared and no
+close error at 02:07:29.171427; shutdown recorded stopped at 02:07:29.297004.
+Neither GUI cancellation nor an in-window close occurred.
+
+Local-only fixes and their report are preserved under ignored
+`radioroc_runs/radioroc08_offline/`. `phase_wait.py` detects terminal outcomes,
+faults, disconnect and shutdown before accepting a marker, including simultaneous
+marker/fault delivery. `radioroc08_gui_card.py` integrates this for window and
+first-point waits and adds a separate request trace without Qt widget access.
+The original harness is unchanged. Six deterministic wait tests passed, as did
+compilation, help and default refusal (exit 2). Physical execution is gated by
+an explicit flag and remains unvalidated/unauthorized; the derivative runs the
+scan card and must not be used for the next status-only task. Request tracing
+cannot reconstruct the missing historical request and has not been tested on
+a board.
+
+The saved T2 screenshot independently confirms the previous T1 saved-result
+banner above current T2 data. The minimal production UI change replaces saved
+provenance when starting a new run; device logic and shared APIs are unchanged.
+
+Checks: `.venv-foundation/bin/python tools/check_development.py` passed all
+**118 offline tests**, compile checks and **15 legacy CLI help checks**, including
+the new saved-result/new-run/rejected-submission GUI regression. Log:
+`/private/tmp/radioroc08-development.log`. Packaging metadata is unchanged, so
+no new installed-wheel check was needed. `git diff --check` passed.
+
+The concrete next task is **RADIOROC 09 — Status-only desktop recovery**, using
+`docs/hardware/desktop_status_recovery.md`. Fresh operator authorization is
+required before hardware access. Connect's status read, one explicit repeat,
+disconnect and shutdown are the entire card; success does not establish restored
+configuration or authorize a scan. Physical cancellation/close acceptance,
+word-60 semantics, wider scans and analog performance remain pending.
+
 ## RADIOROC 07 — Physical desktop threshold validation (STOPPED)
 
 On 2026-09-11, the user confirmed the powered bare board, USB only, no
