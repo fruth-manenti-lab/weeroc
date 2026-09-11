@@ -1,31 +1,36 @@
-# RADIOROC 09 — Status-only desktop recovery
+# RADIOROC 10 — Investigate status-only timeout
 
-Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md`, and
-`docs/hardware/desktop_status_recovery.md` before continuing. The preceding
-chat is **RADIOROC 08 — Investigate desktop pre-scan timeout**.
+Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md`,
+`CROSS_PLATFORM_REBUILD_PLAN.md`, and `docs/hardware/desktop_status_recovery.md`.
+The preceding chat is **RADIOROC 09 — Status-only desktop recovery**.
 
-Branch: `feat/desktop-hardware-threshold`, version `0.5.0`. Verify the current
-commit and working tree. RADIOROC 08 started at `a1b17e6`, audited the saved
-failure offline, improved local phase waits and corrected stale GUI provenance.
-The original 49 inventoried evidence files are intact under
-`radioroc_runs/physical_desktop_20260911T015835Z/`.
+Branch: `feat/desktop-hardware-threshold`, version `0.5.0`. Verify current commit
+and working tree. RADIOROC 09 executed from `b31d024`; only documentation and
+ignored local harness/evidence changed. Preserve existing edits and all data.
 
-Next bounded task: obtain fresh designated-operator authorization for the exact
-status-only card, then execute only that authorized card. The prior scan
-permission does not carry forward. Until authorization, use saved evidence,
-fake transports and offline checks only; do not discover or access hardware.
+Freshly authorized native GUI recovery stopped at Connect's first status-100
+read: request `aa00e40055`, 115200 baud, 0.5 s timeout, no response. Exactly one
+request was sent. The worker automatically released the session, reported no
+close error, and shut down successfully. No repeat, scan, FIFO access, verifier,
+configuration write, repair or power-cycle occurred. Two-read acceptance failed;
+configuration restoration and both timeout causes remain unresolved.
 
-Acceptance: fresh setup/identity and owner recorded; Connect's single status-100
-read and one explicit repeat pass as specified; explicit Disconnect and shutdown
-release the owner with no close error; timestamped evidence is preserved.
-Stop on the first error or unexpected status. No automatic retry, scan, ASIC
-FIFO access, verifier, initialization/defaults, repair, persistent configuration
-write, power-cycle, wider scan, push or change to `main`.
+Evidence: `radioroc_runs/physical_status_20260911T051700Z/`. Actual timestamps in
+its logs are 2026-09-11 05:16:21–05:16:25 UTC; the directory suffix is a label.
+Local harness/fake checks: `radioroc_runs/radioroc09_offline/`. Do not execute
+that harness physically under the prior authorization.
 
-Local harness/report: `radioroc_runs/radioroc08_offline/`. Its derivative is a
-scan harness, not the status-only procedure; do not run it for this task.
+Next bounded task: compare this exact request and saved timing/error evidence
+with prior successful status reads and the production transport, offline only.
+Separate established facts from hypotheses. Produce one concrete diagnostic
+proposal with expected observations, stop/release rules and required setup.
+Use a smaller-model agent for a bounded saved-evidence audit if useful; the lead
+owns protocol reasoning. Avoid repeated broad repository exploration.
 
-The pre-scan timeout cause and exact failed serial request remain unresolved.
-Successful status reads would establish communication only, not configuration
-restoration or permission to resume the pending GUI cancellation/close cases.
-Record results, limits and one subsequent bounded task in the status document.
+Acceptance: evidence inventory verified; successful/failing status evidence
+compared without claiming a root cause that the traces do not establish; one
+reviewable next test card prepared; findings, limitations and next task recorded.
+No hardware discovery/open, status retry, ASIC access, verifier, scan, defaults,
+repair, power-cycle, push or change to `main`. Further physical access needs
+fresh authorization for the resulting exact card. Do not resume pending GUI
+cancellation/close cases based on USB enumeration or historical status 5.

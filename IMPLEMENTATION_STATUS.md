@@ -1,5 +1,77 @@
 # Implementation status
 
+## RADIOROC 09 — Status-only desktop recovery (STOPPED)
+
+On 2026-09-11 the user freshly confirmed the powered bare USB board, no
+SiPM/pulser and competing software closed, and authorized the lead as sole
+software operator for the exact status-only card. Native Cocoa execution on
+`feat/desktop-hardware-threshold` at `b31d024` stopped on Connect's first read.
+Fresh candidates were `PCB_RADIOROC`, identity `usb:0403:6010:serial:RD3_32`;
+the explicitly selected control port was `/dev/cu.usbserial-RD3_320`, baud
+115200, timeout 0.5 s.
+
+The trace records exactly one status-100 request, `aa00e40055`, beginning at
+`05:16:23.144650 UTC`. It raised `TransportTimeoutError: no response from
+/dev/cu.usbserial-RD3_320 within 0.5s; request not retried`, with transfer elapsed
+0.501775458 s. No status value or response frame was returned. Unlike the older
+FIFO fault, this request is identified exactly; its cause remains unresolved.
+No repeat status read, scan, FIFO access, verifier, configuration write,
+initialization/defaults, repair or power-cycle occurred.
+
+Connect's error path released the session through its owning worker. The
+`05:16:25.164920 UTC` snapshot records `error`, cleared port/status and no close
+error. Because the session was already released, there was no explicit
+Disconnect or second close attempt. Shutdown recorded `stopped`, worker not
+alive, and no close error at `05:16:25.257612 UTC`; process exit was 1.
+The two-read acceptance did not pass, and configuration restoration is unknown.
+
+Evidence is local and ignored under
+`radioroc_runs/physical_status_20260911T051700Z/`: exact executed harness,
+setup/authorization, fresh candidates, timestamped snapshots and request trace,
+three native widget screenshots, terminal summary, console, source hashes and
+SHA-256 inventory. The directory suffix is a label; actual execution was
+05:16:21–05:16:25 UTC. Native GUI methods were driven programmatically with
+human controls disabled; evidence does not include independent electrical
+observation. The standard production transport and board lock were retained.
+
+Sol prepared the local harness; the lead reviewed and strengthened its guards.
+Five offline fake cases passed: success, unexpected first status, first-read
+timeout, repeat-read timeout and failed close with live ownership retained and
+no close retry. Compilation, help and default refusal passed. No production
+source or packaging changed, so no development-suite or wheel rerun was needed.
+Luna independently audited the saved sequence and verified all seven original
+inventory entries. The lead preserved that manifest and verified an expanded
+11-file inventory including console, source provenance and audit summary.
+`git diff --check` passed; no push or change to `main` occurred.
+
+Next: **RADIOROC 10 — Investigate status-only timeout**, an offline comparison of
+this exact request with prior successful status evidence and the existing
+transport, followed by one concrete diagnostic proposal. This stopped card
+does not authorize further physical access or resuming GUI scan acceptance.
+
+### Preparation history
+
+Continuation started on `feat/desktop-hardware-threshold` at clean `b31d024`.
+Offline source review identified that Connect/status exceptions already attempt
+owner-mediated close. The recovery card now counts that attempt and explicitly
+prohibits Disconnect/window-close/shutdown after `close_failed` without review,
+because those actions can retry close. Successful automatic release is recorded
+before shutdown; the normal success path still requires explicit Disconnect.
+
+Documentation-only preparation; `git diff --check` passed. No hardware discovery,
+open, status read, scan or configuration operation occurred. Physical acceptance
+remains pending fresh setup confirmation and designated-operator authorization
+for the exact card. Next task remains execution of that status-only card; the
+RADIOROC 09 handoff in `NEXT_SESSION.md` remains current.
+
+Continuation review on 2026-09-11 found HEAD still at `b31d024` with the two
+existing documentation edits above, which were preserved. A bounded Luna
+offline review confirmed the card matches current worker APIs and error-path
+release behavior. Unexpected status values require the operator to stop;
+`close_failed` retry restrictions are procedural, not enforced by the API.
+`git diff --check` passed again. No source changes or hardware access occurred;
+fresh setup confirmation and authorization remain the next required step.
+
 ## RADIOROC 08 — Investigate desktop pre-scan timeout
 
 Offline investigation continued on `feat/desktop-hardware-threshold` from clean

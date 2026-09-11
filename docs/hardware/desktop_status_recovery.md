@@ -1,6 +1,13 @@
 # Desktop status-only recovery card (RADIOROC 09)
 
-**State: STOPPED / PENDING fresh operator authorization.** This card is a
+**State: STOPPED after the authorized RADIOROC 09 attempt.** Connect's first
+status-100 request timed out on 2026-09-11 at 05:16:23 UTC. No repeat occurred;
+automatic owner-mediated release and shutdown succeeded with no close error.
+Two-read acceptance remains unmet. Evidence is local under
+`radioroc_runs/physical_status_20260911T051700Z/`; see `IMPLEMENTATION_STATUS.md`.
+Further physical access requires a separately reviewed and authorized card.
+
+This card is a
 read-only recovery check after the RADIOROC 07 desktop pre-scan fault, reviewed
 offline in RADIOROC 08. It is not authorization to touch the board. Before any hardware access, a designated
 operator must freshly authorize this exact status-only procedure and record
@@ -34,9 +41,17 @@ status read.
 
 ## Stop and ownership rules
 
-On any error, stop status operations, preserve the exact exception and
-before/after snapshots, and disconnect once through the owner. A failed close
-leaves ownership in place; any further close retry requires explicit review.
+On any error, stop status operations and preserve the exact exception and
+before/after snapshots. Connect/status exceptions already cause the owning
+worker to attempt session release; count that as the error-path close attempt.
+If it succeeds, the worker reports `error` with no selected port or close error;
+Disconnect is unavailable in that state, so record the automatic owner-mediated
+release and shut down the released worker. If a session remains connected (for
+example, after an unexpected returned value), explicitly Disconnect once.
+A failed close leaves ownership in place; any further close retry requires
+explicit review. In `close_failed`, do not press Disconnect, close the window,
+or call shutdown: each can attempt another close. Preserve the live owner and
+report the failure for review.
 An unexpected or differing status is a stop, not a diagnosis or permission to
 continue. Do not claim restoration from this card.
 
