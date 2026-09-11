@@ -1,11 +1,19 @@
-# Desktop status-only recovery card (RADIOROC 09)
+# Desktop status-only recovery card (RADIOROC 09/10)
 
-**State: STOPPED after the authorized RADIOROC 09 attempt.** Connect's first
-status-100 request timed out on 2026-09-11 at 05:16:23 UTC. No repeat occurred;
-automatic owner-mediated release and shutdown succeeded with no close error.
-Two-read acceptance remains unmet. Evidence is local under
+**State: RECOVERED by an operator power-cycle, outside this card's bounded
+harness.** Connect's first status-100 request timed out on 2026-09-11 at
+05:16:23 UTC (RADIOROC 09). The designated operator power-cycled the board
+immediately afterward and reports a subsequent native-GUI Connect succeeded,
+firmware status `0x05` (5) on `/dev/cu.usbserial-RD3_320` (operator-provided
+screenshot; see "Operator power-cycle recovery" below). This was not run
+through the bounded evidence harness used elsewhere in this document, so no
+saved run directory, timestamps, or request-level trace exist for it, and the
+two-read acceptance defined below is still not confirmed by that standard.
+Prior stopped-card evidence remains local under
 `radioroc_runs/physical_status_20260911T051700Z/`; see `IMPLEMENTATION_STATUS.md`.
-Further physical access requires a separately reviewed and authorized card.
+Any further physical access (including the "RADIOROC 11 candidate" card below,
+or resuming the bounded two-read acceptance sequence) still requires fresh,
+explicit authorization for that exact action.
 
 This card is a
 read-only recovery check after the RADIOROC 07 desktop pre-scan fault, reviewed
@@ -70,6 +78,116 @@ successful owner-mediated disconnect and shutdown, with no close error and
 complete timestamped evidence. This does not accept configuration restoration,
 ASIC/FPGA readback, scan behavior, cancellation, analog performance, or
 close-during-run behavior.
+
+## Offline comparison and diagnostic proposal (RADIOROC 10)
+
+Evidence inventory reverified by the lead: all 11 tracked files under
+`physical_status_20260911T051700Z/` (12 including `complete_inventory.json`
+itself) match the SHA-256 hashes recorded in `evidence_manifest.json`,
+consistent with the prior Luna audit in `offline_audit.json`.
+
+**Cross-session comparison, same board/port/parameters** (`/dev/cu.usbserial-RD3_320`,
+`usb:0403:6010:serial:RD3_32`, 115200 baud, 0.5 s timeout, request `aa00e40055`,
+identical `read_word(100)` call path in `connection_worker.py`/`serial.py` with
+no retry logic and no explicit DTR/RTS handling in any of the three runs below):
+
+- `physical_threshold_20260910T042911Z` (2026-09-10 04:29:22 UTC, CLI): a single
+  status-100 read returned bits `00000101` (5); close passed.
+- `physical_desktop_20260911T015835Z` (RADIOROC 07, native GUI): Connect and its
+  initial status read succeeded at 02:06:49-02:06:50 UTC (status 5, per
+  `native_preflight.json`). Two full threshold scans (`t1_normal`, `t2_normal`)
+  then completed and reported `restored` at 02:06:55 and 02:07:01 UTC on that
+  same open session. A later `t1_cancel_window` job then raised
+  `TransportTimeoutError` at 02:07:27.651 UTC, about 26 s into that job and, per
+  RADIOROC 08's source-order analysis, inside `read_fifo` rather than at Connect.
+- `physical_status_20260911T051700Z` (RADIOROC 09): a brand-new Connect on the
+  same port, about 3 h 9 min after the 07 fault, timed out on its very first
+  status-100 request at 05:16:23.145 UTC, with no successful transaction on that
+  session at all.
+
+The contrast: 07's fault occurred mid-session and mid-job, deep in a request
+sequence, after many prior successful transactions on the same open port; 09's
+fault occurred on the first request of a freshly opened port, with no physical
+intervention recorded between the two. Source hashes recorded in
+`source_provenance.json` show the same transport/connection-worker code across
+these runs, which makes a framing or software regression an unlikely
+explanation on current evidence, though it is not excluded.
+
+**Host-level offline check (this session):** `pmset -g log` shows no actual
+Sleep/Wake transition on the host between the 07 fault (02:07:27 UTC / 12:07
+AEST) and the 09 attempt (05:16:23 UTC / 15:16 AEST) on 2026-09-11 — only
+unrelated scheduled "Wake Requests" predictions appear. This rules out an OS
+sleep/USB-bus-reset cycle as an explanation for the gap. A deeper unified-log
+USB/FTDI trace for that window could not be obtained offline in this session
+(`log show` returned "Operation not permitted"; this shell lacks Full Disk
+Access) and remains a limitation, not a finding.
+
+**No root cause is established.** Two unproven hypotheses remain open:
+
+- **H1 - stuck board/bridge state.** The `read_fifo` timeout during 07's
+  `t1_cancel_window` job, or its automatic cleanup, left the ASIC/FPGA or the
+  FTDI bridge unresponsive to any further request, including a fresh Connect.
+  Only a power-cycle or physical reseat would be expected to clear this; a
+  software reconnect cannot detect or repair it.
+- **H2 - independent transient/environmental fault.** An unrelated intermittent
+  contact, cable, or hub condition affected the unrelated 09 attempt; its
+  timing relative to 07 is coincidental.
+
+**Proposed next card ("RADIOROC 11 candidate"), status-only, no power-cycle:**
+this is a proposal for future authorization, not an executed or authorized
+procedure.
+
+1. Same preconditions as the existing status-only card: powered bare board, no
+   SiPM/pulser, competing software closed, one designated operator, one owning
+   `ConnectionWorker`, explicit port selection, 115200 baud, 0.5 s timeout.
+2. Before Connect, capture a host-side USB enumeration snapshot without opening
+   the port (for example `system_profiler SPUSBDataType`, or the existing
+   refreshed candidate list) to confirm the board's USB identity/location is
+   still present and unchanged.
+3. Connect through the owning worker (issues the first status-100 read) with
+   the same parameters as RADIOROC 09.
+4. Expected observations and their reading:
+   - An identical timeout, with the board still enumerated in step 2, would
+     support H1 (persistent stuck state) and argue against a USB-level dropout.
+   - A successful read (status 5) would support H2 (transient fault); the
+     existing two-read acceptance sequence in this card could then proceed as
+     already authorized.
+5. Stop/release rules: identical to the existing card in this document above —
+   any error or unexpected value stops immediately; the owning worker performs
+   the single close attempt; no retry, no repeat beyond the existing gated one,
+   no FIFO/verifier/scan/configuration/defaults/repair/power-cycle action.
+6. Evidence to capture: everything the existing "Evidence to save" section
+   requires, plus the pre-Connect USB enumeration snapshot and the elapsed time
+   since the 07 fault and since the board was last physically touched.
+
+If this card's outcome supports H1, the natural follow-up (a designated-operator
+power-cycle or physical reseat, then a repeat of this same status-only card) is
+explicitly outside this card's scope and needs its own separate authorization.
+
+## Operator power-cycle recovery (post-RADIOROC 10)
+
+Reported directly by the designated operator, not captured through this card's
+bounded evidence harness: immediately after the RADIOROC 09 timeout was found,
+the operator power-cycled the board. A subsequent Connect through the native
+desktop GUI succeeded, showing "Connected - /dev/cu.usbserial-RD3_320" and
+"Firmware status 0x05 (5)" (operator screenshot). No exact UTC timestamp,
+request-level trace, explicit repeat status-100 read, or Disconnect/shutdown
+result was captured for this action, so it does not by itself satisfy the
+"Acceptance" criteria defined above, and configuration-restoration state is
+still not established from it.
+
+This is still useful evidence: a power-cycle performed right after the fault,
+followed immediately by a successful Connect at the same status value (5) seen
+before the fault, strongly supports **H1** from the RADIOROC 10 comparison
+below (the board or USB bridge was left in a state that required a power-cycle
+to clear) over **H2** (an unrelated transient/environmental fault). This is
+support, not proof: no independent control (for example, retrying without a
+power-cycle first) was run, and the "RADIOROC 11 candidate" card proposed below
+was written specifically to test this discrimination in a bounded, evidenced
+way. Its USB-presence-before-Connect step is now less critical given this
+result, but the card is still worth running under the bounded harness if
+further physical access is authorized, so the record has verified timestamps,
+a captured repeat status read, and a clean Disconnect/shutdown.
 
 ## Offline diagnosis from RADIOROC 08
 

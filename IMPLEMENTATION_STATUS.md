@@ -1,5 +1,59 @@
 # Implementation status
 
+## RADIOROC 10 — Investigate status-only timeout (offline, STOPPED card unchanged)
+
+Offline-only continuation on `feat/desktop-hardware-threshold`, working tree
+clean at `9fd8665`. No hardware discovery/open, status retry, ASIC access,
+verifier, scan, defaults, repair, power-cycle, or push/change to `main`
+occurred; the RADIOROC 09 stopped card and its acceptance state are unchanged.
+
+The lead reverified the RADIOROC 09 evidence inventory: all 11 tracked files
+under `radioroc_runs/physical_status_20260911T051700Z/` (12 including
+`complete_inventory.json` itself) match the SHA-256 hashes in
+`evidence_manifest.json`, consistent with Luna's prior `offline_audit.json`.
+
+The lead compared that run's exact request/timing/error evidence against prior
+successful status reads on the same port/parameters: a 2026-09-10 CLI status
+check (`status.json` in `physical_threshold_20260910T042911Z`, status 5) and
+RADIOROC 07's native GUI session (`physical_desktop_20260911T015835Z`), whose
+Connect and initial status read succeeded (status 5) and which then completed
+two full threshold scans before a later job (`t1_cancel_window`) hit the known
+`read_fifo` timeout at `02:07:27.651 UTC`. RADIOROC 09's fresh Connect, about
+3 h 9 min after that fault, timed out on its very first status-100 request with
+no prior successful transaction on that session. Source hashes in each run's
+`source_provenance.json` show unchanged transport/connection-worker code across
+all three, so a framing/software regression is unlikely on current evidence but
+not excluded. A host-level offline check (`pmset -g log`) found no actual
+Sleep/Wake transition between the 07 fault and the 09 attempt, ruling out an OS
+sleep/USB-reset cycle as an explanation for the gap; a deeper unified-log
+USB/FTDI trace could not be obtained offline in this session (`log show`:
+"Operation not permitted", no Full Disk Access), which is a limitation, not a
+finding.
+
+No root cause is established. Two open, unproven hypotheses and one concrete
+next test card (status-only, no power-cycle, evidence requirements, and
+stop/release rules) are recorded in
+`docs/hardware/desktop_status_recovery.md` under "Offline comparison and
+diagnostic proposal (RADIOROC 10)". That card is a proposal only; it is not
+authorized to run.
+
+**Addendum, reported after this session's offline analysis:** the designated
+operator power-cycled the board immediately after the RADIOROC 09 timeout was
+found, and a subsequent native-GUI Connect succeeded (firmware status `0x05`/5
+on `/dev/cu.usbserial-RD3_320`), per an operator-provided screenshot. This was
+not run through the bounded evidence harness, so it lacks timestamps, a
+request-level trace, an explicit repeat status read, and a recorded
+Disconnect/shutdown; it does not satisfy this document's evidence standard or
+the status-only card's two-read acceptance. It does strongly support **H1**
+(stuck board/bridge state cleared by power-cycle) over H2. Details are in
+`docs/hardware/desktop_status_recovery.md` under "Operator power-cycle
+recovery (post-RADIOROC 10)".
+
+Next: **RADIOROC 11 — <fresh authorization for the proposed status-only card,
+or further offline diagnosis>**. This session does not authorize further
+physical access; the existing RADIOROC 09 stopped state and two-read acceptance
+gap remain current.
+
 ## RADIOROC 09 — Status-only desktop recovery (STOPPED)
 
 On 2026-09-11 the user freshly confirmed the powered bare USB board, no
