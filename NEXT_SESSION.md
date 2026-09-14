@@ -1,65 +1,66 @@
-# RADIOROC 19 — Validate input DAC/TQ mask physically, or resume Stage C/D
+# RADIOROC 20 — GUI wiring for input DAC/TQ mask, or resume Stage C/D
 
 Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md`,
 `CROSS_PLATFORM_REBUILD_PLAN.md`, `docs/hardware/stage_b_completion.md`, and
 `docs/hardware/stage_c_io_sync_validation.md`. The preceding chat is
-**RADIOROC 18 — Input DAC/TQ mask CLI wiring** (non-hardware).
+**RADIOROC 19 — First physical validation of input DAC/TQ mask (PASSED)**.
 
 Branch: `feat/desktop-hardware-threshold`, version `0.5.0`. Verify current
 commit and working tree.
 
-**Hardware state (unchanged since RADIOROC 16):** IO1 (mux index 5) confirmed
-at ~10-13ms period, ~1.44V amplitude under 50-ohm termination. Stage C so far
-covers only IO1; Stage D (pulse generator, signal injection) hasn't started.
-
-**RADIOROC 17/18 (no hardware access in either):** recovered the register
-mapping for input DAC (value/enable/impedance) and TQ mask directly from the
-vendor's compiled GUI bytecode (cross-checked against this codebase's
-already-hardware-validated T1/T2 mask bits), implemented as four new
-`RadiorocDevice` methods, then wired into a new CLI script,
+**RADIOROC 17-19 summary:** recovered the input DAC (value/enable/impedance)
+and TQ mask register mapping from the vendor's compiled GUI bytecode,
+implemented four `RadiorocDevice` methods, wired them into
 `scripts/radioroc_channel_config.py` (`--tq-mask`, `--input-dac-enable`,
-`--input-dac-value`/`--value`, `--input-dac-impedance {low,high}`, plus
-`--verify` and a `--restore` bounded-validation mode that snapshots touched
-registers, writes, independently reads back, then restores and re-verifies).
-Dry-run only so far; full suite (119 tests) passes. GUI wiring was
-deliberately not started — a separate, larger scope decision to check with
-the operator, not assumed.
+`--input-dac-value`/`--value`, `--input-dac-impedance`, `--verify`,
+`--restore`), then physically validated a bounded case (TQ mask + input DAC
+value + impedance on a bare board) — passed on the first attempt, 65 rows
+independently verified written and then restored, 0 mismatches either way.
+Evidence under `radioroc_runs/physical_channel_config_20260914T035857Z/`.
+Input DAC *enable* specifically wasn't exercised yet (only value/impedance/
+TQ mask were), and nothing has been run without `--restore` (the genuinely
+persistent mode, which is the real calibration use case).
 
-Next bounded task: with the designated operator, pick a direction:
+**Hardware state (Stage C, unchanged since RADIOROC 16):** IO1 (mux index 5)
+confirmed at ~10-13ms period, ~1.44V amplitude. Stage D (pulse generator)
+hasn't started.
 
-1. **Physically validate the new CLI script** — this would be the first
-   hardware evidence for either input DAC or TQ mask control. Natural first
-   card: bare board, `--restore --verify`, small scope (e.g. `--tq-mask 4`,
-   `--input-dac-value 4 --value 200`, `--input-dac-impedance low`), same
-   discipline as RADIOROC 09-16: confirm preconditions, explicit
-   authorization (operator, host, UTC time, exact scope), stop on any error
-   or mismatch. Since `--restore` already snapshots/verifies/restores,
-   running it does **not** need the item-7-style "persistent change"
-   sign-off — only running it *without* `--restore` would, and that's not
-   what this first validation needs.
-2. **Decide on GUI wiring** for input DAC/TQ mask before or after physical
-   validation — ask the operator whether they want this now or want to defer
-   it; it's a real UI feature addition (new panel/tab), not a small change.
-3. **Resume the Stage C/D hardware track** instead: extend Stage C (pulse
-   width/rise-time on IO1, an untermination-corrected amplitude, other IO
-   lines) or move to Stage D if a pulse generator is available (bigger step:
-   attenuator needed, injects a signal into the ASIC, needs its own setup
-   review).
-4. **Other deferred items**: persistent defaults/FPGA init (item 7, still
-   explicitly deferred), or the already-queued branch/CI review and
-   Windows-parity inventory backlog items.
+The operator asked for GUI wiring for input DAC/TQ mask next (a real UI
+feature addition — new panel/tab in the desktop app, not a small change).
 
-Whatever is chosen, follow the RADIOROC 09-18 discipline: confirm
+Next bounded task: implement GUI wiring for input DAC (value/enable/
+impedance) and TQ mask, following this codebase's existing GUI patterns
+(`src/radioroc/gui/threshold_window.py` and its `ConnectionWorker` usage) —
+read that file first to decide whether this fits as a new tab/panel on the
+existing window or a separate window, and whether it should reuse
+`ConnectionWorker` (one owner per session, same ownership discipline as
+everything else) or needs its own worker. Mirror the safety posture already
+established: any control that persists a hardware change should be visually
+distinct from the transient threshold-scan controls, and the vendor's own
+"Note that... these changes persist" framing (already documented for
+`apply_defaults`/FPGA init) applies here too — input DAC/TQ mask writes
+persist by default in the CLI (`radioroc_channel_config.py`), so the GUI
+should make that clear rather than implying auto-restore. Add offline/GUI
+tests following `tests/test_threshold_gui.py`'s existing pattern (offscreen
+Qt tests) before any physical exercise of the new GUI path.
+
+After GUI wiring is implemented and offline-tested, decide with the operator
+whether to physically validate the new GUI controls in the same session or
+defer that to a later bounded card, and/or resume the Stage C/D hardware
+track (extend Stage C on IO1/other lines, or move to Stage D if a pulse
+generator is available — bigger step, needs an attenuator and its own setup
+review).
+
+Whatever is chosen, follow the RADIOROC 09-19 discipline: confirm
 preconditions before any hardware access, get an explicit authorization
-statement for the exact action, and treat a new/first-of-its-kind script
-(like `radioroc_channel_config.py`) with the same care as any other
-never-before-run path — diagnose surprises with independent instrumentation
-before concluding anything about the hardware itself.
+statement for the exact action, and treat any new GUI hardware path as a
+first-of-its-kind script/action needing its own bounded physical card, not
+an extension of an already-authorized one.
 
-Acceptance: the chosen direction is authorized/scoped, executed, and its
-outcome recorded with the same evidence rigor as RADIOROC 09-18 in both
+Acceptance: the chosen work is completed/authorized/scoped, and its outcome
+recorded with the same evidence rigor as RADIOROC 09-19 in both
 `IMPLEMENTATION_STATUS.md` and this file, along with the next task. No
 ASIC/FIFO access, verifier, scan, persistent configuration write (without
-`--restore`, unless explicitly authorized as such), defaults, repair,
-power-cycle, signal injection, or detector connection beyond what is
-explicitly authorized for that exact action; no push or change to `main`.
+explicit authorization as such), defaults, repair, power-cycle, signal
+injection, or detector connection beyond what is explicitly authorized for
+that exact action; no push or change to `main`.

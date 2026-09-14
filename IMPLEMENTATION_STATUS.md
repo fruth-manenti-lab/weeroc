@@ -1,5 +1,32 @@
 # Implementation status
 
+## RADIOROC 19 — First physical validation of input DAC/TQ mask (PASSED)
+
+Continuation on `feat/desktop-hardware-threshold` at `3e9e188c3aadeb68d7e85d1df1778906ea245ae8`
+(clean tree before this run). With the board confirmed powered/bare and
+competing software closed, the user authorized the bounded first card:
+`scripts/radioroc_channel_config.py --execute --skip-fpga-init --tq-mask 4
+--tq-mask-value 1 --input-dac-value 4 --value 200 --input-dac-impedance low
+--verify --restore`.
+
+**Passed on the first attempt.** Firmware status word 5. All three writes
+(TQ mask on channel 4, input DAC value 200 on channel 4, impedance switch to
+low across all channels) independently read back correctly via a real
+hardware I2C read (65 touched rows, 0 mismatches) — not just trusting
+in-memory state. All 65 rows were then restored to their pre-run values and
+independently re-verified (0 mismatches). This is the project's first
+physical evidence for the RADIOROC 17 register mapping (input DAC
+value/enable/impedance, TQ mask), recovered from the vendor's compiled GUI
+bytecode. Evidence is local under
+`radioroc_runs/physical_channel_config_20260914T035857Z/`. No push or change
+to `main` occurred.
+
+Not established by this run: input DAC enable (only value/impedance/TQ mask
+were exercised; enable uses the same mechanism and register, so risk is low,
+but it hasn't specifically been run), behavior without `--restore` (a
+genuinely persistent change, which is the eventual real-world use case for
+input DAC calibration), or GUI wiring.
+
 ## RADIOROC 18 — Input DAC/TQ mask CLI wiring (offline)
 
 Continuation of RADIOROC 17's non-hardware work, following the existing
