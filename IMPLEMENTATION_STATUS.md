@@ -1,5 +1,45 @@
 # Implementation status
 
+## RADIOROC 15 — First Stage-C oscilloscope validation (PASSED)
+
+Continuation on `feat/desktop-hardware-threshold` at `af90e576c59de4586273c14930d7c0e116544bee`
+(clean tree before this run). The operator connected an oscilloscope to the
+board's IO1 output (bottom-right corner) — the project's first move from
+Stage B (bare board, USB only) to Stage C (oscilloscope/probe). No signal
+generator or injection is involved; this is a passive observation only, so no
+attenuator was needed.
+
+Reran RADIOROC 14's `scripts/radioroc_io_mux_scan.py --execute --sync-io io1`
+sweep (mux indices 0-7) while the operator watched the scope, then a small
+new script (`hold_mux_index5.py`) isolated mux index 5 so the operator had a
+stationary target to observe, mirroring `pulse_synchro_trigger`'s exact write
+sequence and restoring the original mux state afterward.
+
+The operator's first observation (~500 ms apparent pulse spacing) was 50x off
+the requested 10 ms period. Rather than guess, the script was instrumented to
+independently measure the actual `write_word`-level pulse timing: **12.66 ms
+mean period** (min 10.31, max 15.36) — confirming the code/hardware side was
+correct and ruling out a timing bug. The discrepancy was attributed to the
+oscilloscope's own trigger/timebase configuration; after the operator
+adjusted it, they confirmed pulses genuinely ~10 ms apart, matching both the
+request and the independent measurement.
+
+This corroborates a 2026-06-26/2026-06-29 logbook finding (IO1, mux index 5 =
+verified sync output) on the **current** board/software, addressing the
+plan's own caution against trusting historical wiring notes blindly. Evidence
+is local under `radioroc_runs/physical_scope_20260914T025434Z/`. Full
+narrative in the new `docs/hardware/stage_c_io_sync_validation.md`.
+
+Not established: exact voltage/amplitude (no independent voltage reading was
+taken), pulse width/signal integrity, or any other FPGA IO signal (io0,
+io2-io4, or the separate `IO_FPGA6`/`IO_FPGA7` SMA connectors). No push or
+change to `main` occurred.
+
+Next: with the designated operator, decide whether to extend Stage-C work
+(other IO signals, voltage/amplitude measurement, timing on a second scope
+channel) or move toward Stage D (pulse generator) for S-curve/hold-scan
+signal-response validation, per `CROSS_PLATFORM_REBUILD_PLAN.md` section 5.
+
 ## RADIOROC 14 — Stage-B completion sweep (PASSED)
 
 Continuation on `feat/desktop-hardware-threshold` at `e08c0819104099ce90ffa08582909e51ba8d9415`
