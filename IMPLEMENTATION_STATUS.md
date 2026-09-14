@@ -1,5 +1,39 @@
 # Implementation status
 
+## RADIOROC 16 — IO1 sync-pulse amplitude follow-up (PASSED)
+
+Continuation on `feat/desktop-hardware-threshold` at `88974e7584b13f6a026bfa880c9bb7f586b68d04`
+(clean tree before this run). With the oscilloscope already connected from
+RADIOROC 15, the operator held `io1` at mux index 5 again
+(`hold_mux_index5.py`, 3000 pulses; measured mean period again ~12.62 ms,
+consistent with RADIOROC 15) and read the pulse amplitude.
+
+First reading: **14.4V under 50-ohm termination** — about 6x the vendor
+guide's documented "2.5V TTL" figure for the board's FPGA sync connectors,
+and suspiciously close to a 10x multiple of a plausible value. Rather than
+record this as a real 14.4V signal, the operator checked the scope channel's
+probe-attenuation setting: it was **10X** while the physical connection was a
+direct 1x cable. Corrected amplitude: **14.4V / 10 = 1.44V** under 50-ohm
+termination.
+
+This ~1.44V figure doesn't exactly match the vendor guide's 2.5V TTL number
+either, but that number is documented for a different, separately-named
+connector pair (`IO_FPGA6`/`IO_FPGA7`), not confirmed to be the same signal
+path as `io1`'s mux-selected output, and 50-ohm termination can load a
+non-negligible-impedance source down from its open-circuit level. Recorded as
+the current empirical reading, not as a contradiction requiring further
+action right now. Evidence is local under
+`radioroc_runs/physical_scope_amplitude_20260914T030258Z/`. Full narrative in
+`docs/hardware/stage_c_io_sync_validation.md` under "Amplitude follow-up
+(RADIOROC 16)". No push or change to `main` occurred.
+
+Next: with the designated operator, decide whether to keep extending Stage C
+(other IO lines, pulse width/rise time, an untermination-corrected reading)
+or move toward Stage D (pulse generator, per
+`CROSS_PLATFORM_REBUILD_PLAN.md` section 5) — a materially bigger step
+requiring an attenuator and actual signal injection into the ASIC, needing
+its own setup review before authorization.
+
 ## RADIOROC 15 — First Stage-C oscilloscope validation (PASSED)
 
 Continuation on `feat/desktop-hardware-threshold` at `af90e576c59de4586273c14930d7c0e116544bee`

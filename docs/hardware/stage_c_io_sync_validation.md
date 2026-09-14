@@ -1,4 +1,4 @@
-# Stage-C FPGA IO1 sync-pulse validation (RADIOROC 15 — PASSED)
+# Stage-C FPGA IO1 sync-pulse validation (RADIOROC 15/16 — PASSED)
 
 **State: PASSED.** This is the project's first Stage-C physical result
 (`CROSS_PLATFORM_REBUILD_PLAN.md` section 5: "Oscilloscope and suitable
@@ -8,7 +8,9 @@ oscilloscope observation on the current board, that FPGA IO1 carries a real
 synchro-trigger pulse train at mux index 5 — corroborating a logbook finding
 from 2026-06-26/2026-06-29 that the plan document itself cautions must be
 re-checked against the current wiring and board revision before being
-trusted.
+trusted. RADIOROC 16 added a follow-up amplitude reading (~1.44V under
+50-ohm termination, after correcting a 10x probe-attenuation-setting
+mismatch) — see "Amplitude follow-up (RADIOROC 16)" below.
 
 ## Setup
 
@@ -59,17 +61,39 @@ scope-to-computer integration exists in this project) — this is the same
 evidentiary standard as every prior "operator confirms via GUI/physically"
 step in this project, not a lower one.
 
+## Amplitude follow-up (RADIOROC 16)
+
+With the scope already connected, the operator held `io1` at mux index 5
+again (`hold_mux_index5.py`, 3000 pulses, ~38 s; measured mean period again
+~12.6 ms, consistent with the first run) and read the pulse amplitude: first
+reported as **14.4V with 50-ohm termination**. That is about 6x the vendor
+guide's documented "2.5V TTL" figure for the board's FPGA sync connectors,
+and suspiciously close to a 10x multiple of a plausible TTL-ish value — so,
+rather than record it as a real 14.4V signal, the operator was asked to check
+the scope channel's probe-attenuation setting. It was set to **10X** while
+the physical connection was a direct (1x) cable, so the true amplitude is
+**14.4V / 10 ~= 1.44V** under 50-ohm termination.
+
+This corrected 1.44V figure does not exactly match the vendor guide's 2.5V
+TTL figure either, but that figure is documented specifically for the
+`IO_FPGA6`/`IO_FPGA7` SMA connectors (External Synchro/External Hold), not
+confirmed to be the same signal path as `io1`'s mux-selected sync output; a
+50-ohm termination can also load a not-low-impedance source down from its
+open-circuit level. Treat 1.44V (terminated) as the current empirical
+reading for this specific point, not as a contradiction of the vendor figure
+for a different connector.
+
 ## What this does and doesn't establish
 
 Establishes: FPGA IO1, mux index 5, genuinely carries a ~10 ms period digital
 pulse train, both by independent software timing measurement and by direct
 electrical observation — Stage C's core claim ("register readback alone
 cannot establish signal correctness") is now backed by an actual signal
-observation for this one signal path.
+observation for this one signal path. A follow-up amplitude reading, after
+correcting an initial 10x probe-attenuation-setting mismatch, put the pulse
+at ~1.44V under 50-ohm termination.
 
-Does not establish: exact voltage levels/logic family (the operator did not
-report measured amplitude; the vendor guide's "2.5V TTL" figure for the
-board's FPGA sync connectors was not independently confirmed by a voltage
-reading), pulse width/rise-time/signal integrity, or any other FPGA IO
-signal (io0, io2-io4, or the separately-documented `IO_FPGA6`/`IO_FPGA7` SMA
+Does not establish: pulse width/rise-time/signal integrity, an
+untermination-corrected open-circuit amplitude, or any other FPGA IO signal
+(io0, io2-io4, or the separately-documented `IO_FPGA6`/`IO_FPGA7` SMA
 connectors). Those remain open Stage-C work if useful later.
