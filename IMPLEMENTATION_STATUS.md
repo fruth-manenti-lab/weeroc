@@ -1,5 +1,34 @@
 # Implementation status
 
+## RADIOROC 22 — IO0 sync-pulse characterization (PASSED)
+
+Continuation on `feat/desktop-hardware-threshold` at `dfc8d339ee5ab950cbdb5d31108fd7f9b63cea5d`
+(clean tree before this run). The operator moved the oscilloscope from IO1
+to IO0 and asked to characterize it the same way. The fast automated
+`radioroc_io_mux_scan.py --sync-io io0` sweep (run twice) made it hard to
+attribute a signal to a specific mux index, so a new script,
+`hold_mux_index.py <io_name> <index>` (generalizing RADIOROC 15's
+single-purpose `hold_mux_index5.py`), held each of the 8 indices
+individually for ~15 s while the operator watched.
+
+Result: indices 0-3 showed nothing; indices 4, 6, and 7 showed a static
+baseline-level shift with no pulsing (a real, repeatable but unexplained
+effect — not investigated further this session); **index 5 showed real
+pulses**. A longer hold at index 5 (~30 s) let the operator measure
+amplitude: **1.44 Vpp, ~10 ms apart** — matching IO1's RADIOROC 16 result
+almost exactly, at the same mux index. This is now independent Stage-C
+evidence from a second signal path, both consistent with mux index 5
+selecting the same internal synchro-trigger signal regardless of which
+physical IO line it's routed to.
+
+Evidence is local under `radioroc_runs/physical_scope_io0_20260914T044151Z/`.
+Full narrative in `docs/hardware/stage_c_io_sync_validation.md` under "IO0
+characterization (RADIOROC 22)". No push or change to `main` occurred.
+
+Not established: what the indices 4/6/7 baseline shift actually corresponds
+to internally; io2-io4; the documented `IO_FPGA6`/`IO_FPGA7` SMA connectors;
+pulse width/rise-time; an untermination-corrected (open-circuit) amplitude.
+
 ## RADIOROC 21 — First physical validation of the GUI channel-config panel (PASSED)
 
 Continuation on `feat/desktop-hardware-threshold` at `7e9174d3b8ce393802bd3fbf9587150666672ceb`

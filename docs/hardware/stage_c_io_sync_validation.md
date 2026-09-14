@@ -1,4 +1,4 @@
-# Stage-C FPGA IO1 sync-pulse validation (RADIOROC 15/16 — PASSED)
+# Stage-C FPGA IO0/IO1 sync-pulse validation (RADIOROC 15/16/22 — PASSED)
 
 **State: PASSED.** This is the project's first Stage-C physical result
 (`CROSS_PLATFORM_REBUILD_PLAN.md` section 5: "Oscilloscope and suitable
@@ -10,7 +10,9 @@ from 2026-06-26/2026-06-29 that the plan document itself cautions must be
 re-checked against the current wiring and board revision before being
 trusted. RADIOROC 16 added a follow-up amplitude reading (~1.44V under
 50-ohm termination, after correcting a 10x probe-attenuation-setting
-mismatch) — see "Amplitude follow-up (RADIOROC 16)" below.
+mismatch). RADIOROC 22 repeated the full characterization on **IO0** and
+found the same result at the same mux index — see "IO0 characterization
+(RADIOROC 22)" below.
 
 ## Setup
 
@@ -94,6 +96,43 @@ correcting an initial 10x probe-attenuation-setting mismatch, put the pulse
 at ~1.44V under 50-ohm termination.
 
 Does not establish: pulse width/rise-time/signal integrity, an
-untermination-corrected open-circuit amplitude, or any other FPGA IO signal
-(io0, io2-io4, or the separately-documented `IO_FPGA6`/`IO_FPGA7` SMA
-connectors). Those remain open Stage-C work if useful later.
+untermination-corrected open-circuit amplitude, or (before RADIOROC 22) any
+other FPGA IO signal (io0, io2-io4, or the separately-documented
+`IO_FPGA6`/`IO_FPGA7` SMA connectors). io2-io4 and the SMA pair remain open
+Stage-C work if useful later.
+
+## IO0 characterization (RADIOROC 22)
+
+With the oscilloscope moved to the board's IO0 connector, the operator
+first ran the full default `radioroc_io_mux_scan.py --sync-io io0` sweep
+(mux indices 0-7, ~8 s) twice, but the fast automated sweep made it hard to
+attribute an observed signal to a specific index. A new script,
+`hold_mux_index.py <io_name> <index>` (a generalization of RADIOROC 15's
+`hold_mux_index5.py`, taking the IO line and index as arguments), held each
+index individually for ~15 s so the operator could watch one at a time.
+
+Results, index by index:
+
+| Mux index | Observation |
+|---|---|
+| 0-3 | Nothing observable |
+| 4 | Baseline level shifted down, no pulsing |
+| **5** | **Real pulses observed** |
+| 6 | Baseline level shifted down, no pulsing (same as 4) |
+| 7 | Baseline level shifted down, no pulsing (same as 4/6) |
+
+A longer hold (3000 pulses, ~30 s) at index 5 let the operator measure
+amplitude: **1.44 Vpp, pulses ~10 ms apart** — matching IO1's RADIOROC 16
+result (~1.44V, ~10-13 ms) almost exactly, at the *same* mux index. This is
+consistent with mux index 5 selecting the same internal "synchro trigger"
+signal regardless of which physical IO line it is routed to, and is now
+independent evidence from a second signal path, not just one.
+
+The indices 4/6/7 baseline-shift observation is new and not yet explained —
+it is a real, repeatable effect (three separate indices, same character),
+but this session did not investigate what internal signal or artifact
+produces it. Recorded as an open question, not a finding.
+
+Evidence is local under `radioroc_runs/physical_scope_io0_20260914T044151Z/`
+(sweep console logs, the `hold_mux_index.py` script, operator observations
+and measurements in `terminal_summary.json`).
