@@ -1,5 +1,37 @@
 # Implementation status
 
+## RADIOROC 21 — First physical validation of the GUI channel-config panel (PASSED)
+
+Continuation on `feat/desktop-hardware-threshold` at `7e9174d3b8ce393802bd3fbf9587150666672ceb`
+(clean tree before this run). With the board confirmed powered/bare and
+competing software closed, the user authorized driving the actual desktop
+GUI (not the CLI script) through Connect -> the new "Input DAC / TQ mask"
+panel with Restore checked -> Disconnect: TQ mask channel 4, input DAC value
+200 on channel 4, impedance switch to low.
+
+**Passed on the first attempt.** A new harness
+(`radioroc21_gui_channel_config_card.py`, modeled on the RADIOROC 07/12/13/14
+GUI harnesses) drove `ThresholdWindow` directly: connected (status 5),
+filled in the panel fields exactly as authorized, clicked Apply, and watched
+the worker transition `connected -> configuring -> connected` cleanly (no
+fault). The published `channel_config_snapshot()` result matched RADIOROC
+19's CLI outcome exactly: 65 rows touched, 0 verify mismatches, restored,
+0 restore mismatches. Explicit Disconnect and worker shutdown both completed
+normally. Evidence (15 files: screenshots at each step, event/console logs,
+`terminal_summary.json`, `source_provenance.json`) is local under
+`radioroc_runs/physical_gui_channel_config_20260914T041722Z/`.
+
+This closes the one gap left open by RADIOROC 20: both the CLI and the GUI
+paths through the shared `channel_config` core now have independent physical
+evidence, using the same authorization and evidence discipline as every
+other physical card in this project. No push or change to `main` occurred.
+
+Next: with the designated operator, decide the next hardware slice — extend
+Stage C (other IO lines, pulse width/amplitude follow-up) or move to Stage D
+if a pulse generator is available, or continue with deferred non-hardware
+items (persistent defaults/FPGA init, branch/CI review, Windows-parity
+inventory).
+
 ## RADIOROC 20 — Input DAC/TQ mask GUI wiring (offline)
 
 Non-hardware work, at the operator's request to finish GUI wiring alongside
