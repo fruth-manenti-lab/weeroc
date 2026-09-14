@@ -1,5 +1,42 @@
 # Implementation status
 
+## RADIOROC 13 — First physical multi-channel threshold scans (PASSED)
+
+Continuation on `feat/desktop-hardware-threshold` at `df606cf0c5ba0b2a0d32c823dca5327038abbe38`
+(clean tree before this run). With the board confirmed powered/bare (no
+SiPM/pulser) and competing software closed, the user authorized two new T1
+scans reusing the RADIOROC 07/12 conservative settings but varying the
+`channels` field beyond the single hardcoded channel (4) every prior physical
+case used: adjacent channels `[4, 5]`, then boundary channels `[0, 31, 63]`
+(first, middle, last of the 64-channel ASIC). The lead wrote a small new
+harness adapted from the RADIOROC 07/12 script and was sole software operator.
+
+A first attempt stopped on a mismatched expected `attempts` count in the new
+harness itself (attempts scale as `channels x DAC points`, not just DAC
+points) — the board's own scan, cleanup, and verification were unaffected and
+the session closed cleanly. The harness was corrected and rerun immediately
+under the same authorization/settings (no new physical scope). Both cases
+then passed: `cleanup.status == "restored"` and `verification.status ==
+"passed"` (exact FPGA/ASIC match) for channels `[4, 5]` and for `[0, 31, 63]`,
+with a populated rate column per channel in each saved CSV. Source hashes
+confirm no code change from RADIOROC 12. Evidence is local under
+`radioroc_runs/physical_multichannel_20260914T013419Z/` (failed harness
+validation, board state unaffected) and
+`radioroc_runs/physical_multichannel_20260914T013527Z/` (passed). Full
+narrative in `docs/hardware/desktop_threshold_validation.md` under "RADIOROC
+13 multi-channel execution record".
+
+This is the first physical evidence that multi-channel scans work correctly,
+including at the ASIC's channel-index boundaries. Not covered: channels other
+than 0, 4, 5, 31, 63; more than 3 channels in one scan; wider DAC ranges; or
+any cancellation/close-during-run case with multiple channels. No ASIC/FIFO
+misuse, defaults, repair, power-cycle, push, or change to `main` occurred.
+
+Next: with the designated operator, choose the next bounded hardware slice —
+for example a modest wider-range DAC scan, or moving toward first detector
+(SiPM) connection (which needs a new safety card, not just a rerun) — or pivot
+to non-hardware backlog items (branch/CI review, Windows-parity inventory).
+
 ## RADIOROC 12 — Desktop threshold validation card complete (PASSED)
 
 Continuation on `feat/desktop-hardware-threshold` at `33fb47a26323b6babc29ff8b8b717abd4fcdb81f`

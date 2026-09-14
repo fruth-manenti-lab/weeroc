@@ -1,10 +1,13 @@
-# Desktop hardware threshold validation card (RADIOROC 12 — PASSED, all cases)
+# Desktop hardware threshold validation card (RADIOROC 12/13 — PASSED, all cases)
 
 **State: PASSED.** All five required GUI cases (T1, T2, cancel-in-window,
 cancel-after-point, close-during-run) completed with `cleanup=restored` and
 `verification.status=passed` (exact expected/observed match) on 2026-09-11.
-See "RADIOROC 12 execution record" below. This card covers the desktop
-`ConnectionWorker` hardware workflow only. The earlier
+See "RADIOROC 12 execution record" below. RADIOROC 13 (2026-09-14) extended
+coverage beyond the single hardcoded channel (4) used by every case above to a
+small set of channels spanning the 64-channel ASIC's low/adjacent/boundary
+range; see "RADIOROC 13 multi-channel execution record" below. This card
+covers the desktop `ConnectionWorker` hardware workflow only. The earlier
 `bare_board_threshold_validation.md` records RADIOROC 05 CLI evidence,
 separate from this GUI authorization.
 
@@ -180,3 +183,51 @@ covered by this card, still requiring separate authorization: wider DAC/scan
 ranges, Ctest/gain variation, FPGA initialization/defaults, detector
 (SiPM/pulser) connection, and any analog/detector performance claim — the
 board remained bare throughout.
+
+## RADIOROC 13 multi-channel execution record
+
+Every prior physical GUI case (RADIOROC 07, 12) used a single hardcoded
+channel (4). On 2026-09-14, with the board confirmed powered/bare (no
+SiPM/pulser) and competing software closed, the user authorized two new T1
+scans reusing the exact same conservative settings (DAC 0..1, 10 ms window,
+averages 1, mask enabled, Ctest disabled, no FPGA init/defaults, mandatory
+restoration verification) but varying the `channels` field: adjacent channels
+`[4, 5]`, then boundary channels `[0, 31, 63]` (first, middle, and last of the
+64-channel ASIC). No cancellation or close-during-run case was in scope. The
+lead wrote a new harness (`radioroc13_multichannel_card.py`, adapted from the
+RADIOROC 07/12 script) and was sole software operator.
+
+A first execution attempt
+(`radioroc_runs/physical_multichannel_20260914T013419Z/`) stopped on a
+`RuntimeError` for the `[4, 5]` case — but the only reported problem was a
+mismatched expected `attempts` count (`4` observed vs. `2` hardcoded in the
+harness). The scan's own `cleanup.status == "restored"` and
+`verification.status == "passed"` (exact FPGA/ASIC match) were unaffected; the
+harness's emergency handler disconnected and closed the session cleanly
+(`idle` -> `stopped`, no `close_failed`, no fault). Root cause: `attempts`
+scales as `channels x DAC points x averages` in the shared `ThresholdJob`
+(confirmed by reading `src/radioroc/application/threshold.py`), not just DAC
+points as the single-channel cases had it; the harness's hardcoded expected
+values did not account for that. This was a bug in the new local verification
+script, not a hardware or application fault, and did not require a fresh
+authorization to correct and rerun (same board state, same two authorized
+cases, same settings).
+
+The harness's expected-attempts values were corrected (`4` for `[4, 5]`, `6`
+for `[0, 31, 63]`) and rerun immediately
+(`radioroc_runs/physical_multichannel_20260914T013527Z/`). Both cases passed:
+`t1_multichannel_adjacent` (channels 4, 5; 2 points, 4 attempts) and
+`t1_multichannel_boundary` (channels 0, 31, 63; 2 points, 6 attempts), each
+with `cleanup.status == "restored"` and `verification.status == "passed"`
+(empty mismatches/missing) against the expected FPGA words 0/1/6 and full ASIC
+snapshot, and each CSV carrying a populated rate column per requested channel.
+The connection ended in a clean explicit Disconnect and worker shutdown
+(`stopped`, not alive). `source_provenance.json` for the passing run confirms
+the transport/threshold-job source is unchanged from RADIOROC 12.
+
+This is the first physical evidence that the multi-channel scan path (masking
+and measuring more than one channel within a single job) works correctly,
+including at the ASIC's channel-index boundaries (0 and 63). Not covered:
+channels other than 0, 4, 5, 31, 63; more than 3 channels in one scan; wider
+DAC ranges; or any cancellation/close-during-run case with multiple channels
+— each would need its own bounded authorization.
