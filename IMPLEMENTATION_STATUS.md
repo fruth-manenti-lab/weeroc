@@ -1,5 +1,58 @@
 # Implementation status
 
+## RADIOROC 20 — Input DAC/TQ mask GUI wiring (offline)
+
+Non-hardware work, at the operator's request to finish GUI wiring alongside
+the CLI. Refactored first: the CLI script's inline apply/verify/restore logic
+moved into a new shared core, `src/radioroc/application/channel_config.py`
+(`ChannelConfigOperation`, `ChannelConfigResult`, `apply_channel_config`),
+matching this project's stated "shared core for both UI and CLI" principle
+instead of duplicating the logic a second time for the GUI.
+`scripts/radioroc_channel_config.py` now calls this shared function; its
+dry-run output is byte-identical to before the refactor.
+
+The shared core also fixed a real gap: unlike the CLI (which loads the ASIC
+config table via `prepare_device`), the GUI's `ConnectionWorker` never loaded
+`device.i2c_rows` at all, so a channel-config write from the GUI would have
+silently no-opped (`find_i2c_row` returns `None` on an empty table, and the
+RADIOROC 17 setters return early without writing or raising). Added
+`ChannelConfigOperation.load_rows`/loading step (mirroring
+`ThresholdJobConfig.load_rows`'s exact convention: reuse already-loaded rows,
+or load the packaged default CSV) so this now works correctly from either
+caller.
+
+`ConnectionWorker` gained a new `"configuring"` busy state,
+`apply_channel_config(operation)`, and `channel_config_snapshot()`, mirroring
+`read_status`'s shape: on success, published `"connected"` with the result
+stored; on a verify/restore mismatch, latches a fault and publishes
+`"faulted"` (same "any fault blocks further work until reviewed and
+disconnected" policy as threshold-job faults) — not silently reported.
+
+`ThresholdWindow` gained a new "Input DAC / TQ mask (persists unless Restore
+is checked)" group box: a shared channel selector, TQ mask/input-DAC-enable/
+input-DAC-value checkboxes with value controls, a global impedance combo, a
+"Restore after (bounded validation, does not persist)" checkbox, an Apply
+button, and a status label reporting applied writes plus verify/restore
+results. The persistence framing intentionally matches this codebase's
+existing "(persists)" labels on `initialize`/`defaults`. The panel is only
+enabled when connected, idle, and fault-free, reusing the exact same
+condition as the existing "Run hardware threshold" button.
+
+Tests: `tests/test_channel_config.py` (6, offline core logic against a fully
+round-tripping fake ASIC transport — including a genuine forced-mismatch
+case, not just the happy path), 2 new `tests/test_connection_worker.py`
+cases (apply/verify/restore through the real threaded worker; a mismatch
+correctly faults and blocks further commands until disconnect+review), 2 new
+`tests/test_connection_gui.py` cases (button enable state, operation
+construction from widget state, status text, and input validation before
+submission). Full suite: 129 tests pass. The panel was also visually
+verified by rendering the real window offline (screenshots, no hardware) —
+layout, labels, and the disabled-when-disconnected Apply button all confirmed
+correct.
+
+Not done: physical validation of the new GUI path specifically (RADIOROC 19
+validated the CLI path only). No push or change to `main` occurred.
+
 ## RADIOROC 19 — First physical validation of input DAC/TQ mask (PASSED)
 
 Continuation on `feat/desktop-hardware-threshold` at `3e9e188c3aadeb68d7e85d1df1778906ea245ae8`

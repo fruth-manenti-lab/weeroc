@@ -206,6 +206,62 @@ class ConnectionGuiTests(unittest.TestCase):
         window.close()
         self.assertGreaterEqual(worker.shutdown_calls, 1)
 
+    def test_channel_config_submits_operation_and_shows_verified_result(self):
+        from radioroc.application.channel_config import ChannelConfigResult
+
+        worker = FakeHardwareWorker()
+        window = self.make_window(discovery=lambda: [], session_factory=self.session_factory)
+        window.connection_worker = worker
+        window.mode.setCurrentIndex(1)
+        worker.state = "connected"
+        window._update_connection_controls()
+        self.assertTrue(window.channel_config_apply_button.isEnabled())
+
+        window.channel_config_channels.setText("4")
+        window.channel_config_set_tq_mask.setChecked(True)
+        window.channel_config_set_input_dac_value.setChecked(True)
+        window.channel_config_input_dac_value.setValue(200)
+        window.channel_config_restore.setChecked(True)
+        window.apply_channel_config()
+
+        self.assertEqual(len(worker.channel_config_calls), 1)
+        operation = worker.channel_config_calls[0]
+        self.assertEqual(operation.tq_mask_channels, (4,))
+        self.assertEqual(operation.input_dac_value_channels, (4,))
+        self.assertEqual(operation.input_dac_value, 200)
+        self.assertTrue(operation.restore)
+        self.assertEqual(worker.state, "configuring")
+        window._update_connection_controls()
+        self.assertFalse(window.channel_config_apply_button.isEnabled())
+
+        worker.channel_config_result = ChannelConfigResult(
+            applied=("tq_mask channel=4 -> 1", "input_dac_value channel=4 -> 200"),
+            touched_rows=2, verify_mismatches=(), restored=True, restore_mismatches=(),
+        )
+        worker.state = "connected"
+        window.poll_connection_worker()
+        self.assertIn("verified", window.channel_config_status.text())
+        self.assertIn("restored", window.channel_config_status.text())
+        self.assertTrue(window.channel_config_apply_button.isEnabled())
+
+    def test_channel_config_rejects_incomplete_input_before_submitting(self):
+        worker = FakeHardwareWorker()
+        window = self.make_window(discovery=lambda: [], session_factory=self.session_factory)
+        window.connection_worker = worker
+        window.mode.setCurrentIndex(1)
+        worker.state = "connected"
+        window._update_connection_controls()
+
+        window.channel_config_set_input_dac_value.setChecked(True)
+        window.channel_config_channels.setText("4")
+        # input_dac_value spinbox left at 0 is valid, so instead leave no
+        # channels selected for any operation to trigger "at least one field".
+        window.channel_config_set_input_dac_value.setChecked(False)
+        window.apply_channel_config()
+
+        self.assertEqual(worker.channel_config_calls, [])
+        self.assertIn("Invalid channel configuration", window.channel_config_status.text())
+
     def test_hardware_run_replaces_saved_result_banner_before_plot_is_cleared(self):
         worker = FakeHardwareWorker()
         window = self.make_window()
@@ -307,6 +363,8 @@ class FakeHardwareWorker:
         self.run_calls = self.cancel_calls = self.shutdown_calls = 0
         self.outcome = None
         self.run_error = None
+        self.channel_config_calls = []
+        self.channel_config_result = None
 
     @property
     def is_alive(self):
@@ -331,8 +389,15 @@ class FakeHardwareWorker:
     def cancel_threshold(self):
         self.cancel_calls += 1
 
+    def apply_channel_config(self, operation):
+        self.channel_config_calls.append(operation)
+        self.state = "configuring"
+
     def threshold_snapshot(self):
         return SimpleNamespace(event=None, rows=(), coalesced_events=0, outcome=self.outcome)
+
+    def channel_config_snapshot(self):
+        return self.channel_config_result
 
     def finish_fault(self):
         result = SimpleNamespace(status="completed", points=0, attempts=0,

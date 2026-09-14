@@ -17,6 +17,7 @@ from radioroc.transport.config import RadiorocConnectionConfig
 from radioroc.transport.discovery import BoardPort, list_board_ports
 from radioroc.transport.serial import RadiorocSerial
 
+from .channel_config import ChannelConfigOperation, apply_channel_config
 from .jobs import CancellationToken, JobBusyError, JobCancelled
 from .threshold import ThresholdJob, ThresholdJobConfig
 from .threshold_worker import WorkerOutcome, WorkerSnapshot
@@ -57,6 +58,7 @@ class ConnectionWorker:
         self._threshold_unread = False
         self._threshold_coalesced = 0
         self._threshold_outcome = None
+        self._channel_config_outcome = None
         self._hold_shutdown_for_job_fault = False
         self._pending = False
         self._shutdown_queued = False
@@ -92,6 +94,10 @@ class ConnectionWorker:
                                            self._threshold_coalesced,
                                            self._threshold_outcome))
 
+    def channel_config_snapshot(self):
+        with self._lock:
+            return deepcopy(self._channel_config_outcome)
+
     def refresh(self):
         self._submit("refresh", None, "discovering", {"idle", "error"})
 
@@ -102,6 +108,11 @@ class ConnectionWorker:
 
     def read_status(self):
         self._submit("read_status", None, "reading", {"connected"})
+
+    def apply_channel_config(self, operation: ChannelConfigOperation):
+        """Apply one input DAC / TQ mask configuration on the owned session."""
+        operation.validate()
+        self._submit("apply_channel_config", operation, "configuring", {"connected"})
 
     def disconnect(self):
         self._submit("disconnect", None, "disconnecting",
@@ -250,6 +261,8 @@ class ConnectionWorker:
                 self._connect(argument)
             elif command == "read_status":
                 self._read_status()
+            elif command == "apply_channel_config":
+                self._apply_channel_config(argument)
             elif command == "disconnect":
                 self._disconnect(stop=False)
             elif command == "run_threshold":
@@ -398,6 +411,31 @@ class ConnectionWorker:
         with self._lock:
             self._status_word = status_word
         self._publish("connected")
+
+    def _apply_channel_config(self, operation):
+        try:
+            result = apply_channel_config(self._device, operation)
+        except Exception as exc:
+            primary_error = self._describe(exc)
+            close_error = self._close_session()
+            if not close_error:
+                with self._lock:
+                    self._port = None
+                    self._status_word = None
+            with self._lock:
+                self._channel_config_outcome = None
+            self._publish("close_failed" if close_error else "error",
+                          error=primary_error, close_error=close_error)
+            return
+        with self._lock:
+            self._channel_config_outcome = result
+        if result.verify_mismatches or result.restore_mismatches:
+            fault = (f"channel config mismatch: verify={len(result.verify_mismatches)} "
+                     f"restore={len(result.restore_mismatches)}")
+            self._latch_fault(fault)
+            self._publish("faulted", error=fault)
+        else:
+            self._publish("connected")
 
     def _disconnect(self, *, stop: bool) -> bool:
         close_error = self._close_session()

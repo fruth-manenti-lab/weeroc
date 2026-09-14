@@ -14,7 +14,8 @@ from PySide6.QtWidgets import (
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
-from radioroc_client import ThresholdScanConfig
+from radioroc_client import ThresholdScanConfig, parse_channels
+from radioroc.application.channel_config import ChannelConfigOperation
 from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.application.threshold import ThresholdJob, ThresholdJobConfig
 from radioroc.application.threshold_worker import ThresholdWorker
@@ -46,7 +47,8 @@ def _new_directory(execution_mode="simulation"):
 
 
 class ThresholdWindow(QMainWindow):
-    _CONNECTION_BUSY = {"discovering", "connecting", "reading", "disconnecting", "scanning"}
+    _CONNECTION_BUSY = {"discovering", "connecting", "reading", "disconnecting", "scanning",
+                        "configuring"}
     _CONNECTION_LOCKS_MODE = _CONNECTION_BUSY | {"connected", "close_failed", "faulted"}
 
     def __init__(self, *, worker_factory=ThresholdWorker,
@@ -124,6 +126,45 @@ class ThresholdWindow(QMainWindow):
         self.firmware_status = QLabel("—")
         connection_form.addRow("Firmware status", self.firmware_status)
         form.addRow(self.connection_group)
+
+        self.channel_config_group = QGroupBox("Input DAC / TQ mask (persists unless Restore is checked)")
+        channel_config_form = QFormLayout(self.channel_config_group)
+        self.channel_config_channels = QLineEdit()
+        self.channel_config_channels.setPlaceholderText("e.g. 4 or 0-15 or all")
+        channel_config_form.addRow("Channels", self.channel_config_channels)
+        self.channel_config_set_tq_mask = QCheckBox("Set TQ mask")
+        self.channel_config_tq_mask_value = QComboBox()
+        self.channel_config_tq_mask_value.addItems(["Enabled", "Disabled"])
+        tq_row = QHBoxLayout()
+        tq_row.addWidget(self.channel_config_set_tq_mask)
+        tq_row.addWidget(self.channel_config_tq_mask_value)
+        channel_config_form.addRow(tq_row)
+        self.channel_config_set_input_dac_enable = QCheckBox("Set input DAC enable")
+        self.channel_config_input_dac_enable_value = QComboBox()
+        self.channel_config_input_dac_enable_value.addItems(["Enabled", "Disabled"])
+        dac_enable_row = QHBoxLayout()
+        dac_enable_row.addWidget(self.channel_config_set_input_dac_enable)
+        dac_enable_row.addWidget(self.channel_config_input_dac_enable_value)
+        channel_config_form.addRow(dac_enable_row)
+        self.channel_config_set_input_dac_value = QCheckBox("Set input DAC value")
+        self.channel_config_input_dac_value = _integer(0, 255, 0)
+        dac_value_row = QHBoxLayout()
+        dac_value_row.addWidget(self.channel_config_set_input_dac_value)
+        dac_value_row.addWidget(self.channel_config_input_dac_value)
+        channel_config_form.addRow(dac_value_row)
+        self.channel_config_impedance = QComboBox()
+        self.channel_config_impedance.addItems(
+            ["Unchanged", "Low (~150 Ohm, all channels)", "High (all channels)"])
+        channel_config_form.addRow("Impedance", self.channel_config_impedance)
+        self.channel_config_restore = QCheckBox("Restore after (bounded validation, does not persist)")
+        channel_config_form.addRow(self.channel_config_restore)
+        self.channel_config_apply_button = QPushButton("Apply channel config")
+        channel_config_form.addRow(self.channel_config_apply_button)
+        self.channel_config_status = QLabel("—")
+        self.channel_config_status.setWordWrap(True)
+        channel_config_form.addRow(self.channel_config_status)
+        form.addRow(self.channel_config_group)
+
         self.channels = QLineEdit("4,5")
         self.dac_min = _integer(0, 1023, 0)
         self.dac_max = _integer(0, 1023, 1000)
@@ -207,6 +248,7 @@ class ThresholdWindow(QMainWindow):
         self.read_status_button.clicked.connect(self.read_hardware_status)
         self.disconnect_button.clicked.connect(self.disconnect_hardware)
         self.review_fault_button.clicked.connect(self.review_hardware_fault)
+        self.channel_config_apply_button.clicked.connect(self.apply_channel_config)
         self.timer = QTimer(self)
         self.timer.setInterval(100)
         self.timer.timeout.connect(self.poll_worker)
@@ -299,6 +341,50 @@ class ThresholdWindow(QMainWindow):
         if self.connection_worker is not None:
             self._connection_command(lambda worker: worker.review_fault())
 
+    def apply_channel_config(self):
+        if self.mode.currentIndex() != 1 or self.connection_worker is None:
+            return
+        text = self.channel_config_channels.text().strip()
+        channels = tuple(parse_channels(text)) if text else ()
+        impedance = {0: None, 1: True, 2: False}[self.channel_config_impedance.currentIndex()]
+        operation = ChannelConfigOperation(
+            tq_mask_channels=channels if self.channel_config_set_tq_mask.isChecked() else (),
+            tq_mask_value=self.channel_config_tq_mask_value.currentIndex() == 0,
+            input_dac_enable_channels=(
+                channels if self.channel_config_set_input_dac_enable.isChecked() else ()),
+            input_dac_enable_value=self.channel_config_input_dac_enable_value.currentIndex() == 0,
+            input_dac_value_channels=(
+                channels if self.channel_config_set_input_dac_value.isChecked() else ()),
+            input_dac_value=(self.channel_config_input_dac_value.value()
+                             if self.channel_config_set_input_dac_value.isChecked() else None),
+            input_dac_impedance=impedance,
+            verify=True,
+            restore=self.channel_config_restore.isChecked(),
+        )
+        try:
+            operation.validate()
+        except ValueError as exc:
+            self.channel_config_status.setText(f"Invalid channel configuration: {exc}")
+            return
+        self._connection_command(lambda worker: worker.apply_channel_config(operation))
+
+    def _show_channel_config_snapshot(self):
+        worker = self.connection_worker
+        result = worker.channel_config_snapshot() if worker is not None else None
+        if result is None:
+            return
+        parts = [f"{len(result.applied)} write(s)", f"{result.touched_rows} row(s) touched"]
+        if result.verify_mismatches:
+            parts.append(f"{len(result.verify_mismatches)} VERIFY MISMATCH(ES)")
+        else:
+            parts.append("verified")
+        if result.restored:
+            parts.append("restored" if not result.restore_mismatches
+                         else f"{len(result.restore_mismatches)} RESTORE MISMATCH(ES)")
+        self.channel_config_status.setText(
+            "Channel config: " + "; ".join(parts) + (
+                (" · " + "; ".join(result.applied)) if result.applied else ""))
+
     def _show_connection_snapshot(self, snapshot):
         state = snapshot.state
         if state == "idle":
@@ -365,6 +451,7 @@ class ThresholdWindow(QMainWindow):
         snapshot = worker.snapshot()
         self._sync_connection_ports(snapshot.ports)
         self._show_connection_snapshot(snapshot)
+        self._show_channel_config_snapshot()
         if snapshot.state == "close_failed" and self._closing:
             # A failed window-close attempt stays open for review. A later close
             # event is the explicit request to try shutdown again.
@@ -408,6 +495,8 @@ class ThresholdWindow(QMainWindow):
                                   and not self._closing)
         self.run_button.setEnabled((self.mode.currentIndex() == 0 and simulation_available) or
                                    (self.mode.currentIndex() == 1 and hardware_run_available))
+        self.channel_config_group.setEnabled(hardware)
+        self.channel_config_apply_button.setEnabled(hardware_run_available)
 
     def operation(self):
         channels = [int(value.strip()) for value in self.channels.text().split(",")]

@@ -10,6 +10,7 @@ from unittest.mock import patch
 import radioroc_client  # noqa: F401
 from radioroc_client import ThresholdScanConfig, ThresholdScanResult
 
+from radioroc.application.channel_config import ChannelConfigOperation
 from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.application.jobs import JobBusyError
 from radioroc.application.threshold import ThresholdJobConfig
@@ -356,6 +357,66 @@ class ConnectionWorkerTests(unittest.TestCase):
         self.assertEqual(set(transport.thread_ids + session.thread_ids),
                          {worker._thread.ident})
         self.assertEqual(session.close_calls, 0)
+
+    def test_channel_config_applies_verifies_restores_and_stays_on_worker_thread(self):
+        transport = OwnedThresholdTransport()
+        session = ThresholdSession(transport)
+        worker = self.started(session_factory=lambda config: session)
+        worker.connect(RadiorocConnectionConfig(port="fake-control"))
+        self.wait_for(worker, "connected")
+
+        worker.apply_channel_config(ChannelConfigOperation(
+            tq_mask_channels=(4,), tq_mask_value=True,
+            input_dac_value_channels=(4,), input_dac_value=200,
+            input_dac_impedance=True, verify=True, restore=True,
+        ))
+        self.assertEqual(worker.snapshot().state, "configuring")
+        with self.assertRaises(JobBusyError):
+            worker.read_status()
+        snap = self.wait_for(worker, "connected", timeout=5)
+        result = worker.channel_config_snapshot()
+
+        self.assertIsNone(snap.fault)
+        self.assertEqual(result.verify_mismatches, ())
+        self.assertTrue(result.restored)
+        self.assertEqual(result.restore_mismatches, ())
+        self.assertIn("tq_mask channel=4 -> 1", result.applied)
+        self.assertEqual(set(transport.thread_ids + session.thread_ids),
+                         {worker._thread.ident})
+        self.assertEqual(session.close_calls, 0)
+
+    def test_channel_config_mismatch_faults_until_disconnected_and_reviewed(self):
+        transport = OwnedThresholdTransport()
+        session = ThresholdSession(transport)
+        worker = self.started(session_factory=lambda config: session)
+        config = RadiorocConnectionConfig(port="fake-control")
+        worker.connect(config)
+        self.wait_for(worker, "connected")
+
+        # Force a readback mismatch, the same way test_channel_config.py
+        # exercises the same fault path against the shared core directly.
+        device = worker._device
+        original_read_register_bits = device.read_register_bits
+
+        def flaky_read_register_bits(add, subadd):
+            if (add, subadd) == (4, 6):
+                return "00000000"
+            return original_read_register_bits(add, subadd)
+
+        device.read_register_bits = flaky_read_register_bits
+
+        worker.apply_channel_config(ChannelConfigOperation(tq_mask_channels=(4,), verify=True))
+        snap = self.wait_for(worker, "faulted", timeout=5)
+        self.assertIn("channel config mismatch", snap.fault)
+        self.assertIsNotNone(worker.channel_config_snapshot())
+        with self.assertRaises(JobBusyError):
+            worker.apply_channel_config(ChannelConfigOperation(tq_mask_channels=(5,)))
+
+        worker.disconnect()
+        idle = self.wait_for(worker, "idle")
+        self.assertIsNotNone(idle.fault)
+        worker.review_fault()
+        self.assertIsNone(worker.snapshot().fault)
 
     def test_verified_cancellation_returns_to_connected_after_cleanup(self):
         transport = OwnedThresholdTransport(counts=(10,))
