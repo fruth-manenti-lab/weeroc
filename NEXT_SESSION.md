@@ -1,4 +1,4 @@
-# RADIOROC 23 — Continue Stage C (io2-4, SMA pair, baseline-shift question), or move on
+# RADIOROC 23 — Real next feature: Stage D (if equipment allows) or app backlog
 
 Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md`,
 `CROSS_PLATFORM_REBUILD_PLAN.md`, `docs/hardware/stage_b_completion.md`, and
@@ -8,43 +8,49 @@ Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md`,
 Branch: `feat/desktop-hardware-threshold`, version `0.5.0`. Verify current
 commit and working tree.
 
-**Hardware state:** both IO1 (RADIOROC 15/16) and IO0 (RADIOROC 22) are now
-characterized: mux index 5 carries a real ~10 ms period, ~1.44 Vpp pulse
-train on both — the same signal, routed to whichever physical IO line is
-selected. Indices 0-3 show nothing on either line; indices 4/6/7 show a
-static baseline-level shift with no pulsing, a real and repeatable but
-**unexplained** effect, not investigated this session. io2, io3, io4, and
-the documented `IO_FPGA6`/`IO_FPGA7` SMA connectors have never been probed.
-Pulse width/rise-time and an untermination-corrected (open-circuit)
-amplitude are also still open on both io0 and io1.
+**Course correction:** the operator asked to stay focused on what the app
+and end user actually need, not open-ended/completionist hardware
+exploration. Prior handoffs (including an earlier draft of this file) listed
+things like "characterize io2-4 for completeness" and "investigate the mux
+4/6/7 baseline-shift artifact" as options — neither ties to a real feature
+in `CROSS_PLATFORM_REBUILD_PLAN.md`'s feature table, so drop them. Only
+propose hardware or exploratory work that unblocks a concrete feature-parity
+row or end-user capability.
+
+**Hardware state:** IO1 (RADIOROC 15/16) and IO0 (RADIOROC 22) are both
+confirmed carrying the real ~10 ms, ~1.44 Vpp sync pulse at mux index 5 —
+that's the FPGA-routing/sync-timing evidence Stage C exists to establish,
+and it's now been shown on two independent signal paths. Treat that claim as
+adequately supported; do not re-verify it further without a concrete reason.
 
 The input DAC/TQ mask feature (RADIOROC 17-21) is complete and evidenced on
-both the CLI and GUI paths — nothing further planned there unless new gaps
-turn up.
+both the CLI and GUI paths.
 
-Next bounded task: with the designated operator, pick a direction:
+Next bounded task: with the designated operator, pick a direction that
+serves a real feature:
 
-1. **Continue Stage C** — reuse `hold_mux_index.py <io_name> <index>` (now
-   generalized to take any IO name) to characterize io2, io3, io4 the same
-   way, and/or investigate what the mux 4/6/7 baseline-shift artifact
-   actually is (for example, by reading back FPGA/ASIC state at that mux
-   index to see what changed, rather than only watching the scope).
-2. **Probe the `IO_FPGA6`/`IO_FPGA7` SMA connectors** (documented "External
-   Synchro"/"External Hold", 2.5V TTL) if they're identifiable as separate
-   physical connectors from io0-io4 on the board.
-3. **Move to Stage D** if a pulse generator becomes available — the bigger,
-   still-untouched step (needs an attenuator, injects a signal into the
-   ASIC, needs its own setup review before authorization).
-4. **Non-hardware work**: persistent defaults/FPGA init (item 7, still
-   explicitly deferred), branch/CI review before publishing, or the
-   Windows-parity inventory expansion (both already queued).
+1. **Move to Stage D** if a pulse generator is available — this is the
+   actual blocked feature work: `F07` (S-curves) and `F10` (hold scans) in
+   the plan's feature table need real signal injection to validate, and
+   existing CLI scripts (`scripts/radioroc_scurve.py`,
+   `scripts/radioroc_hold_scan.py`, `scripts/radioroc_standard_scurves.py`)
+   already implement the backend but have no GUI and no physical evidence
+   under this rebuild. This is a bigger step (needs an attenuator, injects
+   a signal into the ASIC) needing its own setup review before
+   authorization, but it is real feature-parity work, not exploration.
+2. **Non-hardware app work**: persistent defaults/FPGA init (item 7, `F06`
+   in the feature table — still explicitly deferred by operator choice);
+   branch/CI review before publishing; or expanding the Windows-parity
+   inventory (`CROSS_PLATFORM_REBUILD_PLAN.md` M0 step 3, "build the
+   detailed parity table" — still only a summary table exists, not the
+   full per-row inventory the plan calls for).
+3. If neither is right, ask the operator directly what's next rather than
+   defaulting to more hardware characterization.
 
 Whatever is chosen, follow the RADIOROC 09-22 discipline: confirm
 preconditions before any hardware access, get an explicit authorization
-statement for the exact action, reuse the existing per-index hold script
-rather than writing a new one, and record operator observations precisely
-(distinguish "nothing," "baseline shift only," and "real pulses," as this
-session did) rather than collapsing them into a single pass/fail.
+statement for the exact action, and stop immediately on any error, fault, or
+mismatch.
 
 Acceptance: the chosen direction is authorized/scoped, executed, and its
 outcome recorded with the same evidence rigor as RADIOROC 09-22 in both
