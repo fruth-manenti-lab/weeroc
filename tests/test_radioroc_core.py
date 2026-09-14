@@ -78,6 +78,45 @@ class RadiorocCoreTests(unittest.TestCase):
         device.write_word(3, "11110000")
         self.assertEqual(transport.words[3], "11110000")
 
+    def test_tq_mask_and_input_dac_bit_positions(self) -> None:
+        # Bit positions recovered from the vendor GUI's compiled widget
+        # properties (radioroc2UI.pyc / i2c.pyc's set_value convention:
+        # position = LSB index), cross-checked against this codebase's
+        # already hardware-validated T1 (index 3) / T2 (index 4) bits on the
+        # same channel-6 register. Not yet independently hardware-validated
+        # for these specific bits.
+        device = RadiorocDevice(RadiorocMemoryTransport(), dry_run=True)  # type: ignore[arg-type]
+        device.load_default_config()
+
+        device.set_tq_mask_for_channel(4, enabled=True)
+        self.assertEqual(device.find_i2c_row(4, 6).data[5], "1")
+        device.set_tq_mask_for_channel(4, enabled=False)
+        self.assertEqual(device.find_i2c_row(4, 6).data[5], "0")
+
+        device.set_input_dac_enable_for_channel(4, enabled=True)
+        self.assertEqual(device.find_i2c_row(4, 6).data[1], "1")
+        device.set_input_dac_enable_for_channel(4, enabled=False)
+        self.assertEqual(device.find_i2c_row(4, 6).data[1], "0")
+
+        device.set_input_dac_value(4, 200)
+        self.assertEqual(device.find_i2c_row(4, 0).data, bits(200, 8))
+        with self.assertRaises(ValueError):
+            device.set_input_dac_value(4, 256)
+        with self.assertRaises(ValueError):
+            device.set_input_dac_value(64, 0)
+
+        device.set_input_dac_impedance(True)
+        self.assertTrue(all(device.find_i2c_row(ch, 6).data[0] == "1" for ch in range(64)))
+        device.set_input_dac_impedance(False)
+        self.assertTrue(all(device.find_i2c_row(ch, 6).data[0] == "0" for ch in range(64)))
+
+        # Untouched bits on the shared channel-6 register are left alone.
+        before = device.find_i2c_row(10, 6).data
+        device.set_tq_mask_for_channel(10, enabled=True)
+        after = device.find_i2c_row(10, 6).data
+        self.assertEqual(after[5], "1")
+        self.assertEqual(after[:5] + after[6:], before[:5] + before[6:])
+
 
 class RadiorocAnalysisTests(unittest.TestCase):
     def test_threshold_csv_and_summary(self) -> None:

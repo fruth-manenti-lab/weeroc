@@ -1348,6 +1348,124 @@ class RadiorocDevice:
         data[3] = "1" if enabled else "0"
         self.write_register(channel, 7, "".join(data))
 
+    def set_tq_mask_for_channel(self, channel: int, enabled: bool) -> None:
+        """Enable or disable one channel's TQ trigger mask bit.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `enabled` (`bool`): Mask bit value.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel mask register if present in the loaded defaults.
+
+        Bit position recovered from the vendor GUI's compiled widget
+        properties (`checkBox_maskTQ_NN`: add=channel, subadd=6, position=2,
+        LSB-numbered per `i2c.set_value`'s documented convention -> string
+        index 5 in this codebase's MSB-first row string), cross-checked
+        against `set_mask_for_channel`'s already hardware-validated T1
+        (position 4 -> index 3) and T2 (position 3 -> index 4) bits from the
+        same register. Not yet independently verified against real hardware.
+        """
+
+        validate_channel(channel)
+        row: I2CRow | None = self.find_i2c_row(channel, 6)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[5] = "1" if enabled else "0"
+        self.write_register(channel, 6, "".join(data))
+
+    def set_input_dac_enable_for_channel(self, channel: int, enabled: bool) -> None:
+        """Enable or disable one channel's input DAC.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `enabled` (`bool`): Enable bit value.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel mask register if present in the loaded defaults.
+
+        Bit position recovered from the vendor GUI's compiled widget
+        properties (`checkBox_indacNN`: add=channel, subadd=6, position=6 ->
+        string index 1 in this codebase's row string). Not yet independently
+        verified against real hardware.
+        """
+
+        validate_channel(channel)
+        row: I2CRow | None = self.find_i2c_row(channel, 6)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[1] = "1" if enabled else "0"
+        self.write_register(channel, 6, "".join(data))
+
+    def set_input_dac_impedance(self, low_impedance: bool) -> None:
+        """Select high- or low-impedance (~150 Ohm) input DAC termination.
+
+        **Inputs**
+        - `low_impedance` (`bool`): Select the ~150 Ohm input when true, high
+          impedance when false.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes the same bit across every loaded channel-6 register (0..63)
+          present in the loaded defaults.
+
+        This is a single physical switch shared by all channels, not a
+        per-channel setting (vendor guide 3.1.2). Bit position recovered from
+        the vendor GUI's compiled widget properties
+        (`checkBox_indac_impedance`: subadd=6, position=7, `all_channels_add`
+        true -> string index 0, written identically to every channel's row 6).
+        Not yet independently verified against real hardware.
+        """
+
+        value = "1" if low_impedance else "0"
+        for channel in range(N_CHANNELS):
+            row: I2CRow | None = self.find_i2c_row(channel, 6)
+            if row is None:
+                continue
+            data: list[str] = list(row.data)
+            data[0] = value
+            self.write_register(channel, 6, "".join(data))
+
+    def set_input_dac_value(self, channel: int, value: int) -> None:
+        """Set one channel's input DAC DC value.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `value` (`int`): Raw 8-bit input DAC code, 0..255 (vendor guide
+          3.1.2: approximately 50-600 mV, ~2 mV per step).
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel input-DAC register if present in the loaded
+          defaults.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`lineEdit_indacNN`: add=channel, subadd=0, position=0, nbbits=8 ->
+        the entire row byte). Not yet independently verified against real
+        hardware.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_channel(channel)
+        validate_integer(value, 0, 255, "value")
+        row: I2CRow | None = self.find_i2c_row(channel, 0)
+        if row is None:
+            return
+        self.write_register(channel, 0, bits(value, 8))
+
     def prepare_trigger_masks(self, *, t1: bool, use_mask: bool, use_ctest: bool) -> None:
         """Prepare trigger path masks and Ctest bits for scan loops.
 

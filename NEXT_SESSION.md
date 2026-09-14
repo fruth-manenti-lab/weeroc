@@ -1,65 +1,69 @@
-# RADIOROC 17 — Extend Stage C or move toward Stage D
+# RADIOROC 18 — Resume Stage C/D, or wire and validate input DAC/TQ mask
 
 Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md`,
 `CROSS_PLATFORM_REBUILD_PLAN.md`, `docs/hardware/stage_b_completion.md`, and
 `docs/hardware/stage_c_io_sync_validation.md`. The preceding chat is
-**RADIOROC 16 — IO1 sync-pulse amplitude follow-up**.
+**RADIOROC 17 — Input DAC and TQ mask: register mapping recovered,
+implemented offline** (non-hardware work done while the operator was away).
 
 Branch: `feat/desktop-hardware-threshold`, version `0.5.0`. Verify current
-commit and working tree. RADIOROC 15 confirmed FPGA IO1 (mux index 5) carries
-a real ~10-13ms period sync pulse, cross-validated against a 2026-06/2026-06
-logbook finding. RADIOROC 16 followed up with an amplitude reading: initially
-14.4V under 50-ohm termination, corrected to **~1.44V** after discovering the
-scope channel's probe-attenuation setting (10X) didn't match the physical
-1x cable. This doesn't exactly match the vendor guide's "2.5V TTL" figure,
-but that figure is documented for a different connector pair
-(`IO_FPGA6`/`IO_FPGA7`), so it's recorded as the current empirical reading,
-not treated as a contradiction needing resolution. Evidence under
-`radioroc_runs/physical_scope_20260914T025434Z/` and
-`radioroc_runs/physical_scope_amplitude_20260914T030258Z/`.
+commit and working tree.
 
-**Lesson worth repeating to the operator on any future scope measurement**:
-always check the channel's probe-attenuation setting (1X vs 10X) against the
-actual physical connection before trusting an absolute voltage reading — this
-session hit exactly that mistake once already (a 10x error).
+**Hardware state (unchanged since RADIOROC 16, no hardware touched in 17):**
+RADIOROC 15 confirmed FPGA IO1 (mux index 5) carries a real ~10-13ms period
+sync pulse. RADIOROC 16 measured its amplitude: ~1.44V under 50-ohm
+termination, after catching a 10x probe-attenuation-setting mismatch (always
+check this on any new scope measurement). Stage C so far covers only IO1;
+Stage D (pulse generator, signal injection) hasn't started.
 
-State: Stage B complete for everything with existing, non-persistent-change
-code. Stage C has one signal (IO1, mux 5) with existence, timing, and now
-amplitude confirmed. No other FPGA IO line has been probed; no analog signal
-response (needs Stage D, a pulse generator) has been touched.
+**New in RADIOROC 17 (no hardware access):** the two Stage-B gaps that had
+*no existing code at all* — per-channel input DAC value/enable/impedance and
+the TQ mask — now have a register-level mapping, recovered by loading the
+vendor's own compiled `radioroc2UI.pyc`/`uiroc/i2c.pyc` bytecode directly
+with Python's `marshal`+`dis` (the vendor's PyInstaller build turned out to
+use a Python 3.13-era marshal format the current interpreter reads natively,
+no decompiler needed) rather than guessing. The mapping cross-checks cleanly
+against this codebase's already hardware-validated T1/T2 mask bit positions.
+Implemented as four new `RadiorocDevice` methods (`set_tq_mask_for_channel`,
+`set_input_dac_enable_for_channel`, `set_input_dac_impedance`,
+`set_input_dac_value`), with one new offline test; full suite (119 tests)
+passes. See `IMPLEMENTATION_STATUS.md`'s RADIOROC 17 entry for the exact bit
+mapping and its provenance. **Not yet wired into any CLI script or the GUI,
+and not yet physically validated** — these are the two natural next steps
+for this specific feature, separate from the Stage C/D hardware track.
 
-Next bounded task: with the designated operator, choose a direction:
+Next bounded task: with the designated operator, choose a direction — there
+are now two independent threads, either is fine to pick up:
 
-1. **Extend Stage C further** while the scope may still be connected: pulse
-   width/rise-time, an untermination-corrected (high-Z) amplitude reading, or
-   probing a different FPGA IO line (io0, io2-io4, or the documented
-   `IO_FPGA6`/`IO_FPGA7` SMA connectors) with the same
-   existence/timing/amplitude approach used for IO1.
-2. **Move to Stage D** if a pulse generator is also available — this is what
-   the historical logbook workflow actually built toward (IO1 triggering a
-   generator, generator output attenuated into `in-test1` for real
-   S-curve/hold-scan signal response, `F07`/`F10` in the plan's feature
-   table). Bigger step: needs an attenuator (not needed for RADIOROC
-   15/16's passive observation) and involves injecting a signal into the
-   ASIC — needs its own careful setup review before authorization.
-3. **Non-hardware work instead**: item 7 (persistent defaults/FPGA init) is
-   still deferred and open; so are the input-DAC/TQ-mask feature gaps and
-   the already-queued branch/CI review and Windows-parity inventory backlog
-   items.
+1. **Continue the Stage C/D hardware track** (unchanged from RADIOROC 17's
+   handoff): extend Stage C (pulse width/rise-time on IO1, an
+   untermination-corrected amplitude, or probing io0/io2-io4/
+   `IO_FPGA6`/`IO_FPGA7`) or move to Stage D if a pulse generator is
+   available (bigger step: needs an attenuator, involves injecting a signal
+   into the ASIC, needs its own setup review before authorization).
+2. **Finish the input-DAC/TQ-mask feature**: wire the four new device
+   methods into a CLI script (following the existing
+   `scripts/radioroc_*.py` pattern: `--execute`-gated, dry-run default,
+   preset/connection args) and/or the GUI, then design a bounded physical
+   validation card for them (same discipline as every prior card: fresh
+   authorization, bare board, independent restoration verification) —
+   this would be the first physical evidence for either control.
+3. **Other deferred items**: persistent defaults/FPGA init (item 7, still
+   explicitly deferred by operator choice) or the already-queued branch/CI
+   review and Windows-parity inventory backlog items.
 
-Whatever is chosen, follow the RADIOROC 09-16 discipline: confirm
-preconditions (including what's physically connected and at what point)
-before any hardware access, get an explicit authorization statement
-(operator, host, UTC start time, scope) for the exact action, and when a
-reading doesn't match expectations (as happened twice now — the 500ms timing
-illusion and the 14.4V amplitude), diagnose with independent instrumentation
-or a sanity check on measurement setup before concluding anything about the
-hardware itself.
+Whatever is chosen, follow the RADIOROC 09-17 discipline: confirm
+preconditions before any hardware access, get an explicit authorization
+statement (operator, host, UTC start time, scope) for the exact action, and
+when a reading or result doesn't match expectations, diagnose with
+independent instrumentation or a sanity check on the setup/tooling before
+concluding anything about the hardware itself (this session's own register
+mapping is offered with that same discipline: cross-checked, not guessed,
+but still flagged unverified against real hardware).
 
-Acceptance: the chosen direction is authorized, run (or explicitly scoped as
-non-hardware work), and its outcome recorded with the same evidence rigor as
-RADIOROC 09-16 in both `IMPLEMENTATION_STATUS.md` and this file, along with
-the next task. No ASIC/FIFO access, verifier, scan, persistent configuration
-write, defaults, repair, power-cycle, signal injection, or detector
-connection beyond what is explicitly authorized for that exact action; no
-push or change to `main`.
+Acceptance: the chosen direction is authorized/scoped, executed, and its
+outcome recorded with the same evidence rigor as RADIOROC 09-17 in both
+`IMPLEMENTATION_STATUS.md` and this file, along with the next task. No
+ASIC/FIFO access, verifier, scan, persistent configuration write, defaults,
+repair, power-cycle, signal injection, or detector connection beyond what is
+explicitly authorized for that exact action; no push or change to `main`.

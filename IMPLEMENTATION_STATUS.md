@@ -1,5 +1,62 @@
 # Implementation status
 
+## RADIOROC 17 — Input DAC and TQ mask: register mapping recovered, implemented offline
+
+Non-hardware work while the operator was away. Two of Stage B's previously
+"no existing code" gaps — per-channel input DAC value/enable/impedance and
+the TQ mask — had no register-level specification anywhere in this repo (the
+vendor user guide describes the UI behavior but not register bits, and the
+existing `*_pydisasm.txt` notes for `ndevice`/`device`/`i2c` don't cover
+them). Guessing register bits for real hardware writes was rejected as too
+risky; instead, the lead recovered the mapping directly from the vendor
+application's own compiled bytecode.
+
+The vendor's PyInstaller-extracted `.pyc` files carry a Python 3.13-era
+marshal format that the current interpreter (3.13.14) loads and disassembles
+natively (`marshal.load` + `dis`), so no decompiler was needed. Searching
+`radioroc2UI.pyc`'s `Ui_MainWindow.setupUi` (the Qt-Designer-generated widget
+layout) for the relevant widget names found each control's register mapping
+encoded as literal `setProperty(add=..., subadd=..., nbbits=..., position=...,
+all_channels_add=..., all_channels_subadd=...)` calls, and `uiroc/i2c.pyc`'s
+`set_value` docstring gives the authoritative convention: `position` is the
+**LSB-numbered** bit position in the register byte. Recovered mapping (all on
+the existing per-channel `(channel, 6)` register except the DAC value):
+
+| Control | Vendor `position` (LSB) | This codebase's row-string index (MSB-first) |
+|---|---|---|
+| T1 mask (existing `set_mask_for_channel`) | 4 | 3 |
+| T2 mask (existing `set_mask_for_channel`) | 3 | 4 |
+| TQ mask (new) | 2 | 5 |
+| Input DAC enable (new) | 6 | 1 |
+| Input DAC impedance (new, `all_channels_add=True`: written identically to channels 0-63) | 7 | 0 |
+| Input DAC value (new, register `(channel, 0)`, `nbbits=8`) | 0 (whole byte) | whole byte |
+
+The T1/T2 rows are not new discoveries — they're a cross-check: the vendor's
+own `position=4`/`position=3` convert to string indices 3/4 exactly matching
+`set_mask_for_channel`'s already hardware-validated bit choices (RADIOROC
+07/12/13), which is why the new TQ/input-DAC bits are recorded with
+reasonable confidence rather than as a guess, while still being explicitly
+**not yet independently verified against real hardware**.
+
+Implemented in `radioroc_client.py`: `set_tq_mask_for_channel`,
+`set_input_dac_enable_for_channel`, `set_input_dac_impedance`,
+`set_input_dac_value`, mirroring `set_mask_for_channel`/`set_ctest_for_channel`'s
+existing style exactly (each is a no-op if the loaded config lacks the target
+row, same as the existing methods). One new offline test,
+`test_tq_mask_and_input_dac_bit_positions` in `tests/test_radioroc_core.py`,
+exercises all four against `RadiorocMemoryTransport`/dry-run, including value
+validation (`0..255`) and confirming untouched bits on the shared register are
+left alone. Full suite: 119 tests pass (`python -m unittest discover -s
+tests`). No hardware was touched; `pip install decompyle3` (unused in the
+end — wrong Python era) and `brew install poppler` (used earlier, RADIOROC
+15) are local environment additions, not repo changes.
+
+Not done: CLI script and GUI wiring for these four methods (the plan requires
+every control to be reachable from API, CLI, and GUI — this is API-only so
+far), and any physical validation. Both are natural next steps once the
+operator wants to authorize a bounded card for them — this needs its own
+review before hardware access, same as every other new capability.
+
 ## RADIOROC 16 — IO1 sync-pulse amplitude follow-up (PASSED)
 
 Continuation on `feat/desktop-hardware-threshold` at `88974e7584b13f6a026bfa880c9bb7f586b68d04`
