@@ -1,5 +1,50 @@
 # Implementation status
 
+## RADIOROC 14 — Stage-B completion sweep (PASSED)
+
+Continuation on `feat/desktop-hardware-threshold` at `e08c0819104099ce90ffa08582909e51ba8d9415`
+(clean tree before this run). The user asked to finish every remaining
+Stage-B item (bare board over USB only, no new equipment) in one session,
+authorized the whole day's work, and separately confirmed including a
+first-ever forced-trigger ADC acquisition while explicitly deferring
+persistent defaults/FPGA initialization to a later session.
+
+**Part 1 (GUI, `ConnectionWorker`/`ThresholdJob` path):** a new sweep card
+(drafted by a coding sub-agent, reviewed before running) exercised four
+dimensions no prior physical case had touched: Ctest enabled, non-zero
+trigger preamp gain (32), a wider/coarser DAC sweep (0..1000 step 100, 11
+points), and all 64 ASIC channels in one scan. All four passed with
+`cleanup=restored` and `verification.status=passed` (exact match), using the
+same live pre-scan-snapshot verifier as every prior card — independently
+re-confirmed by reading `threshold.py` that Ctest/gain variation doesn't
+change what "expected" restoration means. Evidence (57 files) is local under
+`radioroc_runs/physical_sweep_20260914T020107Z/`.
+
+**Part 2 (CLI tools, not on the GUI job path):** HG/LG shaper gain codes, a
+first-ever forced/synchro-triggered ADC acquisition (40 real events, channel
+4, plausible bare-board noise-floor HG/LG values, no detector attached), and
+an FPGA IO-mux readback/restore — via the existing `scripts/radioroc_acquire.py`
+and `scripts/radioroc_io_mux_scan.py`, wrapped in a new script that adds an
+independent before/after register-readback check neither tool has built in.
+A first attempt stopped before any hardware write on a wrapper bug (`read_word`
+returns a bit-string, compared directly against an int); fixed and rerun
+under the same authorization. The rerun passed: independent readback matched
+exactly before and after both subprocess calls. Evidence (7 files) is local
+under `radioroc_runs/physical_cli_20260914T020329Z/`.
+
+Full narrative in the new `docs/hardware/stage_b_completion.md`. Not
+attempted: applying persistent defaults/FPGA init (item 7, deferred by
+explicit operator choice) and per-channel input DAC/impedance, a TQ mask, and
+USB self-test writes (no existing code for any of these — real feature
+development needed first, not just a test card). With this session, every
+Stage-B item with existing, non-persistent-change code now has physical
+evidence. No push or change to `main` occurred.
+
+Next: remaining work needs either Stage C/D/E equipment (oscilloscope, pulse
+generator, or SiPM — see `CROSS_PLATFORM_REBUILD_PLAN.md` section 5) or is
+non-hardware (persistent-defaults card design, the input-DAC/TQ-mask feature
+gaps, branch/CI review, Windows-parity inventory).
+
 ## RADIOROC 13 — First physical multi-channel threshold scans (PASSED)
 
 Continuation on `feat/desktop-hardware-threshold` at `df606cf0c5ba0b2a0d32c823dca5327038abbe38`
