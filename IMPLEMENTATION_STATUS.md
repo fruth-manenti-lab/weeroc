@@ -1,5 +1,42 @@
 # Implementation status
 
+## RADIOROC 18 — Input DAC/TQ mask CLI wiring (offline)
+
+Continuation of RADIOROC 17's non-hardware work, following the existing
+`scripts/radioroc_*.py` package pattern (`radioroc_cli_common`'s shared
+connection/write-safety args, preset loading, `prepare_device`) exactly as
+`radioroc_apply_defaults.py` does. New script:
+`scripts/radioroc_channel_config.py`, exposing all four RADIOROC 17 methods:
+`--tq-mask`/`--tq-mask-value`, `--input-dac-enable`/`--input-dac-enable-value`,
+`--input-dac-value`/`--value`, `--input-dac-impedance {low,high}` (channel
+selectors reuse the existing `parse_channels` syntax: `4`, `0-15`, `all`).
+
+These are configuration-state writes meant to persist, like
+`apply_defaults`/`initialize_fpga` — not transient scan settings that
+auto-restore. The script defaults to persisting (same as `apply_defaults`)
+and adds an explicit `--restore` flag for bounded validation runs: snapshot
+every touched register before writing, then write, then (with `--verify`)
+independently read back and compare against the in-memory expected value,
+then (with `--restore`) write the snapshot back and independently verify
+that restoration too. `--verify` performs a real hardware I2C read in
+`--execute` mode (not just trusting the in-memory row state), matching this
+project's established independent-verification discipline.
+
+Offline-only: `--execute` was never passed. Dry-run smoke tests exercised
+every option combination (missing-argument errors, out-of-range `--value`
+raising cleanly, a combined `--tq-mask`+`--input-dac-value`+
+`--input-dac-impedance --verify --restore` run reporting 65 touched rows, 0
+mismatches, 0 restore mismatches). Full test suite unchanged at 119 passing;
+no dedicated CLI-script test file was added, matching this repo's existing
+convention that `scripts/radioroc_*.py` CLI entry points aren't unit-tested
+directly (their underlying `RadiorocDevice` methods are, in
+`tests/test_radioroc_core.py`). No hardware was touched; no push or change
+to `main` occurred.
+
+Not done: GUI wiring (a separate, larger scope decision — not started without
+checking first) and any physical validation of these four methods or this
+script (would be the first hardware evidence for either control).
+
 ## RADIOROC 17 — Input DAC and TQ mask: register mapping recovered, implemented offline
 
 Non-hardware work while the operator was away. Two of Stage B's previously
