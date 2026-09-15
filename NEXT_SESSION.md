@@ -1,5 +1,22 @@
 # RADIOROC 23 — Real next feature: Stage D (if equipment allows) or app backlog
 
+**Handoff note (2026-09-15):** this session continues on a remote lab
+machine with the RADIOROC board (and likely the oscilloscope from RADIOROC
+15/16/22) already physically connected there. The user is remote (at home)
+but present interactively over chat — get explicit authorization the same
+way as every prior physical session, just because the machine is remote
+doesn't relax that. Read `AGENTS.md` first for the full safety/authorization
+discipline this project runs on (fresh authorization per exact action,
+independent verification, stop-on-fault, no silent repair) before touching
+anything. One standing principle worth repeating here because it won't
+otherwise travel with you: **stay focused on what the app and the end user
+actually need.** Don't propose or chase open-ended/completionist hardware or
+code exploration (e.g. "characterize this other IO line for completeness,"
+"figure out why this unrelated thing does X") unless it serves a concrete
+feature-parity row in `CROSS_PLATFORM_REBUILD_PLAN.md` or something the end
+user will actually use — see the "Course correction" paragraph below for the
+specific incident this came from.
+
 Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md`,
 `CROSS_PLATFORM_REBUILD_PLAN.md`, `docs/hardware/stage_b_completion.md`, and
 `docs/hardware/stage_c_io_sync_validation.md`. The preceding chat is
