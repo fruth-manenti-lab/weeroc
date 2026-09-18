@@ -1,76 +1,85 @@
-# RADIOROC 23 — Real next feature: Stage D (if equipment allows) or app backlog
+# RADIOROC 24 — Run the first Stage D hold scan (channel 4)
 
-**Handoff note (2026-09-15):** this session continues on a remote lab
-machine with the RADIOROC board (and likely the oscilloscope from RADIOROC
-15/16/22) already physically connected there. The user is remote (at home)
-but present interactively over chat — get explicit authorization the same
-way as every prior physical session, just because the machine is remote
-doesn't relax that. Read `AGENTS.md` first for the full safety/authorization
-discipline this project runs on (fresh authorization per exact action,
-independent verification, stop-on-fault, no silent repair) before touching
-anything. One standing principle worth repeating here because it won't
-otherwise travel with you: **stay focused on what the app and the end user
-actually need.** Don't propose or chase open-ended/completionist hardware or
-code exploration (e.g. "characterize this other IO line for completeness,"
-"figure out why this unrelated thing does X") unless it serves a concrete
-feature-parity row in `CROSS_PLATFORM_REBUILD_PLAN.md` or something the end
-user will actually use — see the "Course correction" paragraph below for the
-specific incident this came from.
+**Handoff note (2026-09-18):** this session continues on a **Raspberry Pi**,
+a different physical machine from the one RADIOROC 23 ran on. The bench
+hardware (RADIOROC board, Tektronix MSO56B, Keysight EDU36311A, Aim-TTi
+TGF4162, attenuator) may be the same physical instruments, but do not assume
+anything about them carries over automatically: USB device paths will very
+likely differ (RADIOROC 23 used `/dev/cu.usbserial-RD3_320` and
+`/dev/tty.usbmodemDA20FE0E1` on macOS; on Linux/Raspberry Pi expect something
+like `/dev/ttyUSB0`/`/dev/ttyACM0` instead), and `pyvisa`/`pyvisa-py`/`pyusb`
+may need installing fresh in whatever environment this session uses. Re-discover
+and re-verify everything rather than reusing RADIOROC 23's paths verbatim.
+Read `AGENTS.md` first for the full safety/authorization discipline this
+project runs on (fresh authorization per exact action, independent
+verification, stop-on-fault, no silent repair) — this matters *more*, not
+less, on an unfamiliar machine. The standing principle also still applies:
+**stay focused on what the app and end user actually need** — no
+open-ended/completionist hardware or code exploration unless it serves a
+concrete feature-parity row in `CROSS_PLATFORM_REBUILD_PLAN.md`.
 
-Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md`, `DEVELOPMENT.md`,
-`CROSS_PLATFORM_REBUILD_PLAN.md`, `docs/hardware/stage_b_completion.md`, and
+Read `AGENTS.md`, `IMPLEMENTATION_STATUS.md` (especially the RADIOROC 23
+entry), `CROSS_PLATFORM_REBUILD_PLAN.md`, and
 `docs/hardware/stage_c_io_sync_validation.md`. The preceding chat is
-**RADIOROC 22 — IO0 sync-pulse characterization (PASSED)**.
+**RADIOROC 23 — First Stage D signal-injection confirmation (PASSED)**.
 
-Branch: `feat/desktop-hardware-threshold`, version `0.5.0`. Verify current
-commit and working tree.
+Branch: `feat/desktop-hardware-threshold`. Verify current commit and working
+tree before touching anything.
 
-**Course correction:** the operator asked to stay focused on what the app
-and end user actually need, not open-ended/completionist hardware
-exploration. Prior handoffs (including an earlier draft of this file) listed
-things like "characterize io2-4 for completeness" and "investigate the mux
-4/6/7 baseline-shift artifact" as options — neither ties to a real feature
-in `CROSS_PLATFORM_REBUILD_PLAN.md`'s feature table, so drop them. Only
-propose hardware or exploratory work that unblocks a concrete feature-parity
-row or end-user capability.
+**What RADIOROC 23 established:** the physical signal-injection setup for
+Stage D works. `IO1` at mux index 5 reliably fires the TGF4162 (external
+trigger, single-cycle burst, 100 ns pulse) through a 20 dB attenuator into
+`in_test1`/Ctest, giving ~49-50 mV peak-to-peak at the board — confirmed by
+an exact 3000/3000 triggered-acquisition match plus a clean single-shot
+width/amplitude reading. That took a lot of back-and-forth to get right (see
+RADIOROC 23 for the pitfalls: T-split reflections, `ZLOAD`/`AMPL`
+open-circuit-vs-terminated-load confusion, DSO trigger level sitting outside
+the actual DC baseline, stale AUTO-trigger acquisitions being read after a
+burst had already ended). **Do not assume that calibration still holds** —
+the generator's settable parameters have no query form on this firmware
+(`EER?` only confirms a command parsed, not that the analog output is
+correct), and the front panel can be touched locally between sessions. Treat
+the injection setup as needing a fresh sanity check, not as a known-good
+constant.
 
-**Hardware state:** IO1 (RADIOROC 15/16) and IO0 (RADIOROC 22) are both
-confirmed carrying the real ~10 ms, ~1.44 Vpp sync pulse at mux index 5 —
-that's the FPGA-routing/sync-timing evidence Stage C exists to establish,
-and it's now been shown on two independent signal paths. Treat that claim as
-adequately supported; do not re-verify it further without a concrete reason.
+At RADIOROC 23's end: signal generator output OFF, PSU CH1 output OFF, board
+on USB only (no external 5V rail). The vendor user guide
+(`local_artifacts/downloads/Radioroc2 User Guide - 2_1_0_6(0125).pdf`)
+confirms the board needs both USB and an external 5V/1A supply to actually
+run — don't forget the PSU when re-powering.
 
-The input DAC/TQ mask feature (RADIOROC 17-21) is complete and evidenced on
-both the CLI and GUI paths.
+**Next bounded task:** with the designated operator, and after
+reconfirming preconditions (board powered/bare, no SiPM/pulser beyond the
+authorized generator+attenuator path, competing software closed, injection
+setup re-verified), get explicit authorization to run:
 
-Next bounded task: with the designated operator, pick a direction that
-serves a real feature:
+```
+scripts/radioroc_hold_scan.py --execute \
+  --preset configs/presets/hold_external_track_ctest_ch4.json \
+  --out-dir radioroc_runs/stage_d_hold_scan_ch4_<date>
+```
 
-1. **Move to Stage D** if a pulse generator is available — this is the
-   actual blocked feature work: `F07` (S-curves) and `F10` (hold scans) in
-   the plan's feature table need real signal injection to validate, and
-   existing CLI scripts (`scripts/radioroc_scurve.py`,
-   `scripts/radioroc_hold_scan.py`, `scripts/radioroc_standard_scurves.py`)
-   already implement the backend but have no GUI and no physical evidence
-   under this rebuild. This is a bigger step (needs an attenuator, injects
-   a signal into the ASIC) needing its own setup review before
-   authorization, but it is real feature-parity work, not exploration.
-2. **Non-hardware app work**: persistent defaults/FPGA init (item 7, `F06`
-   in the feature table — still explicitly deferred by operator choice);
-   branch/CI review before publishing; or expanding the Windows-parity
-   inventory (`CROSS_PLATFORM_REBUILD_PLAN.md` M0 step 3, "build the
-   detailed parity table" — still only a summary table exists, not the
-   full per-row inventory the plan calls for).
-3. If neither is right, ask the operator directly what's next rather than
-   defaulting to more hardware characterization.
+This is the same known-good external track-and-hold Ctest configuration from
+the 2026-06-26 logbook (channel 4, threshold DAC 250, Ctest on, 440-640 ns
+hold sweep, IO1/mux-5 sync) — real feature-parity work for `F10` (hold
+scans) in the plan's feature table, with backend code that already exists
+but no physical evidence under this rebuild yet. `F07` (S-curves,
+`scripts/radioroc_scurve.py` / `radioroc_standard_scurves.py`) is the other
+open Stage D item if the operator prefers that instead.
 
-Whatever is chosen, follow the RADIOROC 09-22 discipline: confirm
+If the operator wants something else entirely (non-hardware app work,
+Windows-parity inventory, etc.), ask directly rather than defaulting to more
+hardware work.
+
+Whatever is chosen, follow the RADIOROC 09-23 discipline: confirm
 preconditions before any hardware access, get an explicit authorization
 statement for the exact action, and stop immediately on any error, fault, or
-mismatch.
+mismatch — including a measurement result that looks physically implausible,
+which on this setup has repeatedly turned out to mean a scope/generator
+configuration mistake, not a real ASIC behavior.
 
-Acceptance: the chosen direction is authorized/scoped, executed, and its
-outcome recorded with the same evidence rigor as RADIOROC 09-22 in both
+Acceptance: the chosen action is authorized/scoped, executed, and its
+outcome recorded with the same evidence rigor as RADIOROC 09-23 in both
 `IMPLEMENTATION_STATUS.md` and this file, along with the next task. No
 ASIC/FIFO access, verifier, scan, persistent configuration write, defaults,
 repair, power-cycle, signal injection, or detector connection beyond what is

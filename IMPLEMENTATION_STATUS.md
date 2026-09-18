@@ -1,5 +1,86 @@
 # Implementation status
 
+## RADIOROC 23 — First Stage D signal-injection confirmation (PASSED)
+
+Continuation on `feat/desktop-hardware-threshold` at
+`10ae3060a3469a2892770044ffd47d0de088488c` (clean tree before this run), on a
+lab machine with the RADIOROC board, a Tektronix MSO56B oscilloscope, a
+Keysight EDU36311A power supply, and an Aim-TTi TGF4162 signal generator all
+connected over USB. Reached over VISA (`pyvisa` + `pyvisa-py`, installed this
+session; USBTMC via `pyusb`/`libusb`, already present).
+
+**DSO housekeeping (prerequisite):** the scope's disk was full enough that
+`SAVe:SETUp` failed with "insufficient space." Investigation found the large
+data trees (`cryo`, `triplecoin`, ~532k PNGs total) are unrelated prior
+projects (SiPM cryo/gain characterization, a muon coincidence search), each
+PNG paired with a same-timestamp `.wfm` binary, not a `.csv` as first assumed.
+With the operator's scope narrowed to `cryo` only, verified pairing by
+per-folder PNG/WFM count equality plus sub-second timestamp proximity (not
+filename match — the two files' timestamps differ by tens to hundreds of ms),
+flagging any folder that didn't cleanly satisfy both checks. Deleted PNGs in
+small throttled batches (batch of 5, `*OPC?` sync, sleep between batches);
+this still triggered two real USB faults (an `I/O Error` and the scope fully
+dropping off the USB bus once, self-recovering after the operator power-cycled
+it) — no data loss in either case, `.wfm` counts verified intact throughout,
+and deletion paused rather than retried aggressively. Final count: **11,388
+PNGs deleted** out of 24,216 identified as safe; the disk-space fault is
+resolved (`SAVe:SETUp` now succeeds; `komal_20260918.set` saved for the other
+user). Untouched: `triplecoin` entirely, one folder with a PNG/WFM count
+mismatch, and the remainder of the largest `cryo` folder.
+
+**Power supply:** the vendor user guide (`local_artifacts/downloads/Radioroc2
+User Guide - 2_1_0_6(0125).pdf`, section 2) confirms the board needs an
+external 5V/1A supply at its top-right connector in addition to USB — this
+was the reason the operator asked for the PSU, not SiPM bias. Configured and
+enabled CH1 at 5V/1A; measured draw 306 mA (healthy, not current-limited).
+
+**Signal generator:** the TGF4162's SCPI command set (fetched from Aim-TTi's
+published `TGF4000_Series_Instruction_Manual-Iss3.pdf`) has no query form for
+most settable parameters (`WAVE`, `AMPL`, `PULSWID`, `BST*`, `OUTPUT`, `ZLOAD`
+are set-only on this firmware; only `CHN?`/`CLKSRC?`/`CNTRVAL?`-style commands
+query); verification instead used the `EER?` execution-error register after
+every write. Applied the "known lab setup" documented in `README.md` /
+`REFACTOR_CHECKLIST.md`: PULSE waveform, 100 ns width, external-triggered
+single-cycle burst (trigger source = FPGA `IO1` at mux index 5), output
+through the existing 20 dB attenuator into `in_test1`/Ctest.
+
+**Physical confirmation (first Stage D physical result under this rebuild):**
+
+1. Ran `hold_mux_index.py io1 5` (the RADIOROC 15/22 script, reused as-is)
+   with the DSO in single-sequence acquisition, edge-triggered on the actual
+   pulse: exactly **3000/3000** triggered acquisitions matched the script's
+   3000 commanded FPGA sync pulses — unambiguous proof the generator fires
+   reliably on every real sync pulse, not just occasionally.
+2. Pulse width from that same clean single-shot capture: **100.05 ns** —
+   matches the documented 100 ns spec almost exactly.
+3. Amplitude required one correction: the generator's `ZLOAD OPEN` setting
+   means `AMPL` is an open-circuit value, and an earlier T-split to a 1 MΩ
+   DSO tap was independently distorting the fast edge (reflections off the
+   unterminated stub). Setting `AMPL 1.0` (compensating for the halving a
+   real 50 Ω load causes) and terminating the DSO channel in true 50 Ω (no
+   T-split — direct connection) gave a stable **~49-50 mV peak-to-peak**
+   reading across multiple samples taken *during* an active burst, matching
+   the documented ~50 mV post-attenuation spec.
+
+Evidence is local under
+`radioroc_runs/physical_stage_d_first_pulse_20260918/` (the reused hold
+script, its console logs across several runs). No push or change to `main`
+occurred. At handoff: signal generator output OFF, PSU CH1 output OFF, board
+still on USB (data only, no external 5V rail) — a safe idle state before
+switching to a different physical machine (Raspberry Pi) for the next
+session.
+
+**Not established:** the actual Stage D measurement itself. This session
+confirmed the *injection setup* works; the proposed next action — a
+`radioroc_hold_scan.py --execute --preset
+hold_external_track_ctest_ch4.json` run (the same known-good external
+track-and-hold Ctest configuration from the 2026-06-26 logbook, channel 4,
+threshold DAC 250, 440-640 ns hold sweep) — was authorized in discussion but
+not yet run before the session ended. Also not established: why the
+generator's amplitude reading was initially so unstable across trigger/scope
+configurations before landing on the 50 Ω/single-sequence method; the root
+cause of the two DSO USB faults during batch deletion.
+
 ## RADIOROC 22 — IO0 sync-pulse characterization (PASSED)
 
 Continuation on `feat/desktop-hardware-threshold` at `dfc8d339ee5ab950cbdb5d31108fd7f9b63cea5d`
