@@ -25,7 +25,20 @@ class InputDacGridPanelTests(unittest.TestCase):
 
     def make_panel(self, worker=None):
         from radioroc.gui.input_dac_grid_panel import InputDacGridPanel
-        return InputDacGridPanel(worker)
+        panel = InputDacGridPanel(worker)
+        self.addCleanup(self._cleanup_widget, panel)
+        return panel
+
+    def _cleanup_widget(self, widget):
+        # deleteLater routes destruction through Qt's own thread-safe
+        # mechanism instead of leaving it to Python's cyclic GC, which can
+        # run on any thread and crashes destroying a main-thread QTimer --
+        # even for a plain QWidget with no timer of its own, since its Qt
+        # signal/slot connections can keep it alive in a reference cycle
+        # only cyclic GC (not refcounting) ever breaks, at an unpredictable
+        # later moment on an unpredictable thread.
+        widget.deleteLater()
+        self.app.processEvents()
 
     def test_panel_has_64_spinboxes_defaulting_to_128_in_range(self):
         panel = self.make_panel()
