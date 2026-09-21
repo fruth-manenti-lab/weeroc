@@ -18,6 +18,7 @@ from .connection_panel import ConnectionPanel
 from .hold_scan_window import HoldScanWindow
 from .input_dac_grid_panel import InputDacGridPanel
 from .probes_masks_panel import ProbesMasksPanel
+from .raw_register_panel import RawRegisterPanel
 from .scurve_window import ScurveWindow
 from .threshold_calibration_panel import ThresholdCalibrationPanel
 from .threshold_window import ThresholdWindow
@@ -79,7 +80,11 @@ class MainWindow(QMainWindow):
         # tab bar is Main / input DAC / Threshold calibration / Probes-Masks;
         # "Main" needs register mappings this codebase doesn't have yet, so
         # only the three backed by an existing, tested core -- input DAC,
-        # threshold calibration, and the T1/T2/TQ mask grids -- are built.)
+        # threshold calibration, and the T1/T2/TQ mask grids -- are built.
+        # "Registers" (F06, raw add/subadd read-all/write-one) has no vendor
+        # sidebar-page equivalent tab; it is this app's own home for that
+        # feature, not a stand-in for the vendor's separate "Register mode"
+        # toggle on each existing tab.)
         asic_page = QWidget()
         asic_layout = QVBoxLayout(asic_page)
         asic_layout.setContentsMargins(0, 0, 0, 0)
@@ -91,11 +96,13 @@ class MainWindow(QMainWindow):
         self.input_dac_grid_panel = InputDacGridPanel(None)
         self.threshold_calibration_panel = ThresholdCalibrationPanel(None)
         self.probes_masks_panel = ProbesMasksPanel(None)
+        self.raw_register_panel = RawRegisterPanel(None)
         self.asic_config_tabs = QTabWidget()
         self.asic_config_tabs.addTab(self.channel_config_panel, "Channel config")
         self.asic_config_tabs.addTab(self.input_dac_grid_panel, "input DAC")
         self.asic_config_tabs.addTab(self.threshold_calibration_panel, "Threshold calibration")
         self.asic_config_tabs.addTab(self.probes_masks_panel, "Probes/Masks")
+        self.asic_config_tabs.addTab(self.raw_register_panel, "Registers")
         asic_layout.addWidget(self.asic_config_tabs, 1)
         self.pages.addWidget(asic_page)
 
@@ -116,6 +123,7 @@ class MainWindow(QMainWindow):
         self.input_dac_grid_panel.connection_worker = worker
         self.threshold_calibration_panel.connection_worker = worker
         self.probes_masks_panel.connection_worker = worker
+        self.raw_register_panel.connection_worker = worker
 
         # -- Calibration: the three scan workflows as sub-tabs ---------------
         calibration_page = QWidget()
