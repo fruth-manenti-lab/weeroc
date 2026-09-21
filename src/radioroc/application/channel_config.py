@@ -24,12 +24,32 @@ class ChannelConfigOperation:
     - `tq_mask_channels` (`tuple[int, ...]`): Channels to set the TQ mask bit
       for.
     - `tq_mask_value` (`bool`): TQ mask bit to write.
+    - `tq_mask_states` (`dict[int, bool] | None`): Independent per-channel TQ
+      mask bits (channel -> enabled), for a 64-channel toggle-grid UI where
+      each cell may hold a different state. Channels here must not also
+      appear in `tq_mask_channels`.
+    - `t1_mask_states` (`dict[int, bool] | None`): Same as `tq_mask_states`,
+      for the T1 mask; channels here must not also appear in
+      `t1_mask_channels`.
+    - `t2_mask_states` (`dict[int, bool] | None`): Same as `tq_mask_states`,
+      for the T2 mask; channels here must not also appear in
+      `t2_mask_channels`.
     - `input_dac_enable_channels` (`tuple[int, ...]`): Channels to set the
       input DAC enable bit for.
     - `input_dac_enable_value` (`bool`): Input DAC enable bit to write.
     - `input_dac_value_channels` (`tuple[int, ...]`): Channels to set the
       input DAC raw value for.
     - `input_dac_value` (`int | None`): Raw 8-bit input DAC code, 0..255.
+    - `input_dac_values` (`dict[int, int] | None`): Independent per-channel
+      raw 8-bit input DAC codes (channel -> value), for callers such as a
+      64-channel grid UI where each cell may hold a different value.
+      Channels here must not also appear in `input_dac_value_channels`.
+    - `t1_mask_channels` (`tuple[int, ...]`): Channels to set the T1 trigger
+      mask bit for.
+    - `t1_mask_value` (`bool`): T1 mask bit to write.
+    - `t2_mask_channels` (`tuple[int, ...]`): Channels to set the T2 trigger
+      mask bit for.
+    - `t2_mask_value` (`bool`): T2 mask bit to write.
     - `input_dac_impedance` (`bool | None`): Set the shared impedance switch
       (all channels) to low (~150 Ohm) when true, high when false; leave
       unset when `None`.
@@ -46,10 +66,18 @@ class ChannelConfigOperation:
 
     tq_mask_channels: tuple[int, ...] = ()
     tq_mask_value: bool = True
+    tq_mask_states: dict[int, bool] | None = None
     input_dac_enable_channels: tuple[int, ...] = ()
     input_dac_enable_value: bool = True
     input_dac_value_channels: tuple[int, ...] = ()
     input_dac_value: int | None = None
+    input_dac_values: dict[int, int] | None = None
+    t1_mask_channels: tuple[int, ...] = ()
+    t1_mask_value: bool = True
+    t1_mask_states: dict[int, bool] | None = None
+    t2_mask_channels: tuple[int, ...] = ()
+    t2_mask_value: bool = True
+    t2_mask_states: dict[int, bool] | None = None
     input_dac_impedance: bool | None = None
     verify: bool = True
     restore: bool = False
@@ -86,13 +114,47 @@ class ChannelConfigOperation:
         if self.input_dac_value is not None and not 0 <= self.input_dac_value <= 255:
             raise ValueError("input_dac_value must be in range 0..255")
         for channels in (self.tq_mask_channels, self.input_dac_enable_channels,
-                        self.input_dac_value_channels):
+                        self.input_dac_value_channels, self.t1_mask_channels,
+                        self.t2_mask_channels):
             for channel in channels:
                 if not 0 <= channel < N_CHANNELS:
                     raise ValueError(f"channel must be in range 0..{N_CHANNELS - 1}")
+        for states, channels, name in (
+            (self.tq_mask_states, self.tq_mask_channels, "tq_mask"),
+            (self.t1_mask_states, self.t1_mask_channels, "t1_mask"),
+            (self.t2_mask_states, self.t2_mask_channels, "t2_mask"),
+        ):
+            self._validate_channel_dict(states, channels, name)
+        if self.input_dac_values is not None:
+            overlap = set(self.input_dac_values) & set(self.input_dac_value_channels)
+            if overlap:
+                raise ValueError(
+                    f"channels {sorted(overlap)} appear in both input_dac_values and "
+                    "input_dac_value_channels")
+            for channel, value in self.input_dac_values.items():
+                if not 0 <= channel < N_CHANNELS:
+                    raise ValueError(f"channel must be in range 0..{N_CHANNELS - 1}")
+                if not 0 <= value <= 255:
+                    raise ValueError("input_dac_values values must be in range 0..255")
         if not any([self.tq_mask_channels, self.input_dac_enable_channels,
-                   self.input_dac_value_channels, self.input_dac_impedance is not None]):
+                   self.input_dac_value_channels, self.input_dac_values,
+                   self.t1_mask_channels, self.t2_mask_channels,
+                   self.tq_mask_states, self.t1_mask_states, self.t2_mask_states,
+                   self.input_dac_impedance is not None]):
             raise ValueError("at least one channel-configuration field is required")
+
+    @staticmethod
+    def _validate_channel_dict(states: dict[int, bool] | None, channels: tuple[int, ...],
+                               name: str) -> None:
+        if states is None:
+            return
+        overlap = set(states) & set(channels)
+        if overlap:
+            raise ValueError(
+                f"channels {sorted(overlap)} appear in both {name}_states and {name}_channels")
+        for channel in states:
+            if not 0 <= channel < N_CHANNELS:
+                raise ValueError(f"channel must be in range 0..{N_CHANNELS - 1}")
 
 
 @dataclass(frozen=True)
@@ -149,6 +211,12 @@ def apply_channel_config(device: RadiorocDevice, operation: ChannelConfigOperati
     touched.update((ch, 6) for ch in operation.tq_mask_channels)
     touched.update((ch, 6) for ch in operation.input_dac_enable_channels)
     touched.update((ch, 0) for ch in operation.input_dac_value_channels)
+    touched.update((ch, 0) for ch in (operation.input_dac_values or {}))
+    touched.update((ch, 6) for ch in operation.t1_mask_channels)
+    touched.update((ch, 6) for ch in operation.t2_mask_channels)
+    touched.update((ch, 6) for ch in (operation.tq_mask_states or {}))
+    touched.update((ch, 6) for ch in (operation.t1_mask_states or {}))
+    touched.update((ch, 6) for ch in (operation.t2_mask_states or {}))
     if operation.input_dac_impedance is not None:
         touched.update((ch, 6) for ch in range(N_CHANNELS))
 
@@ -166,6 +234,24 @@ def apply_channel_config(device: RadiorocDevice, operation: ChannelConfigOperati
     for channel in operation.input_dac_value_channels:
         device.set_input_dac_value(channel, operation.input_dac_value)
         applied.append(f"input_dac_value channel={channel} -> {operation.input_dac_value}")
+    for channel, value in (operation.input_dac_values or {}).items():
+        device.set_input_dac_value(channel, value)
+        applied.append(f"input_dac_value channel={channel} -> {value}")
+    for channel in operation.t1_mask_channels:
+        device.set_mask_for_channel(channel, t1=True, enabled=operation.t1_mask_value)
+        applied.append(f"t1_mask channel={channel} -> {int(operation.t1_mask_value)}")
+    for channel in operation.t2_mask_channels:
+        device.set_mask_for_channel(channel, t1=False, enabled=operation.t2_mask_value)
+        applied.append(f"t2_mask channel={channel} -> {int(operation.t2_mask_value)}")
+    for channel, enabled in (operation.tq_mask_states or {}).items():
+        device.set_tq_mask_for_channel(channel, enabled=enabled)
+        applied.append(f"tq_mask channel={channel} -> {int(enabled)}")
+    for channel, enabled in (operation.t1_mask_states or {}).items():
+        device.set_mask_for_channel(channel, t1=True, enabled=enabled)
+        applied.append(f"t1_mask channel={channel} -> {int(enabled)}")
+    for channel, enabled in (operation.t2_mask_states or {}).items():
+        device.set_mask_for_channel(channel, t1=False, enabled=enabled)
+        applied.append(f"t2_mask channel={channel} -> {int(enabled)}")
     if operation.input_dac_impedance is not None:
         device.set_input_dac_impedance(operation.input_dac_impedance)
         applied.append(f"input_dac_impedance -> {'low' if operation.input_dac_impedance else 'high'}")

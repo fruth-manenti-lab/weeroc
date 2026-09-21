@@ -17,6 +17,28 @@ class ChannelConfigOperationTests(unittest.TestCase):
             ChannelConfigOperation(tq_mask_channels=(64,)).validate()
         with self.assertRaises(ValueError):
             ChannelConfigOperation().validate()  # no operation requested
+        with self.assertRaises(ValueError):
+            ChannelConfigOperation(t1_mask_channels=(64,)).validate()
+        with self.assertRaises(ValueError):
+            ChannelConfigOperation(input_dac_values={64: 10}).validate()
+        with self.assertRaises(ValueError):
+            ChannelConfigOperation(input_dac_values={4: 256}).validate()
+        with self.assertRaises(ValueError):
+            ChannelConfigOperation(input_dac_value_channels=(4,), input_dac_value=10,
+                                   input_dac_values={4: 20}).validate()  # overlapping channel
+        with self.assertRaises(ValueError):
+            ChannelConfigOperation(tq_mask_channels=(4,),
+                                   tq_mask_states={4: True}).validate()  # overlapping channel
+        with self.assertRaises(ValueError):
+            ChannelConfigOperation(t1_mask_states={64: True}).validate()
+
+    def test_validate_accepts_mask_and_per_channel_values_alone(self):
+        ChannelConfigOperation(t1_mask_channels=(4,)).validate()
+        ChannelConfigOperation(t2_mask_channels=(4,)).validate()
+        ChannelConfigOperation(input_dac_values={4: 10, 5: 20}).validate()
+        ChannelConfigOperation(tq_mask_states={4: True, 5: False}).validate()
+        ChannelConfigOperation(t1_mask_states={4: True}).validate()
+        ChannelConfigOperation(t2_mask_states={4: True}).validate()
 
     def test_load_rows_reuses_existing_when_config_path_is_none(self):
         existing = [I2CRow(4, 6, "11111111")]
@@ -92,6 +114,45 @@ class ApplyChannelConfigTests(unittest.TestCase):
         self.assertEqual(len(result.verify_mismatches), 1)
         mismatch = result.verify_mismatches[0]
         self.assertEqual((mismatch.add, mismatch.subadd), (4, 6))
+
+    def test_t1_and_t2_mask_channels_write_distinct_bits(self):
+        self.device.load_default_config()
+        result = apply_channel_config(self.device, ChannelConfigOperation(
+            t1_mask_channels=(4,), t1_mask_value=True,
+            t2_mask_channels=(4,), t2_mask_value=False,
+            verify=True,
+        ))
+        self.assertIn("t1_mask channel=4 -> 1", result.applied)
+        self.assertIn("t2_mask channel=4 -> 0", result.applied)
+        row = self.device.find_i2c_row(4, 6).data
+        self.assertEqual(row[3], "1")  # T1 bit
+        self.assertEqual(row[4], "0")  # T2 bit
+        self.assertEqual(result.verify_mismatches, ())
+
+    def test_per_channel_input_dac_values_write_independent_codes(self):
+        self.device.load_default_config()
+        result = apply_channel_config(self.device, ChannelConfigOperation(
+            input_dac_values={4: 200, 5: 10}, verify=True,
+        ))
+        self.assertEqual(self.device.read_register_bits(4, 0), bits(200, 8))
+        self.assertEqual(self.device.read_register_bits(5, 0), bits(10, 8))
+        self.assertIn("input_dac_value channel=4 -> 200", result.applied)
+        self.assertIn("input_dac_value channel=5 -> 10", result.applied)
+        self.assertEqual(result.verify_mismatches, ())
+
+    def test_per_channel_mask_states_write_independent_bits(self):
+        self.device.load_default_config()
+        result = apply_channel_config(self.device, ChannelConfigOperation(
+            tq_mask_states={4: True, 5: False},
+            t1_mask_states={4: True, 5: False},
+            t2_mask_states={4: False, 5: True},
+            verify=True,
+        ))
+        row4 = self.device.find_i2c_row(4, 6).data
+        row5 = self.device.find_i2c_row(5, 6).data
+        self.assertEqual((row4[3], row4[4], row4[5]), ("1", "0", "1"))  # T1, T2, TQ
+        self.assertEqual((row5[3], row5[4], row5[5]), ("0", "1", "0"))
+        self.assertEqual(result.verify_mismatches, ())
 
 
 if __name__ == "__main__":
