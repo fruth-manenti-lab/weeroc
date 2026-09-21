@@ -5,6 +5,7 @@ one ``QSpinBox`` per channel, plus a per-grid "Set all" control and an
 Apply button.
 """
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QGridLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QSpinBox,
     QVBoxLayout, QWidget,
@@ -82,6 +83,15 @@ class ThresholdCalibrationPanel(QWidget):
         self.status_label.setWordWrap(True)
         outer.addWidget(self.status_label)
 
+        # apply_channel_config is asynchronous (the worker only enqueues it
+        # and returns immediately); showing the snapshot the instant it's
+        # submitted reliably shows a stale or empty result, not the one just
+        # requested. Poll until the worker leaves its busy state instead.
+        self._applying = False
+        self.timer = QTimer(self)
+        self.timer.setInterval(100)
+        self.timer.timeout.connect(self._poll)
+
     def build_operation(self):
         operation = ChannelConfigOperation(
             t1_calibration_dac_values={ch: spin.value() for ch, spin in enumerate(self.t1_spinboxes)},
@@ -92,7 +102,7 @@ class ThresholdCalibrationPanel(QWidget):
         return operation
 
     def apply(self):
-        if self.connection_worker is None:
+        if self.connection_worker is None or self._applying:
             return None
         try:
             operation = self.build_operation()
@@ -104,8 +114,21 @@ class ThresholdCalibrationPanel(QWidget):
         except Exception as exc:
             self.status_label.setText(f"Calibration apply error · {type(exc).__name__}: {exc}")
             return None
-        self.show_snapshot()
+        self._applying = True
+        self.status_label.setText("Applying calibration…")
+        self.timer.start()
         return operation
+
+    def _poll(self):
+        if self.connection_worker is None:
+            self.timer.stop()
+            self._applying = False
+            return
+        if self.connection_worker.snapshot().state == "configuring":
+            return  # still in flight
+        self.timer.stop()
+        self._applying = False
+        self.show_snapshot()
 
     def show_snapshot(self):
         worker = self.connection_worker

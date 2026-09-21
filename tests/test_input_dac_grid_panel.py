@@ -7,6 +7,7 @@ offscreen platform, and a fake/recording connection worker.
 import importlib.util
 import os
 import unittest
+from types import SimpleNamespace
 
 # Bootstrap the checkout package when test discovery sees an older installed wheel.
 import radioroc_client  # noqa: F401
@@ -131,6 +132,12 @@ class FakeWorker:
 
     def channel_config_snapshot(self):
         return self._result if self.channel_config_calls else None
+
+    def snapshot(self):
+        # This fake completes synchronously (no separate busy period to
+        # model); tests call panel._poll() once to simulate the timer tick
+        # that a real, asynchronous ConnectionWorker would eventually fire.
+        return SimpleNamespace(state="connected")
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ same underlying behavior embedded in ``ThresholdWindow``.
 import importlib.util
 import os
 import unittest
+from types import SimpleNamespace
 
 # Bootstrap the checkout package when test discovery sees an older installed wheel.
 import radioroc_client  # noqa: F401
@@ -79,6 +80,8 @@ class ChannelConfigPanelTests(unittest.TestCase):
         operation = panel.apply()
         self.assertIsNotNone(operation)
         self.assertEqual(len(worker.channel_config_calls), 1)
+        self.assertIn("Applying", panel.channel_config_status.text())
+        panel._poll()  # simulate the timer tick that detects completion
         self.assertIn("verified", panel.channel_config_status.text())
 
     def test_apply_reports_a_validation_error_on_its_own_status_label(self):
@@ -128,6 +131,12 @@ class FakeWorker:
 
     def channel_config_snapshot(self):
         return self._result if self.channel_config_calls else None
+
+    def snapshot(self):
+        # This fake completes synchronously (no separate busy period to
+        # model); tests call panel._poll() once to simulate the timer tick
+        # that a real, asynchronous ConnectionWorker would eventually fire.
+        return SimpleNamespace(state="connected")
 
 
 if __name__ == "__main__":

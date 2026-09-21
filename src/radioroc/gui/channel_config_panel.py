@@ -8,6 +8,7 @@ this panel does not own a connection: it is handed an existing
 sync with whichever worker instance is currently live.
 """
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
@@ -84,6 +85,15 @@ class ChannelConfigPanel(QWidget):
         self.channel_config_status.setWordWrap(True)
         channel_config_form.addRow(self.channel_config_status)
 
+        # apply_channel_config is asynchronous (the worker only enqueues it
+        # and returns immediately); showing the snapshot the instant it's
+        # submitted reliably shows a stale or empty result, not the one just
+        # requested. Poll until the worker leaves its busy state instead.
+        self._applying = False
+        self.timer = QTimer(self)
+        self.timer.setInterval(100)
+        self.timer.timeout.connect(self._poll)
+
     def build_operation(self):
         """Build (and validate) a ``ChannelConfigOperation`` from the widgets.
 
@@ -119,7 +129,7 @@ class ChannelConfigPanel(QWidget):
         ``build_operation`` + ``self.connection_worker.apply_channel_config``
         itself instead, as ``ThresholdWindow.apply_channel_config`` does.
         """
-        if self.connection_worker is None:
+        if self.connection_worker is None or self._applying:
             return None
         try:
             operation = self.build_operation()
@@ -132,8 +142,21 @@ class ChannelConfigPanel(QWidget):
             self.channel_config_status.setText(
                 f"Channel config error · {type(exc).__name__}: {exc}")
             return None
-        self.show_snapshot()
+        self._applying = True
+        self.channel_config_status.setText("Applying channel config…")
+        self.timer.start()
         return operation
+
+    def _poll(self):
+        if self.connection_worker is None:
+            self.timer.stop()
+            self._applying = False
+            return
+        if self.connection_worker.snapshot().state == "configuring":
+            return  # still in flight
+        self.timer.stop()
+        self._applying = False
+        self.show_snapshot()
 
     def show_snapshot(self):
         worker = self.connection_worker

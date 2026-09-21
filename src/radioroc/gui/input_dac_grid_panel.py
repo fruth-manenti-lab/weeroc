@@ -6,6 +6,7 @@ panel); both stay independently usable. This one matches the vendor's
 impedance switch and "All ON"/"All OFF" buttons.
 """
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSpinBox,
     QVBoxLayout, QWidget,
@@ -69,10 +70,19 @@ class InputDacGridPanel(QWidget):
         self.all_on_button.clicked.connect(self.all_on)
         self.all_off_button.clicked.connect(self.all_off)
 
+        # apply_channel_config is asynchronous (the worker only enqueues it
+        # and returns immediately); showing the snapshot the instant it's
+        # submitted reliably shows a stale or empty result, not the one just
+        # requested. Poll until the worker leaves its busy state instead.
+        self._applying = False
+        self.timer = QTimer(self)
+        self.timer.setInterval(100)
+        self.timer.timeout.connect(self._poll)
+
     def apply(self):
         """Validate, submit the 64-value grid plus impedance, and report
         errors on ``status_label`` instead of raising."""
-        if self.connection_worker is None:
+        if self.connection_worker is None or self._applying:
             return None
         operation = ChannelConfigOperation(
             input_dac_values={channel: spin.value()
@@ -85,19 +95,12 @@ class InputDacGridPanel(QWidget):
         except ValueError as exc:
             self.status_label.setText(f"Invalid input DAC configuration: {exc}")
             return None
-        try:
-            self.connection_worker.apply_channel_config(operation)
-        except Exception as exc:
-            self.status_label.setText(
-                f"Input DAC error · {type(exc).__name__}: {exc}")
-            return None
-        self.show_snapshot()
-        return operation
+        return self._submit(operation)
 
     def _apply_enable(self, enable_value: bool):
         # "All ON"/"All OFF" set the input-DAC enable bit for every channel;
         # the raw-value grid above is written separately via apply().
-        if self.connection_worker is None:
+        if self.connection_worker is None or self._applying:
             return None
         operation = ChannelConfigOperation(
             input_dac_enable_channels=tuple(range(N_CHANNELS)),
@@ -109,14 +112,30 @@ class InputDacGridPanel(QWidget):
         except ValueError as exc:
             self.status_label.setText(f"Invalid input DAC configuration: {exc}")
             return None
+        return self._submit(operation)
+
+    def _submit(self, operation):
         try:
             self.connection_worker.apply_channel_config(operation)
         except Exception as exc:
             self.status_label.setText(
                 f"Input DAC error · {type(exc).__name__}: {exc}")
             return None
-        self.show_snapshot()
+        self._applying = True
+        self.status_label.setText("Applying input DAC config…")
+        self.timer.start()
         return operation
+
+    def _poll(self):
+        if self.connection_worker is None:
+            self.timer.stop()
+            self._applying = False
+            return
+        if self.connection_worker.snapshot().state == "configuring":
+            return  # still in flight
+        self.timer.stop()
+        self._applying = False
+        self.show_snapshot()
 
     def all_on(self):
         return self._apply_enable(True)

@@ -7,6 +7,7 @@ groups: there is no backend support for probe routing in this codebase yet,
 so building it would mean guessing at unconfirmed register behavior.
 """
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton,
     QVBoxLayout, QWidget,
@@ -81,6 +82,15 @@ class ProbesMasksPanel(QWidget):
         self.status_label.setWordWrap(True)
         outer.addWidget(self.status_label)
 
+        # apply_channel_config is asynchronous (the worker only enqueues it
+        # and returns immediately); showing the snapshot the instant it's
+        # submitted reliably shows a stale or empty result, not the one just
+        # requested. Poll until the worker leaves its busy state instead.
+        self._applying = False
+        self.timer = QTimer(self)
+        self.timer.setInterval(100)
+        self.timer.timeout.connect(self._poll)
+
     def build_operation(self):
         operation = ChannelConfigOperation(
             tq_mask_states={ch: cb.isChecked() for ch, cb in enumerate(self.tq_checkboxes)},
@@ -92,7 +102,7 @@ class ProbesMasksPanel(QWidget):
         return operation
 
     def apply(self):
-        if self.connection_worker is None:
+        if self.connection_worker is None or self._applying:
             return None
         try:
             operation = self.build_operation()
@@ -104,8 +114,21 @@ class ProbesMasksPanel(QWidget):
         except Exception as exc:
             self.status_label.setText(f"Mask apply error · {type(exc).__name__}: {exc}")
             return None
-        self.show_snapshot()
+        self._applying = True
+        self.status_label.setText("Applying masks…")
+        self.timer.start()
         return operation
+
+    def _poll(self):
+        if self.connection_worker is None:
+            self.timer.stop()
+            self._applying = False
+            return
+        if self.connection_worker.snapshot().state == "configuring":
+            return  # still in flight
+        self.timer.stop()
+        self._applying = False
+        self.show_snapshot()
 
     def show_snapshot(self):
         worker = self.connection_worker
