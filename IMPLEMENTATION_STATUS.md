@@ -1,5 +1,105 @@
 # Implementation status
 
+## RADIOROC 28 — CI fix; raw-register view (F06); a real async-race bug fix (offline)
+
+Same conversation as RADIOROC 27, continuing after the operator asked two
+unrelated questions: how to keep working reliably from a train with
+unstable internet (answered directly, not recorded here — no code change),
+and why every push has been triggering a GitHub Actions "all runs failed"
+email.
+
+**CI fix.** `tests/test_main_window.py` (written during RADIOROC 26)
+imported PySide6 at module level instead of guarding it behind the
+`GUI_AVAILABLE` skip pattern every other GUI test file in this repo uses.
+`.github/workflows/python.yml`'s main job never installs the `[gui]` extra,
+so `unittest`'s test *loader* failed to even import that module — one
+failing import fails the entire `unittest discover` invocation, which fails
+`tools/check_development.py`, which fails the whole job, on every single
+push since that file was first committed, across the whole
+ubuntu/macos × python 3.11/3.13 matrix. Reproduced the exact CI steps
+end-to-end in a clean venv on this machine (`pip install '.[analysis,dev]'`,
+`check_development.py`, `python -m build`, wheel install with each extra) to
+confirm this was really the cause before fixing it.
+
+**Raw-register view (`F06`)**, the next-task suggestion from RADIOROC 27's
+handoff. New `src/radioroc/application/raw_registers.py`
+(`RawRegisterWrite`/`RawRegisterResult`, `read_all_registers`/
+`write_raw_register` — generic `(add, subadd, byte)` access, batching the
+full-table re-read through the existing multi-row `read_fifo` rather than
+one round trip per register), two new `ConnectionWorker` commands mirroring
+`apply_channel_config`'s exact pattern, and a new `RawRegisterPanel` GUI
+sub-tab ("Registers", fifth on the ASIC-config page): a table of every
+loaded register plus a single-register write field set with verify.
+
+Found while testing the core: the shared `ThresholdTransport`/
+`OwnedThresholdTransport` test fixture's synthetic ASIC map (add 0..66,
+subadd 0..63) doesn't cover every row the packaged default config CSV
+carries (reserved `add=66 subadd>=64` probe-block rows, `add=67`) — fine for
+every existing test, which only ever touches specific requested channels,
+but this feature's bulk multi-row read hits it directly. Worked around with
+a small controlled row set rather than extending a fixture shared by
+unrelated test files; flagged inline for whoever touches this next.
+
+**A resurfaced SIGSEGV, fixed for real this time.** Adding the above tests
+made the same `QObject::killTimer` crash RADIOROC 26 partially fixed
+reproduce deterministically (3/3, via a hard-`timeout`-wrapped
+`tools/check_development.py`, not just eyeballing "OK"). Root-caused with
+`PYTHONFAULTHANDLER=1` to a native stack: a leftover Qt object from an
+*earlier, unrelated* GUI test getting garbage-collected — on a background
+thread — in the middle of a later, purely-Python test's `Thread.join()`
+call. RADIOROC 26 fixed this for the four `QMainWindow`-based test files but
+explicitly flagged the standalone-panel test files as pending follow-up
+(`test_channel_config_panel.py` and this session's own new
+`test_input_dac_grid_panel.py`/`test_probes_masks_panel.py`/
+`test_threshold_calibration_panel.py`): none of them called `deleteLater()`
+on the bare `QWidget` panels they construct, relying entirely on Python's
+cyclic GC, which can run on any thread. Fixed by registering
+`panel.deleteLater()` + `app.processEvents()` via `addCleanup` in each
+file's `make_panel()` helper — 8 clean full-suite runs after (was 0/3
+before, deterministically, once this session's new tests shifted GC timing
+enough to expose it).
+
+**A real, confirmed (not theoretical) bug found by direct empirical
+testing, not just code reading:** built `RawRegisterPanel` to poll for
+command completion (since a full-table read can take a while) rather than
+assume the result is ready the instant it's submitted — the same shape as
+the scan workflow windows' own submit-then-poll pattern. This prompted
+checking whether the four *existing* channel-config-family panels
+(`ChannelConfigPanel`, `InputDacGridPanel`, `ProbesMasksPanel`,
+`ThresholdCalibrationPanel`, all following the same "submit, then
+immediately call `show_snapshot()`" shape) had the same problem. They did:
+`apply_channel_config` on `ConnectionWorker` only enqueues the operation and
+returns immediately, so calling `show_snapshot()` right after reliably reads
+a stale or empty result. Confirmed end-to-end against a real
+`ConnectionWorker` with a faithful fake transport before touching any
+code — 0/50 correct with the pre-fix panel, 50/50 after — ruling out this
+being an artifact of an incomplete test double. Standalone on MainWindow's
+ASIC-config page, nothing else re-polls these panels afterward either, so
+this was not self-correcting (unlike the same panels embedded in a scan
+window that owns its own `ConnectionPanel`, where that panel's own
+perpetual 100ms timer happens to paper over it within about a tick — a
+minor, mostly-imperceptible blip there, not a permanent staleness). Fixed
+all four with the same submit-then-poll pattern `RawRegisterPanel` already
+needed, and updated each panel's `FakeWorker` test fixture to answer
+`snapshot()` (previously absent entirely — these fakes completed
+"synchronously" from the panel's point of view, which is exactly why the
+existing unit tests never caught this).
+
+**Evidence:** 286/286 offline tests (24 new: 7 raw-registers core, 2
+`ConnectionWorker`-level, 8 `RawRegisterPanel`, plus fixture/assertion
+updates to the four existing panels' tests), 5 clean full-suite runs.
+Offscreen screenshot of the new "Registers" tab. Not physically validated
+against real hardware (same caveat as the rest of this session's non-Main
+register work — this feature's registers are generic, not ASIC-semantic,
+so there is no register-mapping-confidence question here, only the usual
+"not yet run for real" one).
+
+**Not done:** "Main" tab register mapping (see RADIOROC 27's entry — still
+deferred, method proven but not yet applied there); full vendor F06 parity
+(`read/write all` beyond the loaded table, `default reset`, config
+import/save/drag-drop, embedded field help) — this pass built the narrow
+version deliberately, as scoped in the RADIOROC 27 handoff.
+
 ## RADIOROC 27 — Threshold-calibration DAC register mapping recovered; grid built (offline)
 
 Same day, continuing from RADIOROC 26 with the operator now present and
