@@ -9,13 +9,15 @@ independent top-level windows each owning their own connection.
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QFormLayout, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow,
+    QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow,
     QStackedWidget, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .channel_config_panel import ChannelConfigPanel
 from .connection_panel import ConnectionPanel
 from .hold_scan_window import HoldScanWindow
+from .input_dac_grid_panel import InputDacGridPanel
+from .probes_masks_panel import ProbesMasksPanel
 from .scurve_window import ScurveWindow
 from .threshold_window import ThresholdWindow
 
@@ -71,14 +73,27 @@ class MainWindow(QMainWindow):
         body_layout.addWidget(self.pages, 1)
         self.sidebar.currentRowChanged.connect(self.pages.setCurrentIndex)
 
-        # -- One shared connection + channel-config area ---------------------
+        # -- One shared connection area, over per-topic ASIC-config sub-tabs -
+        # (mirrors the vendor app's "ASIC config." sidebar page, whose own
+        # tab bar is Main / input DAC / Threshold calibration / Probes-Masks;
+        # Main and Threshold calibration need register mappings this
+        # codebase doesn't have yet, so only the two backed by an existing,
+        # tested core -- input DAC and the T1/T2/TQ mask grids -- are built.)
         asic_page = QWidget()
-        asic_layout = QFormLayout(asic_page)
+        asic_layout = QVBoxLayout(asic_page)
+        asic_layout.setContentsMargins(0, 0, 0, 0)
         self.connection_panel = ConnectionPanel(
             connection_worker_factory=connection_worker_factory or self._default_worker_factory())
+        asic_layout.addWidget(self.connection_panel)
+
         self.channel_config_panel = ChannelConfigPanel(None)
-        asic_layout.addRow(self.connection_panel)
-        asic_layout.addRow(self.channel_config_panel)
+        self.input_dac_grid_panel = InputDacGridPanel(None)
+        self.probes_masks_panel = ProbesMasksPanel(None)
+        self.asic_config_tabs = QTabWidget()
+        self.asic_config_tabs.addTab(self.channel_config_panel, "Channel config")
+        self.asic_config_tabs.addTab(self.input_dac_grid_panel, "input DAC")
+        self.asic_config_tabs.addTab(self.probes_masks_panel, "Probes/Masks")
+        asic_layout.addWidget(self.asic_config_tabs, 1)
         self.pages.addWidget(asic_page)
 
         self.connection_panel.refresh_button.clicked.connect(self.connection_panel.refresh)
@@ -95,6 +110,8 @@ class MainWindow(QMainWindow):
         # time, since an injected worker is never created by the window itself.
         worker = self.connection_panel.ensure_worker()
         self.channel_config_panel.connection_worker = worker
+        self.input_dac_grid_panel.connection_worker = worker
+        self.probes_masks_panel.connection_worker = worker
 
         # -- Calibration: the three scan workflows as sub-tabs ---------------
         calibration_page = QWidget()

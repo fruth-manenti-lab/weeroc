@@ -53,10 +53,60 @@ needed there.
 `--help` checks) run 8 times in a row on `.conda-radioroc`, all clean — no
 SIGSEGV, no test failures, no warnings from the killed-timer path.
 
+**Expanded the ASIC-config page with two more of the vendor app's sub-tabs**
+(`local_artifacts/app_pics/image (13-16).png`): its "ASIC config." area has
+four sub-tabs (Main, input DAC, Threshold calibration, Probes/Masks); only
+two were buildable tonight without inventing unconfirmed register mappings —
+"Main" (trigger/energy-measurement/gain/threshold settings, `F02`) and
+"Threshold calibration" (T1/T2 calibration DAC trims, `F04`) have no backend
+support at all in this codebase yet, and guessing at their register layout
+autonomously would be exactly the kind of uncertain hardware reasoning this
+project reserves for the lead working carefully, not for an unsupervised
+overnight pass. The "input DAC" grid and the mask side of "Probes/Masks",
+by contrast, are fully backed by already-validated primitives
+(`set_input_dac_value`, `set_mask_for_channel`, `set_tq_mask_for_channel`),
+so those two were built.
+
+First (shared-contract) step, done directly rather than delegated: extended
+`ChannelConfigOperation`/`apply_channel_config`
+(`src/radioroc/application/channel_config.py`) with `input_dac_values`
+(`dict[channel, code]`, independent per-channel raw DAC codes) and
+`tq_mask_states`/`t1_mask_states`/`t2_mask_states` (`dict[channel, enabled]`,
+independent per-channel mask bits) alongside the existing uniform
+tuple-of-channels-plus-one-value fields — needed because a 64-cell grid
+generally holds 64 different values/states in one submit, which the existing
+fields couldn't express. Reuses the existing primitives; no new register
+mapping, no hardware-reasoning risk. 4 new core tests (10/10 in
+`test_channel_config.py`).
+
+Delegated the two grid widgets to parallel agents (each handed the relevant
+vendor screenshot, the extended core, and `ChannelConfigPanel` as the pattern
+to mirror, with non-overlapping files and explicit hardware/scope
+constraints): `InputDacGridPanel` (`gui/input_dac_grid_panel.py`, 64
+per-channel `QSpinBox`, a HiZ-impedance checkbox, "All ON"/"All OFF" as the
+input-DAC *enable* bit for every channel — documented as a judgment call
+since the vendor screenshot doesn't disambiguate what those two buttons
+drive) and `ProbesMasksPanel` (`gui/probes_masks_panel.py`, three 64-checkbox
+Enable-T1/T2/TQ grids with per-grid Enable-all/Enable-none; the vendor tab's
+analog/digital probe *routing* radio groups are explicitly out of scope, same
+reasoning as Main/Threshold-calibration above). Both wired into
+`MainWindow`'s ASIC-config page as new tabs alongside the existing
+`ChannelConfigPanel` (now labeled "Channel config"), sharing the same
+injected `ConnectionWorker` as everything else on that page. Reviewed both
+agents' output directly against their spec before integrating.
+
+**Evidence:** 260/260 offline tests (14 new panel tests + 4 new core tests),
+3 clean full-suite runs. Offscreen-rendered screenshots of both new tabs
+(`/tmp/asic_input_dac.png`, `/tmp/asic_probes_masks.png` — not saved into the
+repo) show the grids laid out correctly with no overlap, matching the vendor
+screenshots' shape. **Not physically validated on hardware** — this session
+had no hardware authorization (see above).
+
 **Not done this session:** the hardware-validation item from the previous
 handover (physically validating the S-curve GUI path) was explicitly left for
 an operator-present session — this session's authorization did not cover
-hardware. See a fresh `NEXT_SESSION.md` for what's next.
+hardware. Main/Threshold-calibration sub-tabs remain unbuilt pending real
+register documentation. See a fresh `NEXT_SESSION.md` for what's next.
 
 ## RADIOROC 25 — S-curve job migration and GUI tab (offline; physical validation pending)
 
