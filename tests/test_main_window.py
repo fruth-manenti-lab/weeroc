@@ -1,17 +1,21 @@
 """Offline tests for the shared shell (MainWindow)."""
 
+import importlib.util
+import os
 import time
 import unittest
 
-from PySide6.QtWidgets import QApplication
-
 import radioroc_client  # noqa: F401  (side effect: puts src/ on sys.path for radioroc.*)
 from radioroc.application.connection_worker import ConnectionWorker
-from radioroc.gui.main_window import MainWindow
 from radioroc.transport.config import RadiorocConnectionConfig
+
+GUI_AVAILABLE = (importlib.util.find_spec("PySide6") is not None
+                 and importlib.util.find_spec("matplotlib") is not None)
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 def _app():
+    from PySide6.QtWidgets import QApplication
     return QApplication.instance() or QApplication([])
 
 
@@ -41,11 +45,13 @@ class _FakeSession:
         pass
 
 
+@unittest.skipUnless(GUI_AVAILABLE, "install [gui] for desktop acceptance checks")
 class MainWindowTests(unittest.TestCase):
     def setUp(self):
         _app()
 
     def _make_window(self):
+        from radioroc.gui.main_window import MainWindow
         window = MainWindow(connection_worker_factory=_FakeConnectionWorker)
         self.addCleanup(self._shut_down, window)
         return window
