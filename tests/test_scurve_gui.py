@@ -44,6 +44,10 @@ class ScurveGuiTests(unittest.TestCase):
             self.window.cancel_run()
             self.wait_idle()
         self.window.close()
+        # deleteLater routes destruction through Qt's own thread-safe
+        # mechanism instead of leaving it to Python's cyclic GC, which can
+        # run on any thread and crashes destroying a main-thread QTimer.
+        self.window.deleteLater()
         self.app.processEvents()
 
     def wait_idle(self):

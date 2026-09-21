@@ -77,6 +77,10 @@ class ConnectionGuiTests(unittest.TestCase):
             worker.join(3)
         self.window.connection_worker = None
         self.window.close()
+        # deleteLater routes destruction through Qt's own thread-safe
+        # mechanism instead of leaving it to Python's cyclic GC, which can
+        # run on any thread and crashes destroying a main-thread QTimer.
+        self.window.deleteLater()
         self.app.processEvents()
 
     def select_hardware_candidate(self):

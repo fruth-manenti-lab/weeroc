@@ -1,5 +1,63 @@
 # Implementation status
 
+## RADIOROC 26 — Shared connection/channel-config shell; GUI-test SIGSEGV fix (offline)
+
+Autonomous overnight session (no operator present; scope explicitly limited to
+software-only work per that session's `NEXT_SESSION.md` — see the standing
+per-action hardware-authorization rule in `AGENTS.md`, which this session did
+not relax). Continuing on `feat/desktop-hardware-threshold` from the previous
+(uncommitted) session's work.
+
+**Committed the shared-shell refactor built the previous session** (built
+against real Windows vendor-app screenshots, `local_artifacts/app_pics/image
+(13-28).png`): `MainWindow` (`src/radioroc/gui/main_window.py`) is the new
+app shell — a sidebar ("ASIC config." / "Calibration"), one shared
+`ConnectionPanel` (`gui/connection_panel.py`) + `ChannelConfigPanel`
+(`gui/channel_config_panel.py`) on the ASIC-config page, and the three scan
+workflows (`ThresholdWindow`/`HoldScanWindow`/`ScurveWindow`) as sub-tabs of
+Calibration, all sharing one real `ConnectionWorker` instance instead of each
+window owning its own connection + channel-config UI. The three scan windows
+now accept an injected `connection_worker` (falling back to owning one
+standalone, so each remains independently usable/testable) and their
+`closeEvent` handling was extended with a third branch: when a
+`connection_worker` was injected from outside (not owned by this window),
+closing must not shut that shared worker down — it only waits for this
+window's own in-flight scan to reach a terminal state, mirroring the existing
+SIMULATION-mode close-wait path. `gui/__main__.py` now just constructs
+`MainWindow` instead of hand-rolling a `QTabWidget` shell with its own
+busy-polling close logic.
+
+**Found and fixed a real, reproducible-but-intermittent SIGSEGV in the test
+suite**, along with the previous session (partially fixed then): `QObject::
+killTimer: Timers cannot be stopped from another thread`. Root cause: GUI
+test teardown called `window.close()` but never `window.deleteLater()`; the
+window's leftover Python reference cycle (via Qt signal/slot connections)
+could then be collected by Python's *cyclic* garbage collector on any
+thread — including a `ConnectionWorker`'s background thread — which crashes
+destroying a `QTimer` whose thread affinity is the main thread. Applied the
+same `window.deleteLater()` + `app.processEvents()` fix (already used in the
+previous session's new `tests/test_connection_panel.py`) to the four
+pre-existing GUI test files that shared the identical latent pattern in their
+final-teardown path: `tests/test_threshold_gui.py`,
+`tests/test_hold_scan_gui.py`, `tests/test_scurve_gui.py`,
+`tests/test_connection_gui.py` (each has other `.close()` calls mid-test that
+exercise close-while-busy behavior and are not the final teardown, so those
+were left alone). Swept the `*_worker.py` test files
+(`test_threshold_worker.py`, `test_hold_scan_worker.py`,
+`test_scurve_worker.py`, `test_connection_worker.py`) and the session's own
+new `test_channel_config_panel.py`/`test_main_window.py`: none construct a
+bare `QWidget` without an existing `deleteLater()` path, so no further change
+needed there.
+
+**Evidence:** `tools/check_development.py` (242 offline tests + 16 legacy CLI
+`--help` checks) run 8 times in a row on `.conda-radioroc`, all clean — no
+SIGSEGV, no test failures, no warnings from the killed-timer path.
+
+**Not done this session:** the hardware-validation item from the previous
+handover (physically validating the S-curve GUI path) was explicitly left for
+an operator-present session — this session's authorization did not cover
+hardware. See a fresh `NEXT_SESSION.md` for what's next.
+
 ## RADIOROC 25 — S-curve job migration and GUI tab (offline; physical validation pending)
 
 Same session/branch as RADIOROC 24, continuing immediately after it (not yet a

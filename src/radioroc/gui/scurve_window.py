@@ -23,15 +23,13 @@ from PySide6.QtWidgets import (
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
-from radioroc_client import ScurveConfig, parse_channels
-from radioroc.application.channel_config import ChannelConfigOperation
+from radioroc_client import ScurveConfig
 from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.application.scurve import ScurveJob, ScurveJobConfig
 from radioroc.application.scurve_worker import ScurveWorker
 from radioroc.data.scurve_reader import read_scurve_run
-from radioroc.transport.config import (
-    DEFAULT_BAUD, DEFAULT_TIMEOUT_SECONDS, RadiorocConnectionConfig,
-)
+from radioroc.gui.channel_config_panel import ChannelConfigPanel
+from radioroc.gui.connection_panel import ConnectionPanel
 from radioroc.transport.scurve_simulator import ScurveSimulationConfig
 
 
@@ -61,15 +59,16 @@ class ScurveWindow(QMainWindow):
     _CONNECTION_LOCKS_MODE = _CONNECTION_BUSY | {"connected", "close_failed", "faulted"}
 
     def __init__(self, *, worker_factory=ScurveWorker,
-                 connection_worker_factory=ConnectionWorker):
+                 connection_worker_factory=ConnectionWorker, connection_worker=None):
         super().__init__()
         self.setWindowTitle("RADIOROC · S-curve workflow")
         self.resize(1180, 820)
         self.worker_factory = worker_factory
         self.worker = None
         self.connection_worker_factory = connection_worker_factory
-        self.connection_worker = None
-        self._connection_ports = ()
+        self._connection_panel = None
+        self._channel_config_panel = None
+        self._connection_worker = None
         self._accepted_mode = 0
         self._closing = False
         self._last_rows = ()
@@ -102,77 +101,42 @@ class ScurveWindow(QMainWindow):
         self.mode.addItems(["Simulation", "Hardware connection"])
         form.addRow("Device / mode", self.mode)
 
-        self.connection_group = QGroupBox("Hardware connection")
-        connection_form = QFormLayout(self.connection_group)
-        connection_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        connection_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
-        self.port_select = QComboBox()
-        self.port_select.addItem("Select a USB port candidate…", None)
-        self.port_select.currentIndexChanged.connect(self._update_connection_controls)
-        connection_form.addRow("Port", self.port_select)
-        self.baud = _integer(1, 100_000_000, DEFAULT_BAUD)
-        self.timeout_s = _decimal(0.001, 3600, DEFAULT_TIMEOUT_SECONDS)
-        connection_form.addRow("Baud", self.baud)
-        connection_form.addRow("Timeout (s)", self.timeout_s)
-        connection_buttons_top = QHBoxLayout()
-        connection_buttons_bottom = QHBoxLayout()
-        self.refresh_button = QPushButton("Refresh")
-        self.connect_button = QPushButton("Connect")
-        self.read_status_button = QPushButton("Read status")
-        self.disconnect_button = QPushButton("Disconnect")
-        self.review_fault_button = QPushButton("Acknowledge fault review")
-        connection_buttons_top.addWidget(self.refresh_button)
-        connection_buttons_top.addWidget(self.connect_button)
-        connection_buttons_bottom.addWidget(self.read_status_button)
-        connection_buttons_bottom.addWidget(self.disconnect_button)
-        connection_buttons_bottom.addWidget(self.review_fault_button)
-        connection_form.addRow(connection_buttons_top)
-        connection_form.addRow(connection_buttons_bottom)
-        self.connection_status = QLabel("Not connected · refresh to list USB port candidates")
-        self.connection_status.setWordWrap(True)
-        self.connection_status.setMinimumHeight(42)
-        connection_form.addRow(self.connection_status)
-        self.firmware_status = QLabel("—")
-        connection_form.addRow("Firmware status", self.firmware_status)
-        form.addRow(self.connection_group)
-
-        self.channel_config_group = QGroupBox("Input DAC / TQ mask (persists unless Restore is checked)")
-        channel_config_form = QFormLayout(self.channel_config_group)
-        self.channel_config_channels = QLineEdit()
-        self.channel_config_channels.setPlaceholderText("e.g. 4 or 0-15 or all")
-        channel_config_form.addRow("Channels", self.channel_config_channels)
-        self.channel_config_set_tq_mask = QCheckBox("Set TQ mask")
-        self.channel_config_tq_mask_value = QComboBox()
-        self.channel_config_tq_mask_value.addItems(["Enabled", "Disabled"])
-        tq_row = QHBoxLayout()
-        tq_row.addWidget(self.channel_config_set_tq_mask)
-        tq_row.addWidget(self.channel_config_tq_mask_value)
-        channel_config_form.addRow(tq_row)
-        self.channel_config_set_input_dac_enable = QCheckBox("Set input DAC enable")
-        self.channel_config_input_dac_enable_value = QComboBox()
-        self.channel_config_input_dac_enable_value.addItems(["Enabled", "Disabled"])
-        dac_enable_row = QHBoxLayout()
-        dac_enable_row.addWidget(self.channel_config_set_input_dac_enable)
-        dac_enable_row.addWidget(self.channel_config_input_dac_enable_value)
-        channel_config_form.addRow(dac_enable_row)
-        self.channel_config_set_input_dac_value = QCheckBox("Set input DAC value")
-        self.channel_config_input_dac_value = _integer(0, 255, 0)
-        dac_value_row = QHBoxLayout()
-        dac_value_row.addWidget(self.channel_config_set_input_dac_value)
-        dac_value_row.addWidget(self.channel_config_input_dac_value)
-        channel_config_form.addRow(dac_value_row)
-        self.channel_config_impedance = QComboBox()
-        self.channel_config_impedance.addItems(
-            ["Unchanged", "Low (~150 Ohm, all channels)", "High (all channels)"])
-        channel_config_form.addRow("Impedance", self.channel_config_impedance)
-        self.channel_config_restore = QCheckBox("Restore after (bounded validation, does not persist)")
-        channel_config_form.addRow(self.channel_config_restore)
-        self.channel_config_apply_button = QPushButton("Apply channel config")
-        channel_config_form.addRow(self.channel_config_apply_button)
-        self.channel_config_status = QLabel("—")
-        self.channel_config_status.setWordWrap(True)
-        channel_config_form.addRow(self.channel_config_status)
-        form.addRow(self.channel_config_group)
+        if connection_worker is None:
+            self._connection_panel = ConnectionPanel(connection_worker_factory=connection_worker_factory)
+            self._channel_config_panel = ChannelConfigPanel(None)
+            self.connection_group = self._connection_panel.connection_group
+            self.port_select = self._connection_panel.port_select
+            self.baud = self._connection_panel.baud
+            self.timeout_s = self._connection_panel.timeout_s
+            self.refresh_button = self._connection_panel.refresh_button
+            self.connect_button = self._connection_panel.connect_button
+            self.read_status_button = self._connection_panel.read_status_button
+            self.disconnect_button = self._connection_panel.disconnect_button
+            self.review_fault_button = self._connection_panel.review_fault_button
+            self.connection_status = self._connection_panel.connection_status
+            self.firmware_status = self._connection_panel.firmware_status
+            self.channel_config_group = self._channel_config_panel.channel_config_group
+            self.channel_config_channels = self._channel_config_panel.channel_config_channels
+            self.channel_config_set_tq_mask = self._channel_config_panel.channel_config_set_tq_mask
+            self.channel_config_tq_mask_value = self._channel_config_panel.channel_config_tq_mask_value
+            self.channel_config_set_input_dac_enable = (
+                self._channel_config_panel.channel_config_set_input_dac_enable)
+            self.channel_config_input_dac_enable_value = (
+                self._channel_config_panel.channel_config_input_dac_enable_value)
+            self.channel_config_set_input_dac_value = (
+                self._channel_config_panel.channel_config_set_input_dac_value)
+            self.channel_config_input_dac_value = self._channel_config_panel.channel_config_input_dac_value
+            self.channel_config_impedance = self._channel_config_panel.channel_config_impedance
+            self.channel_config_restore = self._channel_config_panel.channel_config_restore
+            self.channel_config_apply_button = self._channel_config_panel.channel_config_apply_button
+            self.channel_config_status = self._channel_config_panel.channel_config_status
+            form.addRow(self._connection_panel)
+            form.addRow(self._channel_config_panel)
+        else:
+            self._connection_worker = connection_worker
+            self.connection_label = QLabel()
+            self.connection_label.setWordWrap(True)
+            form.addRow("Connection", self.connection_label)
 
         self.channels = QLineEdit("4")
         self.dac_min = _integer(0, 1023, 0)
@@ -260,20 +224,42 @@ class ScurveWindow(QMainWindow):
         self.cancel_button.clicked.connect(self.cancel_run)
         self.reopen_button.clicked.connect(self.choose_saved)
         self.mode.currentIndexChanged.connect(self._mode_changed)
-        self.refresh_button.clicked.connect(self.refresh_connections)
-        self.connect_button.clicked.connect(self.connect_hardware)
-        self.read_status_button.clicked.connect(self.read_hardware_status)
-        self.disconnect_button.clicked.connect(self.disconnect_hardware)
-        self.review_fault_button.clicked.connect(self.review_hardware_fault)
-        self.channel_config_apply_button.clicked.connect(self.apply_channel_config)
         self.timer = QTimer(self)
         self.timer.setInterval(100)
         self.timer.timeout.connect(self.poll_worker)
-        self.connection_timer = QTimer(self)
-        self.connection_timer.setInterval(100)
-        self.connection_timer.timeout.connect(self.poll_connection_worker)
+        if self._connection_panel is not None:
+            self.port_select.currentIndexChanged.connect(self._update_connection_controls)
+            self.refresh_button.clicked.connect(self.refresh_connections)
+            self.connect_button.clicked.connect(self.connect_hardware)
+            self.read_status_button.clicked.connect(self.read_hardware_status)
+            self.disconnect_button.clicked.connect(self.disconnect_hardware)
+            self.review_fault_button.clicked.connect(self.review_hardware_fault)
+            self.channel_config_apply_button.clicked.connect(self.apply_channel_config)
+            self._connection_panel.status_changed.connect(self.poll_connection_worker)
+        else:
+            self.timer.timeout.connect(self._refresh_connection_label)
+            self.timer.start()
+            self._refresh_connection_label()
         self._mode_changed()
         self._plot((), "Simulation — no data yet")
+
+    # -- connection_worker: a plain attribute in "injected" mode, or a
+    # mirror of the internal ConnectionPanel's worker otherwise, so both
+    # existing tests (which set `window.connection_worker = ...` directly)
+    # and the injected-worker case share one attribute name. --------------
+
+    @property
+    def connection_worker(self):
+        if self._connection_panel is not None:
+            return self._connection_panel.connection_worker
+        return self._connection_worker
+
+    @connection_worker.setter
+    def connection_worker(self, value):
+        if self._connection_panel is not None:
+            self._connection_panel.connection_worker = value
+        else:
+            self._connection_worker = value
 
     def _mode_changed(self):
         previous_mode = self._accepted_mode
@@ -282,8 +268,9 @@ class ScurveWindow(QMainWindow):
             self.mode.blockSignals(True)
             self.mode.setCurrentIndex(self._accepted_mode)
             self.mode.blockSignals(False)
-            self.connection_status.setText(
-                "Finish the active session before changing device mode.")
+            if self._connection_panel is not None:
+                self.connection_status.setText(
+                    "Finish the active session before changing device mode.")
         else:
             self._accepted_mode = requested
         simulation = self.mode.currentIndex() == 0
@@ -317,144 +304,83 @@ class ScurveWindow(QMainWindow):
             return False
         return self.connection_worker.snapshot().state in self._CONNECTION_LOCKS_MODE
 
-    def _ensure_connection_worker(self):
-        if self.connection_worker is None:
-            worker = self.connection_worker_factory()
-            worker.start()
-            self.connection_worker = worker
-            self.connection_timer.start()
-        return self.connection_worker
+    def _after_connection_command(self, succeeded):
+        # On success the panel's own poll already refreshed the connection
+        # display from a fresh snapshot; layer the full window-level cascade
+        # (run_button/mode/channel-config enablement) on top of it. On
+        # failure the panel already put the error on connection_status --
+        # only the window-level cascade is still needed, not a snapshot
+        # re-read, which would overwrite that error message.
+        if succeeded:
+            self.poll_connection_worker()
+        else:
+            self._update_connection_controls()
 
-    def _connection_command(self, command):
+    def refresh_connections(self):
+        if self._connection_panel is None:
+            return
+        if self.mode.currentIndex() == 1 and self.worker is None and not self._hardware_running:
+            self._after_connection_command(self._connection_panel.refresh())
+
+    def connect_hardware(self):
+        if self._connection_panel is None:
+            return
+        candidate = self.port_select.currentData()
+        if (self.mode.currentIndex() != 1 or candidate is None or self.worker is not None
+                or self._hardware_running):
+            return
+        self._after_connection_command(self._connection_panel.connect_selected())
+
+    def read_hardware_status(self):
+        if self._connection_panel is None:
+            return
+        if self.mode.currentIndex() == 1:
+            self._after_connection_command(self._connection_panel.read_status())
+
+    def disconnect_hardware(self):
+        if self._connection_panel is None:
+            return
+        if self.connection_worker is not None:
+            self._after_connection_command(self._connection_panel.disconnect())
+
+    def review_hardware_fault(self):
+        if self._connection_panel is None:
+            return
+        if self.connection_worker is not None:
+            self._after_connection_command(self._connection_panel.review_fault())
+
+    def apply_channel_config(self):
+        if self._channel_config_panel is None:
+            return
+        if self.mode.currentIndex() != 1 or self.connection_worker is None:
+            return
         try:
-            command(self._ensure_connection_worker())
+            operation = self._channel_config_panel.build_operation()
+        except ValueError as exc:
+            self.channel_config_status.setText(f"Invalid channel configuration: {exc}")
+            return
+        try:
+            self.connection_worker.apply_channel_config(operation)
             self.poll_connection_worker()
         except Exception as exc:
             self.connection_status.setText(
                 f"Connection error · {type(exc).__name__}: {exc}")
             self._update_connection_controls()
 
-    def refresh_connections(self):
-        if self.mode.currentIndex() == 1 and self.worker is None and not self._hardware_running:
-            self._connection_command(lambda worker: worker.refresh())
-
-    def connect_hardware(self):
-        candidate = self.port_select.currentData()
-        if (self.mode.currentIndex() != 1 or candidate is None or self.worker is not None
-                or self._hardware_running):
-            return
-        config = RadiorocConnectionConfig(candidate.port, self.baud.value(), self.timeout_s.value())
-        self._connection_command(lambda worker: worker.connect(config))
-
-    def read_hardware_status(self):
-        if self.mode.currentIndex() == 1:
-            self._connection_command(lambda worker: worker.read_status())
-
-    def disconnect_hardware(self):
-        if self.connection_worker is not None:
-            self._connection_command(lambda worker: worker.disconnect())
-
-    def review_hardware_fault(self):
-        if self.connection_worker is not None:
-            self._connection_command(lambda worker: worker.review_fault())
-
-    def apply_channel_config(self):
-        if self.mode.currentIndex() != 1 or self.connection_worker is None:
-            return
-        text = self.channel_config_channels.text().strip()
-        channels = tuple(parse_channels(text)) if text else ()
-        impedance = {0: None, 1: True, 2: False}[self.channel_config_impedance.currentIndex()]
-        operation = ChannelConfigOperation(
-            tq_mask_channels=channels if self.channel_config_set_tq_mask.isChecked() else (),
-            tq_mask_value=self.channel_config_tq_mask_value.currentIndex() == 0,
-            input_dac_enable_channels=(
-                channels if self.channel_config_set_input_dac_enable.isChecked() else ()),
-            input_dac_enable_value=self.channel_config_input_dac_enable_value.currentIndex() == 0,
-            input_dac_value_channels=(
-                channels if self.channel_config_set_input_dac_value.isChecked() else ()),
-            input_dac_value=(self.channel_config_input_dac_value.value()
-                             if self.channel_config_set_input_dac_value.isChecked() else None),
-            input_dac_impedance=impedance,
-            verify=True,
-            restore=self.channel_config_restore.isChecked(),
-        )
-        try:
-            operation.validate()
-        except ValueError as exc:
-            self.channel_config_status.setText(f"Invalid channel configuration: {exc}")
-            return
-        self._connection_command(lambda worker: worker.apply_channel_config(operation))
-
-    def _show_channel_config_snapshot(self):
+    def _refresh_connection_label(self):
         worker = self.connection_worker
-        result = worker.channel_config_snapshot() if worker is not None else None
-        if result is None:
+        if worker is None:
+            self.connection_label.setText("Connection: not available")
             return
-        parts = [f"{len(result.applied)} write(s)", f"{result.touched_rows} row(s) touched"]
-        if result.verify_mismatches:
-            parts.append(f"{len(result.verify_mismatches)} VERIFY MISMATCH(ES)")
-        else:
-            parts.append("verified")
-        if result.restored:
-            parts.append("restored" if not result.restore_mismatches
-                         else f"{len(result.restore_mismatches)} RESTORE MISMATCH(ES)")
-        self.channel_config_status.setText(
-            "Channel config: " + "; ".join(parts) + (
-                (" · " + "; ".join(result.applied)) if result.applied else ""))
-
-    def _show_connection_snapshot(self, snapshot):
-        state = snapshot.state
-        if state == "idle":
-            message = "Not connected"
-            if snapshot.ports:
-                message += f" · {len(snapshot.ports)} board candidate(s)"
-            else:
-                message += " · no board candidates found"
-            retained = [problem for problem in (snapshot.error, snapshot.close_error) if problem]
-            if retained:
-                message += " · previous errors: " + "; ".join(retained)
-        elif state == "connected":
-            message = f"Connected · {snapshot.port}"
-        elif state == "faulted":
-            message = f"Hardware fault · {snapshot.fault or snapshot.error or 'review required'}"
-        elif state == "close_failed":
-            problems = [problem for problem in (snapshot.error, snapshot.close_error) if problem]
-            message = f"Close failed · {'; '.join(problems)} · retry close"
-        elif state == "error":
-            message = f"Connection error · {snapshot.error}"
-        elif state == "stopped":
-            message = "Connection worker stopped"
-        else:
-            message = state.replace("_", " ").capitalize()
-            if snapshot.port:
-                message += f" · {snapshot.port}"
-        if getattr(snapshot, "fault", None) and state != "faulted":
-            message += f" · fault review required: {snapshot.fault}"
-        self.connection_status.setText(message)
-        self.firmware_status.setText(
-            "—" if snapshot.status_word is None
-            else f"0x{snapshot.status_word:02X} ({snapshot.status_word})")
-
-    def _sync_connection_ports(self, ports):
-        ports = tuple(ports)
-        if ports == self._connection_ports:
-            return
-        selected = self.port_select.currentData()
-        selected_port = selected.port if selected is not None else None
-        self._connection_ports = ports
-        self.port_select.blockSignals(True)
-        self.port_select.clear()
-        self.port_select.addItem("Select a USB port candidate…", None)
-        selected_index = 0
-        for candidate in ports:
-            label = candidate.port
-            if candidate.description:
-                label += f" — {candidate.description}"
-            self.port_select.addItem(label, candidate)
-            if candidate.port == selected_port:
-                selected_index = self.port_select.count() - 1
-        self.port_select.setCurrentIndex(selected_index)
-        self.port_select.blockSignals(False)
+        snapshot = worker.snapshot()
+        text = f"Connection: {snapshot.state}"
+        port = getattr(snapshot, "port", None)
+        if port:
+            text += f" · {port}"
+        fault = getattr(snapshot, "fault", None)
+        if fault:
+            text += f" · fault review required: {fault}"
+        self.connection_label.setText(text)
 
     def poll_connection_worker(self):
         worker = self.connection_worker
@@ -466,18 +392,24 @@ class ScurveWindow(QMainWindow):
         if self._hardware_running:
             self.poll_worker()
         snapshot = worker.snapshot()
-        self._sync_connection_ports(snapshot.ports)
-        self._show_connection_snapshot(snapshot)
-        self._show_channel_config_snapshot()
+        if self._connection_panel is not None:
+            self._connection_panel.sync_ports(snapshot.ports)
+            self._connection_panel.show_snapshot(snapshot)
+        if self._channel_config_panel is not None:
+            self._channel_config_panel.connection_worker = worker
+            self._channel_config_panel.show_snapshot()
         if snapshot.state == "close_failed" and self._closing:
             # A failed window-close attempt stays open for review. A later close
             # event is the explicit request to try shutdown again.
             self._closing = False
         if snapshot.state == "stopped" and not worker.is_alive:
             worker.join()
-            self.connection_worker = None
-            self.connection_timer.stop()
-            self._connection_ports = ()
+            if self._connection_panel is not None:
+                self._connection_panel.forget_worker()
+            else:
+                self._connection_worker = None
+            if self._channel_config_panel is not None:
+                self._channel_config_panel.connection_worker = None
             if self._closing:
                 self.close()
                 return
@@ -485,35 +417,26 @@ class ScurveWindow(QMainWindow):
 
     def _update_connection_controls(self):
         hardware = self.mode.currentIndex() == 1
-        state = "idle"
-        if self.connection_worker is not None:
-            state = self.connection_worker.snapshot().state
+        worker = self.connection_worker
+        snapshot = worker.snapshot() if worker is not None else None
+        state = snapshot.state if snapshot is not None else "idle"
+        fault = getattr(snapshot, "fault", None) if snapshot is not None else None
         busy = state in self._CONNECTION_BUSY
-        fault = getattr(self.connection_worker.snapshot(), "fault", None) if self.connection_worker else None
         session = state in {"connected", "close_failed", "faulted"}
         simulation_available = self.worker is None and not busy and not session
         commands_available = not self._closing
         self.mode.setEnabled(commands_available and self.worker is None and not busy and not session)
-        self.connection_group.setEnabled(hardware and self.worker is None)
-        selectable = commands_available and not busy and not session and not fault
-        self.port_select.setEnabled(selectable)
-        self.baud.setEnabled(selectable)
-        self.timeout_s.setEnabled(selectable)
-        self.refresh_button.setEnabled(selectable)
-        self.connect_button.setEnabled(selectable and
-                                       self.port_select.currentData() is not None)
-        self.read_status_button.setEnabled(commands_available and state == "connected")
-        self.disconnect_button.setEnabled(commands_available and state in {"connected", "close_failed", "faulted"})
-        self.disconnect_button.setText("Retry close" if state == "close_failed" else "Disconnect")
-        self.review_fault_button.setEnabled(commands_available and not busy and bool(fault) and
-                                            state in {"idle", "error"})
         hardware_run_available = (self.worker is None and not self._hardware_running and
                                   state == "connected" and not fault
                                   and not self._closing)
         self.run_button.setEnabled((self.mode.currentIndex() == 0 and simulation_available) or
                                    (self.mode.currentIndex() == 1 and hardware_run_available))
-        self.channel_config_group.setEnabled(hardware)
-        self.channel_config_apply_button.setEnabled(hardware_run_available)
+        if self._connection_panel is not None:
+            self._connection_panel.update_controls(commands_available=commands_available)
+            self.connection_group.setEnabled(hardware and self.worker is None)
+        if self._channel_config_panel is not None:
+            self.channel_config_group.setEnabled(hardware)
+            self.channel_config_apply_button.setEnabled(hardware_run_available)
 
     def operation(self):
         channels = [int(value.strip()) for value in self.channels.text().split(",")]
@@ -549,7 +472,8 @@ class ScurveWindow(QMainWindow):
             if simulation:
                 data["simulation"] = self.simulation().as_dict()
             else:
-                candidate = self.port_select.currentData()
+                candidate = (self.port_select.currentData()
+                            if self._connection_panel is not None else None)
                 data["hardware"] = {
                     "port": candidate.port if candidate is not None else None,
                     "connection_state": (self.connection_worker.snapshot().state
@@ -765,19 +689,25 @@ class ScurveWindow(QMainWindow):
             event.ignore()
             self._closing = True
             self.cancel_run()
-        elif self.connection_worker is not None:
+        elif self._connection_panel is not None and self.connection_worker is not None:
             event.ignore()
             self._closing = True
             try:
                 self.connection_worker.shutdown()
-                self.connection_timer.start()
+                self._connection_panel.timer.start()
                 self._update_connection_controls()
             except Exception as exc:
                 self._closing = False
                 self.connection_status.setText(
                     f"Could not close connection · {type(exc).__name__}: {exc}")
                 self._update_connection_controls()
+        elif self._connection_panel is None and self._hardware_running and self.connection_worker is not None:
+            # A connection_worker injected from outside is not this window's
+            # to shut down (another page may still be using it) -- just
+            # wait for the in-flight scan this window started to reach a
+            # terminal snapshot, same as the SIMULATION close-wait path.
+            event.ignore()
+            self._closing = True
         else:
             self.timer.stop()
-            self.connection_timer.stop()
             event.accept()
