@@ -1,5 +1,71 @@
 # Implementation status
 
+## RADIOROC 27 — Threshold-calibration DAC register mapping recovered; grid built (offline)
+
+Same day, continuing from RADIOROC 26 with the operator now present and
+directing (not autonomous). The operator asked whether the "Main"/"Threshold
+calibration" register documentation flagged as missing at the end of
+RADIOROC 26 might already be sitting in `local_artifacts` or findable online,
+rather than needing a fresh vendor request.
+
+**Found real source, not a guess.** `local_artifacts/downloads/Radioroc2
+User Guide - 2_1_0_6(0125).pdf` (already in the repo, not previously read
+fully) documents every Main-tab parameter's *behavior* (ranges, step sizes)
+but explicitly defers register addresses to "the datasheet," which isn't
+included. The actual register map turned out to be recoverable a different
+way: `local_artifacts/extracted/RadiorocUI_2_2_0_5.exe_extracted/` is a full
+PyInstaller extraction of the vendor's own Windows app, and its bundled
+`.pyc` files are genuine CPython 3.13 bytecode — matching this machine's
+interpreter exactly, so `marshal.loads()` + `dis` reads them directly with no
+decompiler needed (decompilers largely don't support 3.11+ bytecode, but
+"disassemble and read the constants" doesn't require one). This is the exact
+method this codebase already used previously for the input-DAC/TQ-mask
+registers (see `RadiorocDevice.set_tq_mask_for_channel`'s existing docstring,
+"recovered from the vendor GUI's compiled widget properties") — tonight
+extended the same technique to the registers that hadn't been done yet.
+
+`radioroc2UI.pyc`'s `Ui_MainWindow.setupUi` embeds every control's tooltip
+text as adjacent string constants, many literally spelling out `add: N -
+subadd: M - bit: [a:b]` right after a field's bit-layout description (e.g.
+`NC*2, calibDacT1[5:0]` immediately followed by `add: 0 - subadd: 4`) —
+`strings` on the raw `.pyc` surfaces these without even needing the full
+disassembly. Cross-checked three ways before trusting it: (1) independently
+re-derived bit positions for TQ mask (bit 2), T1 mask (bit 4), T2 mask (bit
+3), and input-DAC enable (bit 6) from this same source and confirmed they
+exactly match this codebase's existing, already-hardware-adjacent
+implementations — not a coincidence, since both were reverse-engineered from
+the same vendor binary; (2) the packaged default config CSV's channel-0 rows
+for subadd 4 and 5 both already carry `00100000` (decimal 32), matching the
+vendor GUI's default "Calibration DAC T1"/"T2" display value of 32 exactly;
+(3) `uiroc/i2c.py`'s own `set_value`/`get_bits` functions (also disassembled)
+confirm the same MSB-first bit-string addressing convention this codebase
+already uses. Result: per channel, subadd 4 bits `[5:0]` = T1 calibration
+trim DAC (6-bit, 0-63), subadd 5 bits `[5:0]` = T2 (top 2 bits of each byte
+unused/`NC`). "Main" tab register addresses were *not* pinned down with the
+same confidence in the time available (its controls are a mix of per-channel
+and shared/common registers, and the "common block" register semantics
+weren't as cleanly self-describing in the strings found) and remain
+deferred, but the reverse-engineering method itself is now demonstrated and
+reusable for a future session that wants to spend more time on it.
+
+**Built on this:** `RadiorocDevice.set_calibration_dac_for_channel`
+(`radioroc_client.py`) mirrors `set_input_dac_value`'s exact style/docstring
+convention. `ChannelConfigOperation` gained
+`t1_calibration_dac_values`/`t2_calibration_dac_values`
+(`dict[channel, 0..63]`, mirroring the existing `input_dac_values` pattern)
+in `src/radioroc/application/channel_config.py`. New `ThresholdCalibrationPanel`
+(`gui/threshold_calibration_panel.py`, delegated, reviewed) adds the vendor
+app's fourth ASIC-config sub-tab — two 64-channel T1/T2 trim-DAC grids with a
+"Set all" per grid — wired into `MainWindow` alongside the three sub-tabs
+RADIOROC 26 already built.
+
+**Evidence:** 268/268 offline tests (8 new over RADIOROC 26's 260: 1
+device-level bit-position test, 1 core-operation test, 6 panel tests), 3
+clean full-suite runs of `tools/check_development.py`. Offscreen screenshot
+of the new tab matches the vendor screenshot's layout. Not independently
+verified against real hardware (same caveat as every other register
+recovered this way in this codebase).
+
 ## RADIOROC 26 — Shared connection/channel-config shell; GUI-test SIGSEGV fix (offline)
 
 Autonomous overnight session (no operator present; scope explicitly limited to

@@ -117,6 +117,36 @@ class RadiorocCoreTests(unittest.TestCase):
         self.assertEqual(after[5], "1")
         self.assertEqual(after[:5] + after[6:], before[:5] + before[6:])
 
+    def test_calibration_dac_bit_positions(self) -> None:
+        # subadd=4/5, low 6 bits (position=0, nbbits=6), recovered the same
+        # way as test_tq_mask_and_input_dac_bit_positions above; the packaged
+        # default config's channel-0 rows for both subadd already carry
+        # "00100000" (decimal 32), matching the vendor GUI's default
+        # Calibration DAC T1/T2 display value of 32 -- an independent
+        # cross-check that subadd 4/5 are the right registers. Not yet
+        # independently hardware-validated.
+        device = RadiorocDevice(RadiorocMemoryTransport(), dry_run=True)  # type: ignore[arg-type]
+        device.load_default_config()
+
+        self.assertEqual(parse_bits(device.find_i2c_row(0, 4).data[2:]), 32)
+        self.assertEqual(parse_bits(device.find_i2c_row(0, 5).data[2:]), 32)
+
+        device.set_calibration_dac_for_channel(4, t1=True, value=50)
+        self.assertEqual(device.find_i2c_row(4, 4).data[2:], bits(50, 6))
+        device.set_calibration_dac_for_channel(4, t1=False, value=10)
+        self.assertEqual(device.find_i2c_row(4, 5).data[2:], bits(10, 6))
+        with self.assertRaises(ValueError):
+            device.set_calibration_dac_for_channel(4, t1=True, value=64)
+        with self.assertRaises(ValueError):
+            device.set_calibration_dac_for_channel(64, t1=True, value=0)
+
+        # The top 2 (unused/NC) bits are left untouched, not forced to zero.
+        before = device.find_i2c_row(5, 4).data
+        device.set_calibration_dac_for_channel(5, t1=True, value=63)
+        after = device.find_i2c_row(5, 4).data
+        self.assertEqual(after[2:], bits(63, 6))
+        self.assertEqual(after[:2], before[:2])
+
 
 class RadiorocAnalysisTests(unittest.TestCase):
     def test_threshold_csv_and_summary(self) -> None:

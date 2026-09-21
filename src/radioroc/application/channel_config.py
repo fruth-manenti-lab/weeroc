@@ -53,6 +53,11 @@ class ChannelConfigOperation:
     - `input_dac_impedance` (`bool | None`): Set the shared impedance switch
       (all channels) to low (~150 Ohm) when true, high when false; leave
       unset when `None`.
+    - `t1_calibration_dac_values` (`dict[int, int] | None`): Independent
+      per-channel T1 threshold-calibration trim codes (channel -> 0..63),
+      for a 64-channel grid UI.
+    - `t2_calibration_dac_values` (`dict[int, int] | None`): Same as
+      `t1_calibration_dac_values`, for the T2 trim DAC.
     - `verify` (`bool`): Independently read back every touched register after
       writing.
     - `restore` (`bool`): Snapshot every touched register before writing and
@@ -79,6 +84,8 @@ class ChannelConfigOperation:
     t2_mask_value: bool = True
     t2_mask_states: dict[int, bool] | None = None
     input_dac_impedance: bool | None = None
+    t1_calibration_dac_values: dict[int, int] | None = None
+    t2_calibration_dac_values: dict[int, int] | None = None
     verify: bool = True
     restore: bool = False
     config_path: Path | None = None
@@ -136,10 +143,20 @@ class ChannelConfigOperation:
                     raise ValueError(f"channel must be in range 0..{N_CHANNELS - 1}")
                 if not 0 <= value <= 255:
                     raise ValueError("input_dac_values values must be in range 0..255")
+        for values, name in ((self.t1_calibration_dac_values, "t1_calibration_dac_values"),
+                             (self.t2_calibration_dac_values, "t2_calibration_dac_values")):
+            if values is None:
+                continue
+            for channel, value in values.items():
+                if not 0 <= channel < N_CHANNELS:
+                    raise ValueError(f"channel must be in range 0..{N_CHANNELS - 1}")
+                if not 0 <= value <= 63:
+                    raise ValueError(f"{name} values must be in range 0..63")
         if not any([self.tq_mask_channels, self.input_dac_enable_channels,
                    self.input_dac_value_channels, self.input_dac_values,
                    self.t1_mask_channels, self.t2_mask_channels,
                    self.tq_mask_states, self.t1_mask_states, self.t2_mask_states,
+                   self.t1_calibration_dac_values, self.t2_calibration_dac_values,
                    self.input_dac_impedance is not None]):
             raise ValueError("at least one channel-configuration field is required")
 
@@ -217,6 +234,8 @@ def apply_channel_config(device: RadiorocDevice, operation: ChannelConfigOperati
     touched.update((ch, 6) for ch in (operation.tq_mask_states or {}))
     touched.update((ch, 6) for ch in (operation.t1_mask_states or {}))
     touched.update((ch, 6) for ch in (operation.t2_mask_states or {}))
+    touched.update((ch, 4) for ch in (operation.t1_calibration_dac_values or {}))
+    touched.update((ch, 5) for ch in (operation.t2_calibration_dac_values or {}))
     if operation.input_dac_impedance is not None:
         touched.update((ch, 6) for ch in range(N_CHANNELS))
 
@@ -252,6 +271,12 @@ def apply_channel_config(device: RadiorocDevice, operation: ChannelConfigOperati
     for channel, enabled in (operation.t2_mask_states or {}).items():
         device.set_mask_for_channel(channel, t1=False, enabled=enabled)
         applied.append(f"t2_mask channel={channel} -> {int(enabled)}")
+    for channel, value in (operation.t1_calibration_dac_values or {}).items():
+        device.set_calibration_dac_for_channel(channel, t1=True, value=value)
+        applied.append(f"t1_calibration_dac channel={channel} -> {value}")
+    for channel, value in (operation.t2_calibration_dac_values or {}).items():
+        device.set_calibration_dac_for_channel(channel, t1=False, value=value)
+        applied.append(f"t2_calibration_dac channel={channel} -> {value}")
     if operation.input_dac_impedance is not None:
         device.set_input_dac_impedance(operation.input_dac_impedance)
         applied.append(f"input_dac_impedance -> {'low' if operation.input_dac_impedance else 'high'}")

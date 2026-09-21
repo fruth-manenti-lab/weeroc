@@ -31,6 +31,10 @@ class ChannelConfigOperationTests(unittest.TestCase):
                                    tq_mask_states={4: True}).validate()  # overlapping channel
         with self.assertRaises(ValueError):
             ChannelConfigOperation(t1_mask_states={64: True}).validate()
+        with self.assertRaises(ValueError):
+            ChannelConfigOperation(t1_calibration_dac_values={4: 64}).validate()
+        with self.assertRaises(ValueError):
+            ChannelConfigOperation(t2_calibration_dac_values={64: 0}).validate()
 
     def test_validate_accepts_mask_and_per_channel_values_alone(self):
         ChannelConfigOperation(t1_mask_channels=(4,)).validate()
@@ -39,6 +43,8 @@ class ChannelConfigOperationTests(unittest.TestCase):
         ChannelConfigOperation(tq_mask_states={4: True, 5: False}).validate()
         ChannelConfigOperation(t1_mask_states={4: True}).validate()
         ChannelConfigOperation(t2_mask_states={4: True}).validate()
+        ChannelConfigOperation(t1_calibration_dac_values={4: 63}).validate()
+        ChannelConfigOperation(t2_calibration_dac_values={4: 0}).validate()
 
     def test_load_rows_reuses_existing_when_config_path_is_none(self):
         existing = [I2CRow(4, 6, "11111111")]
@@ -152,6 +158,21 @@ class ApplyChannelConfigTests(unittest.TestCase):
         row5 = self.device.find_i2c_row(5, 6).data
         self.assertEqual((row4[3], row4[4], row4[5]), ("1", "0", "1"))  # T1, T2, TQ
         self.assertEqual((row5[3], row5[4], row5[5]), ("0", "1", "0"))
+        self.assertEqual(result.verify_mismatches, ())
+
+    def test_per_channel_calibration_dac_values_write_independent_codes(self):
+        self.device.load_default_config()
+        result = apply_channel_config(self.device, ChannelConfigOperation(
+            t1_calibration_dac_values={4: 50, 5: 0},
+            t2_calibration_dac_values={4: 10, 5: 63},
+            verify=True,
+        ))
+        self.assertEqual(self.device.find_i2c_row(4, 4).data[2:], bits(50, 6))
+        self.assertEqual(self.device.find_i2c_row(5, 4).data[2:], bits(0, 6))
+        self.assertEqual(self.device.find_i2c_row(4, 5).data[2:], bits(10, 6))
+        self.assertEqual(self.device.find_i2c_row(5, 5).data[2:], bits(63, 6))
+        self.assertIn("t1_calibration_dac channel=4 -> 50", result.applied)
+        self.assertIn("t2_calibration_dac channel=5 -> 63", result.applied)
         self.assertEqual(result.verify_mismatches, ())
 
 

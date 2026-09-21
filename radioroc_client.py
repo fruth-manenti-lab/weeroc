@@ -1488,6 +1488,40 @@ class RadiorocDevice:
             return
         self.write_register(channel, 0, bits(value, 8))
 
+    def set_calibration_dac_for_channel(self, channel: int, *, t1: bool, value: int) -> None:
+        """Set one channel's T1 or T2 threshold-calibration trim DAC.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `t1` (`bool`): Set the T1 trim DAC when true, T2 when false.
+        - `value` (`int`): Raw 6-bit trim code, 0..63.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel's T1 or T2 calibration-DAC register if present
+          in the loaded defaults.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`lineEdit_calibDacT1NN`/`lineEdit_calibDacT2NN`: add=channel,
+        subadd=4 (T1) or 5 (T2), position=0, nbbits=6 -> the row's low 6
+        bits; the top 2 bits are unused (`NC`) and left as read). Not yet
+        independently verified against real hardware.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_channel(channel)
+        validate_integer(value, 0, 63, "value")
+        subadd = 4 if t1 else 5
+        row: I2CRow | None = self.find_i2c_row(channel, subadd)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[2:] = bits(value, 6)
+        self.write_register(channel, subadd, "".join(data))
+
     def prepare_trigger_masks(self, *, t1: bool, use_mask: bool, use_ctest: bool) -> None:
         """Prepare trigger path masks and Ctest bits for scan loops.
 
