@@ -43,10 +43,10 @@ def build_parser(preset: dict[str, object] | None = None, preset_path: Path | No
     apply_preset_defaults(parser, preset or {}, preset_path)
     add_connection_args(parser)
     parser.add_argument("--execute", action="store_true", help="Write hardware. Without this, dry-run only.")
-    parser.add_argument("--sync-io", choices=FPGA_IO_NAMES, default="io1", help="FPGA IO to scan")
+    parser.add_argument("--sync-io", choices=FPGA_IO_NAMES, help="FPGA IO to scan")
     parser.add_argument("--all-ios", action="store_true", help="Set all IO outputs to each mux index")
-    parser.add_argument("--pulses-per-index", type=int, default=100, help="Pulses emitted at each mux index")
-    parser.add_argument("--period-ms", type=float, default=10.0, help="Pulse period")
+    parser.add_argument("--pulses-per-index", type=int, help="Pulses emitted at each mux index")
+    parser.add_argument("--period-ms", type=float, help="Pulse period")
     return parser
 
 
@@ -62,6 +62,12 @@ def main() -> int:
 
     preset_path, preset = load_preset_from_argv()
     args = build_parser(preset, preset_path).parse_args()
+    if args.sync_io is None:
+        args.sync_io = "io1"
+    if args.pulses_per_index is None:
+        args.pulses_per_index = 100
+    if args.period_ms is None:
+        args.period_ms = 10.0
     connection = connection_config_from_args(args)
     config = IoMuxScanConfig(
         sync_io=args.sync_io,

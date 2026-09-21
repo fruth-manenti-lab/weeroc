@@ -174,10 +174,10 @@ class ThresholdVerificationTests(unittest.TestCase):
         self.assertEqual((result.status, result.verification["status"]), ("cancelled", "passed"))
 
     def test_absent_snapshot_is_incomplete_without_any_readback(self):
-        from radioroc.application.verification import verify_threshold_restoration
+        from radioroc.application.verification import verify_restoration
 
         transport = VerificationTransport()
-        report = verify_threshold_restoration(
+        report = verify_restoration(
             RadiorocDevice(transport), None, [(65, 2), (66, 4)], execution_mode="simulation"
         )
         self.assertEqual(report["status"], "incomplete")
@@ -188,7 +188,7 @@ class ThresholdVerificationTests(unittest.TestCase):
         self.assertEqual(transport.trace, [])
 
     def test_direct_verifier_has_exact_small_transport_suffix(self):
-        from radioroc.application.verification import verify_threshold_restoration
+        from radioroc.application.verification import verify_restoration
 
         transport = VerificationTransport()
         device = RadiorocDevice(transport)
@@ -197,7 +197,7 @@ class ThresholdVerificationTests(unittest.TestCase):
             "fpga": {address: transport.original_words[address] for address in (0, 1, 6)},
             "asic": {register: bits(transport.asic[register]) for register in registers},
         }
-        report = verify_threshold_restoration(device, snapshot, registers, execution_mode="simulation")
+        report = verify_restoration(device, snapshot, registers, execution_mode="simulation")
         self.assertEqual(report["status"], "passed")
         self.assertEqual(transport.trace, [
             ("read", 0), ("read", 1), ("read", 6),
@@ -210,7 +210,7 @@ class ThresholdVerificationTests(unittest.TestCase):
         ])
 
     def test_direct_verifier_reports_asic_mismatch_without_repair(self):
-        from radioroc.application.verification import verify_threshold_restoration
+        from radioroc.application.verification import verify_restoration
 
         transport = VerificationTransport()
         device = RadiorocDevice(transport)
@@ -221,7 +221,7 @@ class ThresholdVerificationTests(unittest.TestCase):
         }
         changed = (transport.asic[(65, 2)] + 1) % 256
         transport.asic[(65, 2)] = changed
-        report = verify_threshold_restoration(device, snapshot, registers, execution_mode="simulation")
+        report = verify_restoration(device, snapshot, registers, execution_mode="simulation")
         self.assertEqual(report["status"], "failed")
         self.assertTrue(any(item.get("kind") == "asic" and item.get("add") == 65
                             and item.get("subadd") == 2 for item in report["mismatches"]))
@@ -253,14 +253,14 @@ class ThresholdVerificationTests(unittest.TestCase):
         second = replace(self.base, out_dir=Path(self.tmp.name) / "second")
         from radioroc.application import verification
 
-        real_verify = verification.verify_threshold_restoration
+        real_verify = verification.verify_restoration
 
         def blocked_verify(*args, **kwargs):
             entered.set()
             release.wait(2)
             return real_verify(*args, **kwargs)
 
-        with patch("radioroc.application.threshold.verify_threshold_restoration",
+        with patch("radioroc.application.threshold.run_restoration_check",
                    side_effect=blocked_verify):
             thread = threading.Thread(
                 target=lambda: result_holder.append(self.run_job(transport)), daemon=True

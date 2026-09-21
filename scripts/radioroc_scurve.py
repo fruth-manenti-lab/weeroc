@@ -46,11 +46,11 @@ def build_parser(preset: dict[str, object] | None = None, preset_path: Path | No
     apply_preset_defaults(parser, preset or {}, preset_path)
     add_connection_args(parser)
     add_write_safety_args(parser)
-    parser.add_argument("--channels", default="4", help="Channels to scan, e.g. 4, 0-15, or all")
-    parser.add_argument("--dac-min", type=int, default=0)
-    parser.add_argument("--dac-max", type=int, default=1023)
-    parser.add_argument("--dac-step", type=int, default=50)
-    parser.add_argument("--clock-index", type=int, default=3, help="S-curve clock index 0..3")
+    parser.add_argument("--channels", help="Channels to scan, e.g. 4, 0-15, or all")
+    parser.add_argument("--dac-min", type=int)
+    parser.add_argument("--dac-max", type=int)
+    parser.add_argument("--dac-step", type=int)
+    parser.add_argument("--clock-index", type=int, help="S-curve clock index 0..3")
     parser.add_argument("--trigger-level", action="store_true", help="Count trigger level instead of rising edge")
     parser.add_argument("--pat-gain", type=int, help="Optional trigger preamp paT gain code, 1=max, 63=min")
     parser.add_argument("--t2", action="store_true", help="Use T2 instead of T1")
@@ -72,6 +72,16 @@ def main() -> int:
 
     preset_path, preset = load_preset_from_argv()
     args = build_parser(preset, preset_path).parse_args()
+    if args.channels is None:
+        args.channels = "4"
+    if args.dac_min is None:
+        args.dac_min = 0
+    if args.dac_max is None:
+        args.dac_max = 1023
+    if args.dac_step is None:
+        args.dac_step = 50
+    if args.clock_index is None:
+        args.clock_index = 3
     connection = connection_config_from_args(args)
     channels = parse_channels(args.channels)
     out_dir = Path(args.out_dir) if args.out_dir else default_run_dir("scurve", channels=channels)

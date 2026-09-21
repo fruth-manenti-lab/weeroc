@@ -1,4 +1,4 @@
-"""Offline threshold acceptance tests using the real device operations."""
+"""Offline hold-scan acceptance tests using the real device operations."""
 
 import contextlib
 import csv
@@ -15,30 +15,59 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from radioroc_client import RadiorocDevice, RadiorocMemoryTransport, ThresholdScanConfig, bits
+from radioroc_client import HoldScanConfig, N_CHANNELS, RadiorocDevice, RadiorocMemoryTransport, bits
 from radioroc.application import CancellationToken, JobBusyError
-from radioroc.application.threshold import ThresholdJob, ThresholdJobConfig, ThresholdJobError
-from radioroc.data.threshold import ThresholdRunWriter
+from radioroc.application.hold_scan import HoldScanJob, HoldScanJobConfig, HoldScanJobError
+from radioroc.data.hold_scan import HoldRunWriter
 from radioroc.transport.errors import TransportIOError, TransportTimeoutError
-from scripts import radioroc_threshold_scan as cli
+from scripts import radioroc_hold_scan as cli
 
 
-class ThresholdTransport(RadiorocMemoryTransport):
-    """Scripted ASIC FIFO and counter responses; no analog/timing claims."""
-    def __init__(self, counts=(10, 30, 20, 40)):
-        super().__init__({0: bits(7), 1: bits(3), 6: bits(12), 100: bits(5)})
-        self.asic = {(a, s): (a * 3 + s) % 256 for a in range(67) for s in range(64)}
+def adc_payload(nb_acq, values):
+    """Build a word-20 ADC frame payload.
+
+    `values` maps channel -> (high_gain_list, low_gain_list), each of length
+    `nb_acq`. Every unlisted channel reports zero for every acquisition.
+    """
+    zero = ([0.0] * nb_acq, [0.0] * nb_acq)
+    payload = bytearray()
+    for i in range(nb_acq):
+        for channel in range(N_CHANNELS):
+            high_list, low_list = values.get(channel, zero)
+            low_raw = round(low_list[i] / 0.25)
+            high_raw = round(high_list[i] / 0.25)
+            payload += low_raw.to_bytes(2, "big") + high_raw.to_bytes(2, "big")
+    return bytes(payload)
+
+
+class HoldTransport(RadiorocMemoryTransport):
+    """Scripted ASIC FIFO and ADC batch responses; no analog/timing claims."""
+
+    # Bit 5 (ADC ready) and bit 7 (I2C FIFO ready) both set.
+    READY_WORD4 = bits(5)
+
+    def __init__(self, *, nb_acq=2, adc_batches=None):
+        super().__init__({
+            4: self.READY_WORD4, 21: bits(1), 22: bits(2), 23: bits(3), 24: bits(4),
+            25: bits(5), 26: bits(6), 27: bits(7), 28: bits(0), 30: bits(8), 31: bits(9),
+            77: bits(10), 78: bits(11), 100: bits(5),
+        })
+        self.asic = {(a, s): (a * 3 + s) % 256 for a in range(67) for s in range(N_CHANNELS)}
         self.original_asic = dict(self.asic)
         self.original_words = dict(self.words)
-        self.counts = iter(counts)
+        self.nb_acq = nb_acq
+        self.adc_batches = iter(adc_batches if adc_batches is not None else [])
         self.trace = []
         self.pending = b""
         self.replies = b""
-        self.read_count = 0
-        self.counter_started = threading.Event()
-        self.fail_counter = None
         self.fail_snapshot = False
+        self.fail_adc_read = None
+        self.fail_adc_read_at = 0
+        self.adc_read_count = 0
         self.poll_token = None
+        self.word4_read_started = threading.Event()
+        self.release_word4 = threading.Event()
+        self.release_word4.set()
 
     def __enter__(self):
         return self
@@ -49,17 +78,19 @@ class ThresholdTransport(RadiorocMemoryTransport):
     def read_word(self, address):
         self.trace.append(("read", address))
         if address == 4:
+            self.word4_read_started.set()
+            self.release_word4.wait(5)
             if self.poll_token:
                 self.poll_token.cancel()
                 return bits(0)
-            return bits(1)
+            return self.READY_WORD4
+        if address == 29:
+            return bits(self.nb_acq)
         return super().read_word(address)
 
     def write_word(self, address, value):
         self.trace.append(("write", address, value))
         super().write_word(address, value)
-        if address == 1 and value.startswith("10"):
-            self.counter_started.set()
         if address == 60 and value == bits(2):
             for offset in range(0, len(self.pending), 4):
                 chip, add, subadd, data = self.pending[offset:offset + 4]
@@ -83,11 +114,14 @@ class ThresholdTransport(RadiorocMemoryTransport):
                 raise TransportTimeoutError("snapshot timeout")
             data, self.replies = self.replies, b""
             return data
-        if address == 96:
-            if self.fail_counter and self.read_count == 2:
-                raise self.fail_counter
-            self.read_count += 1
-            return next(self.counts).to_bytes(4, "little")
+        if address == 20:
+            if self.fail_adc_read is not None and self.adc_read_count >= self.fail_adc_read_at:
+                raise self.fail_adc_read
+            payload = next(self.adc_batches, None)
+            self.adc_read_count += 1
+            if payload is None:
+                payload = adc_payload(self.nb_acq, {})
+            return payload
         return super().read_words(address, length)
 
 
@@ -96,109 +130,82 @@ def rows(path):
         return list(csv.DictReader(stream))
 
 
-class ThresholdJobTests(unittest.TestCase):
+class HoldScanJobTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name) / "run"
-        self.scan = ThresholdScanConfig([4], dac_min=0, dac_max=5, dac_step=5,
-                                        trigger_window_ms=1, averages=2, out_dir=self.directory)
-        self.config = ThresholdJobConfig(self.scan)
-        self.transport = ThresholdTransport()
+        self.scan = HoldScanConfig(mode="external", channels=[4], trigger_channel=4,
+                                   hold_min=0, hold_max=5, hold_step=5, acquisitions=2,
+                                   timeout_s=1.0, out_dir=self.directory)
+        self.config = HoldScanJobConfig(self.scan)
+        self.transport = HoldTransport(nb_acq=2, adc_batches=[
+            adc_payload(2, {4: ([100.0, 200.0], [10.0, 20.0])}),
+            adc_payload(2, {4: ([300.0, 400.0], [30.0, 40.0])}),
+        ])
         self.device = RadiorocDevice(self.transport)
 
     def run_job(self, **kwargs):
-        return ThresholdJob().run(self.device, self.config, **kwargs)
+        return HoldScanJob().run(self.device, self.config, **kwargs)
 
     def manifest(self):
         return json.loads((self.directory / "metadata.json").read_text())
 
-    def test_success_values_progress_and_restoration(self):
+    def test_success_values_progress_and_manifest(self):
         events = []
         result = self.run_job(on_event=events.append)
-        self.assertEqual((result.status, result.cleanup_status, result.points, result.attempts),
-                         ("completed", "restored", 2, 4))
-        self.assertEqual(rows(result.csv_path), [{"DAC": "0", "ch4": "20000.0"}, {"DAC": "5", "ch4": "30000.0"}])
-        self.assertEqual([r["trigger_count"] for r in rows(result.attempts_csv_path)], ["10", "30", "20", "40"])
+        self.assertEqual((result.status, result.cleanup_status, result.points), ("completed", "restored", 2))
+        written = rows(result.csv_path)
+        self.assertEqual(written[0]["hold_delay_ns"], "0")
+        self.assertEqual(written[0]["ch4_hg_mean"], "150.0")
+        self.assertEqual(written[0]["ch4_lg_mean"], "15.0")
+        self.assertEqual(written[0]["ch4_count"], "2")
+        self.assertEqual(written[1]["hold_delay_ns"], "5")
+        self.assertEqual(written[1]["ch4_hg_mean"], "350.0")
+        self.assertEqual(written[1]["ch4_lg_mean"], "35.0")
         self.assertEqual([(e.point, e.completed_points) for e in events if e.kind == "point"], [(0, 1), (5, 2)])
         self.assertEqual([e.status for e in events if e.kind == "state"], ["preparing", "running", "completed"])
         self.assertEqual(self.transport.asic, self.transport.original_asic)
-        for address in (0, 1, 6):
+        for address in self.transport.original_words:
             self.assertEqual(self.transport.words[address], self.transport.original_words[address])
         manifest = self.manifest()
-        self.assertEqual(manifest["completed_attempts"], 4)
+        self.assertEqual(manifest["completed_points"], 2)
         self.assertEqual(manifest["execution_mode"], "simulation")
         self.assertEqual(manifest["firmware_status_word"], bits(5))
-        # Existing counter reset/enable/stop sequence and little-endian counts.
-        writes = [t[2] for t in self.transport.trace if t[:2] == ("write", 1)]
-        self.assertEqual(writes[:4], ["01000011", "00000011", "10000011", "00000011"])
+        self.assertEqual(manifest["cleanup"]["status"], "restored")
 
-    def test_t2_ctest_gain_and_multichannel_values_restore_all_state(self):
-        self.config = ThresholdJobConfig(replace(self.scan, channels=[4, 5], averages=1,
-                                                  t1=False, use_ctest=True, trigger_preamp_gain=12))
+    def test_internal_mode_captures_and_restores_hold_code_register(self):
+        self.config = HoldScanJobConfig(replace(self.scan, mode="internal", hold_min=0, hold_max=5, hold_step=5))
         result = self.run_job()
-        self.assertEqual(rows(result.csv_path), [
-            {"DAC": "0", "ch4": "10000.0", "ch5": "30000.0"},
-            {"DAC": "5", "ch4": "20000.0", "ch5": "40000.0"}])
-        self.assertEqual(self.transport.asic, self.transport.original_asic)
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(rows(result.csv_path)[0]["hold_code"], "0")
+        self.assertEqual(self.transport.asic[65, 8], self.transport.original_asic[65, 8])
 
     def test_cancel_after_point_preserves_partial_data(self):
         token = CancellationToken()
         events = []
+
         def progress(event):
             events.append(event)
             if event.kind == "point":
                 token.cancel()
+
         result = self.run_job(cancellation=token, on_event=progress)
-        self.assertEqual((result.status, result.points, result.attempts), ("cancelled", 1, 2))
+        self.assertEqual((result.status, result.points), ("cancelled", 1))
         self.assertEqual(len(rows(result.csv_path)), 1)
         self.assertEqual(self.manifest()["status"], "cancelled")
         self.assertIn("cancelling", [event.status for event in events])
         self.assertEqual(self.transport.asic, self.transport.original_asic)
+        for address in self.transport.original_words:
+            self.assertEqual(self.transport.words[address], self.transport.original_words[address])
 
-    def test_cancel_mid_point_retains_completed_counter_windows(self):
-        token = CancellationToken()
-        original = self.transport.read_words
-        def read(address, length):
-            data = original(address, length)
-            if address == 96:
-                token.cancel()
-            return data
-        with patch.object(self.transport, "read_words", side_effect=read):
-            result = self.run_job(cancellation=token)
-        self.assertEqual((result.status, result.points, result.attempts), ("cancelled", 0, 1))
-        self.assertEqual(len(rows(result.attempts_csv_path)), 1)
-        self.assertEqual(self.transport.asic, self.transport.original_asic)
-
-    def test_cancel_during_window_and_reject_second_wrapper_on_session(self):
-        self.config = ThresholdJobConfig(replace(self.scan, trigger_window_ms=10000))
-        token = CancellationToken()
-        results = []
-        thread = threading.Thread(target=lambda: results.append(self.run_job(cancellation=token)))
-        thread.start()
-        try:
-            self.assertTrue(self.transport.counter_started.wait(2))
-            second = ThresholdJobConfig(replace(self.scan, out_dir=self.directory.parent / "second"))
-            with self.assertRaises(JobBusyError):
-                ThresholdJob().run(RadiorocDevice(self.transport), second)
-            self.assertFalse(Path(second.scan.out_dir).exists())
-        finally:
-            token.cancel()
-            thread.join(2)
-        self.assertFalse(thread.is_alive())
-        self.assertEqual(results[0].status, "cancelled")
-        # Lock is released after terminal cleanup.
-        third = ThresholdJobConfig(replace(self.scan, out_dir=self.directory.parent / "third"))
-        self.assertEqual(ThresholdJob().run(self.device, third).status, "completed")
-
-    def test_cancel_during_i2c_ready_polling(self):
+    def test_cancel_during_adc_ready_polling(self):
         token = CancellationToken()
         self.transport.poll_token = token
         result = self.run_job(cancellation=token)
         self.assertEqual(result.status, "cancelled")
         self.assertEqual(result.points, 0)
         self.assertEqual(self.transport.asic, self.transport.original_asic)
-        self.assertEqual(self.transport.words[0], self.transport.original_words[0])
         self.assertEqual(self.manifest()["cleanup"]["status"], "restored")
 
     def test_precancelled_job_has_manifest_and_no_device_access(self):
@@ -209,71 +216,112 @@ class ThresholdJobTests(unittest.TestCase):
         self.assertEqual(self.transport.trace, [])
         self.assertEqual(self.manifest()["completed_points"], 0)
 
+    def test_reject_second_job_while_first_holds_session_lock(self):
+        self.transport.release_word4.clear()
+        token = CancellationToken()
+        results = []
+        thread = threading.Thread(target=lambda: results.append(self.run_job(cancellation=token)))
+        thread.start()
+        try:
+            self.assertTrue(self.transport.word4_read_started.wait(2))
+            second = HoldScanJobConfig(replace(self.scan, out_dir=self.directory.parent / "second"))
+            with self.assertRaises(JobBusyError):
+                HoldScanJob().run(RadiorocDevice(self.transport), second)
+            self.assertFalse(Path(second.scan.out_dir).exists())
+        finally:
+            self.transport.release_word4.set()
+            thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(results[0].status, "completed")
+        # Lock is released after terminal cleanup.
+        third_transport = HoldTransport(nb_acq=2)
+        third = HoldScanJobConfig(replace(self.scan, hold_max=0, out_dir=self.directory.parent / "third"))
+        self.assertEqual(HoldScanJob().run(RadiorocDevice(third_transport), third).status, "completed")
+
     def test_snapshot_failure_does_not_restore_uncaptured_asic_state(self):
         self.transport.fail_snapshot = True
         result = self.run_job()
         self.assertEqual((result.status, result.points), ("failed", 0))
         self.assertEqual(self.transport.asic, self.transport.original_asic)
-        self.assertEqual(self.transport.words[0], self.transport.original_words[0])
+        for address in self.transport.original_words:
+            self.assertEqual(self.transport.words[address], self.transport.original_words[address])
         self.assertNotIn("snapshot", self.manifest())
         self.assertIsInstance(result.error, TransportTimeoutError)
 
     def test_disconnect_preserves_original_error_and_completed_point(self):
         original = TransportIOError("unplugged")
-        self.transport.fail_counter = original
+        self.transport.fail_adc_read = original
+        self.transport.fail_adc_read_at = 1
         result = self.run_job()
         self.assertEqual((result.status, result.points), ("disconnected", 1))
         self.assertIs(result.error, original)
         self.assertEqual(len(rows(result.csv_path)), 1)
         self.assertEqual(self.manifest()["status"], "disconnected")
+        self.assertEqual(self.transport.asic, self.transport.original_asic)
 
     def test_cleanup_failure_does_not_mask_original_error(self):
-        original = TransportTimeoutError("counter timeout")
-        self.transport.fail_counter = original
+        original = TransportTimeoutError("adc timeout")
+        self.transport.fail_adc_read = original
         write = self.device.write_register
+        calls = {"count": 0}
+
         def fail_restore(add, subadd, data):
-            if self.transport.read_count >= 2 and (add, subadd) == (65, 2) and data == bits(self.transport.original_asic[65, 2]):
-                raise TransportIOError("restore failed")
+            if (add, subadd) == (65, 12):
+                calls["count"] += 1
+                if calls["count"] == 2:
+                    raise TransportIOError("restore failed")
             return write(add, subadd, data)
+
         with patch.object(self.device, "write_register", side_effect=fail_restore):
             result = self.run_job()
         self.assertIs(result.error, original)
-        self.assertEqual((result.status, result.cleanup_status, result.points), ("failed", "failed", 1))
+        self.assertEqual((result.status, result.cleanup_status, result.points), ("failed", "failed", 0))
         self.assertEqual(len(result.cleanup_errors), 1)
         self.assertEqual(self.manifest()["device_state"], "unknown")
-        self.assertIn("counter timeout", self.manifest()["error"])
+        self.assertIn("adc timeout", self.manifest()["error"])
 
     def test_cleanup_failure_after_success_is_failed(self):
         write = self.device.write_register
+        calls = {"count": 0}
+
         def fail_restore(add, subadd, data):
-            if self.transport.read_count == 4 and (add, subadd) == (65, 2):
-                raise TransportIOError("cleanup only")
+            if (add, subadd) == (65, 12):
+                calls["count"] += 1
+                # Two configure_adc_external_hold writes (one per point) plus
+                # the final cleanup restore is the third occurrence.
+                if calls["count"] == 3:
+                    raise TransportIOError("cleanup only")
             return write(add, subadd, data)
+
         with patch.object(self.device, "write_register", side_effect=fail_restore):
             result = self.run_job()
         self.assertEqual((result.status, result.points, result.cleanup_status), ("failed", 2, "failed"))
         self.assertEqual(self.manifest()["status"], "failed")
 
-    def test_data_write_failure_retains_prior_points_and_attempts(self):
-        original = ThresholdRunWriter.append_point
+    def test_data_write_failure_retains_prior_points(self):
+        original = HoldRunWriter.append_point
+
         def append(writer, row):
-            if row["DAC"] == 5:
+            if row["hold_delay_ns"] == 5:
                 raise OSError("disk full")
             return original(writer, row)
-        with patch.object(ThresholdRunWriter, "append_point", new=append):
+
+        with patch.object(HoldRunWriter, "append_point", new=append):
             result = self.run_job()
-        self.assertEqual((result.status, result.points, result.attempts), ("failed", 1, 4))
+        self.assertEqual((result.status, result.points), ("failed", 1))
         self.assertEqual(len(rows(result.csv_path)), 1)
         self.assertEqual(self.manifest()["status"], "failed")
         self.assertEqual(self.transport.asic, self.transport.original_asic)
 
     def test_manifest_failure_keeps_previous_manifest_and_reports_unsaved_status(self):
-        original = ThresholdRunWriter.update
+        original = HoldRunWriter.update
+
         def update(writer, manifest):
             if manifest["completed_points"]:
                 raise OSError("manifest disk full")
             original(writer, manifest)
-        with patch.object(ThresholdRunWriter, "update", new=update):
+
+        with patch.object(HoldRunWriter, "update", new=update):
             result = self.run_job()
         self.assertEqual(result.status, "failed")
         self.assertTrue(result.persistence_errors)
@@ -291,40 +339,45 @@ class ThresholdJobTests(unittest.TestCase):
         self.assertEqual(self.transport.trace, [])
 
     def test_invalid_configuration_has_no_hardware_or_files(self):
-        for changes in ({"dac_min": -1}, {"dac_max": 1024}, {"trigger_window_ms": float("nan")},
-                        {"averages": 1.5}, {"channels": [4, 4]}, {"channels": [True]}, {"t1": 1}):
+        for changes in ({"mode": "bogus"}, {"hold_step": 0}, {"acquisitions": 0},
+                        {"acquisitions": 256}, {"adc_window_ns": 3}, {"sync_io": "bogus"},
+                        {"timeout_s": 0}, {"trigger_channel": 999}, {"channels": [70]}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
-                ThresholdJob().run(self.device, ThresholdJobConfig(replace(self.scan, **changes)))
+                HoldScanJob().run(self.device, HoldScanJobConfig(replace(self.scan, **changes)))
         self.assertEqual(self.transport.trace, [])
         self.assertFalse(self.directory.exists())
 
     def test_legacy_api_uses_runner_and_failure_carries_result(self):
-        self.transport.fail_counter = TransportIOError("unplugged")
-        with self.assertRaises(ThresholdJobError) as error:
-            self.device.run_threshold_scan(self.scan)
-        self.assertEqual(error.exception.result.points, 1)
+        self.transport.fail_adc_read = TransportIOError("unplugged")
+        with self.assertRaises(HoldScanJobError) as error:
+            self.device.run_hold_scan(self.scan)
+        self.assertEqual(error.exception.result.points, 0)
         self.assertEqual(error.exception.result.status, "disconnected")
 
     def test_legacy_source_execution_without_installed_project_metadata(self):
-        with patch("radioroc.application.threshold.version", side_effect=PackageNotFoundError):
-            result = self.device.run_threshold_scan(self.scan)
+        with patch("radioroc.application.hold_scan.version", side_effect=PackageNotFoundError):
+            result = self.device.run_hold_scan(self.scan)
         self.assertEqual(result.status, "completed")
         self.assertEqual(self.manifest()["application_version"], "uninstalled-source")
         self.assertEqual(len(self.manifest()["source_fingerprint"]), 64)
 
     def test_cli_and_api_have_identical_command_traces_and_values(self):
-        expected = ThresholdJob().run(self.device, replace(self.config, initialize_fpga=True))
-        actual_transport = ThresholdTransport()
+        expected = HoldScanJob().run(self.device, replace(self.config, initialize_fpga=True))
+        actual_transport = HoldTransport(nb_acq=2, adc_batches=[
+            adc_payload(2, {4: ([100.0, 200.0], [10.0, 20.0])}),
+            adc_payload(2, {4: ([300.0, 400.0], [30.0, 40.0])}),
+        ])
         cli_dir = self.directory.parent / "cli"
-        arguments = ["threshold-scan", "--execute", "--dac-min", "0", "--dac-max", "5", "--dac-step", "5",
-                     "--window-ms", "1", "--averages", "2", "--out-dir", str(cli_dir)]
+        arguments = ["hold-scan", "--execute", "--mode", "external", "--channels", "4",
+                     "--hold-min", "0", "--hold-max", "5", "--hold-step", "5",
+                     "--acquisitions", "2", "--timeout-s", "1.0", "--out-dir", str(cli_dir)]
         with patch("sys.argv", arguments), patch.object(cli.RadiorocSerial, "from_config", return_value=actual_transport), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(cli.main(), 0)
         self.assertEqual(actual_transport.trace, self.transport.trace)
-        self.assertEqual((cli_dir / "thresholdscan.csv").read_bytes(), expected.csv_path.read_bytes())
+        self.assertEqual((cli_dir / "holdscan.csv").read_bytes(), expected.csv_path.read_bytes())
 
     def test_cli_dry_run_never_constructs_serial_or_creates_outputs(self):
-        with patch("sys.argv", ["threshold-scan", "--port", "/does/not/exist", "--out-dir", str(self.directory)]), patch.object(cli.RadiorocSerial, "from_config", side_effect=AssertionError("serial access")), contextlib.redirect_stdout(io.StringIO()) as output:
+        with patch("sys.argv", ["hold-scan", "--port", "/does/not/exist", "--out-dir", str(self.directory)]), patch.object(cli.RadiorocSerial, "from_config", side_effect=AssertionError("serial access")), contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(cli.main(), 0)
         self.assertEqual(json.loads(output.getvalue())["execution_mode"], "dry-run")
         self.assertFalse(self.directory.exists())
@@ -332,6 +385,7 @@ class ThresholdJobTests(unittest.TestCase):
     def test_callback_error_is_warning_and_does_not_interrupt_data(self):
         def fail(event):
             raise ValueError("display gone")
+
         result = self.run_job(on_event=fail)
         self.assertEqual((result.status, result.points), ("completed", 2))
         self.assertEqual(len(result.warnings), 1)
@@ -357,52 +411,53 @@ class ThresholdJobTests(unittest.TestCase):
         self.assertEqual(self.manifest()["device_state"], "unknown")
         self.assertEqual(self.manifest()["preparation"]["status"], "failed_or_cancelled")
 
-    def test_i2c_cleanup_error_preserves_original_poll_error(self):
-        primary = TransportTimeoutError("original poll failure")
-        write = self.transport.write_word
-        read = self.transport.read_word
-        def fail_poll(address):
-            if address == 4:
-                raise primary
-            return read(address)
-        def fail_cleanup(address, data):
-            if address == 0 and data == bits(7):
-                raise TransportIOError("bus cleanup failed")
-            write(address, data)
-        with patch.object(self.transport, "read_word", side_effect=fail_poll), patch.object(self.transport, "write_word", side_effect=fail_cleanup):
-            result = self.run_job()
-        self.assertIs(result.error, primary)
-        self.assertTrue(self.manifest()["error_notes"])
-        self.assertEqual(result.cleanup_status, "failed")
-
     def test_cli_sigint_requests_cancellation_and_returns_130(self):
         original = self.transport.read_words
+
         def read(address, length):
-            data = original(address, length)
-            if address == 96:
+            if address == 20:
                 signal.raise_signal(signal.SIGINT)
-            return data
-        arguments = ["threshold-scan", "--execute", "--window-ms", "1", "--averages", "2",
-                     "--out-dir", str(self.directory)]
+            return original(address, length)
+
+        arguments = ["hold-scan", "--execute", "--mode", "external", "--channels", "4",
+                     "--hold-min", "0", "--hold-max", "5", "--hold-step", "5",
+                     "--acquisitions", "2", "--timeout-s", "1.0", "--out-dir", str(self.directory)]
         with patch("sys.argv", arguments), patch.object(cli.RadiorocSerial, "from_config", return_value=self.transport), patch.object(self.transport, "read_words", side_effect=read), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(cli.main(), 130)
         self.assertEqual(self.manifest()["status"], "cancelled")
-        self.assertEqual(self.manifest()["completed_attempts"], 1)
+        self.assertEqual(self.manifest()["completed_points"], 0)
+
+    def test_threshold_dac_asic_registers_are_captured_and_restored(self):
+        """Regression test for a state-leak bug found while testing this job:
+        HoldScanJobConfig.registers() omitted ASIC 65/1 (or 65/3) and 65/2 even
+        when scan.threshold_dac is set, so device.set_threshold_dac's writes
+        were never snapshotted or restored. Fixed in hold_scan.py registers().
+        """
+        self.config = HoldScanJobConfig(replace(self.scan, threshold_dac=512, t1=True))
+        result = self.run_job()
+        self.assertEqual(result.status, "completed")
+        self.assertIn((65, 2), set(self.config.registers()))
+        self.assertIn((65, 1), set(self.config.registers()))
+        self.assertEqual(self.transport.asic[65, 2], self.transport.original_asic[65, 2])
+        self.assertEqual(self.transport.asic[65, 1], self.transport.original_asic[65, 1])
 
     def test_abrupt_process_exit_leaves_durable_nonterminal_run(self):
         code = '''
 import os
 from pathlib import Path
 import sys
-from radioroc_client import RadiorocDevice, RadiorocMemoryTransport, ThresholdScanConfig
-from radioroc.application.threshold import ThresholdJob, ThresholdJobConfig
-device = RadiorocDevice(RadiorocMemoryTransport({4: '00000001'}, {96: (3).to_bytes(4, 'little')}))
-config = ThresholdJobConfig(ThresholdScanConfig([4], dac_min=0, dac_max=5, dac_step=5,
-                                               trigger_window_ms=1, out_dir=Path(sys.argv[1])))
+from radioroc_client import RadiorocDevice, RadiorocMemoryTransport, HoldScanConfig
+from radioroc.application.hold_scan import HoldScanJob, HoldScanJobConfig
+words = {4: "00000101", 21: "00000001", 29: "00000010"}
+payloads = {20: bytes(64 * 4 * 2)}
+device = RadiorocDevice(RadiorocMemoryTransport(words, payloads))
+config = HoldScanJobConfig(HoldScanConfig(mode="external", channels=[4], trigger_channel=4,
+                                          hold_min=0, hold_max=5, hold_step=5, acquisitions=2,
+                                          timeout_s=1.0, out_dir=Path(sys.argv[1])))
 def exit_after_point(event):
-    if event.kind == 'point':
+    if event.kind == "point":
         os._exit(17)
-ThresholdJob().run(device, config, on_event=exit_after_point)
+HoldScanJob().run(device, config, on_event=exit_after_point)
 '''
         process = subprocess.run([sys.executable, "-c", code, str(self.directory)],
                                  cwd=Path(__file__).resolve().parents[1], capture_output=True, timeout=10)
@@ -410,7 +465,7 @@ ThresholdJob().run(device, config, on_event=exit_after_point)
         self.assertEqual(self.manifest()["status"], "running")
         self.assertNotIn("finished_at", self.manifest())
         self.assertEqual(self.manifest()["cleanup"]["status"], "pending")
-        self.assertEqual(rows(self.directory / "thresholdscan.csv"), [{"DAC": "0", "ch4": "3000.0"}])
+        self.assertEqual(len(rows(self.directory / "holdscan.csv")), 1)
 
 
 if __name__ == "__main__":

@@ -141,32 +141,32 @@ def build_parser(preset: dict[str, object] | None = None, preset_path: Path | No
     apply_preset_defaults(parser, preset or {}, preset_path)
     add_connection_args(parser)
     add_write_safety_args(parser)
-    parser.add_argument("--channels", default="4", help="Channels to save, e.g. 4 or 0-3")
+    parser.add_argument("--channels", help="Channels to save, e.g. 4 or 0-3")
     parser.add_argument("--trigger-channel", type=int, help="Trigger channel; defaults to first saved channel")
-    parser.add_argument("--threshold-dac", type=int, default=530, help="T1/T2 threshold DAC before acquisition")
-    parser.add_argument("--hold-delay-ns", type=int, default=530, help="External hold delay in ns")
-    parser.add_argument("--conversion-delay-ns", type=int, default=400, help="ADC conversion delay in ns")
-    parser.add_argument("--acquisitions-per-batch", type=int, default=50, help="Requested ADC acquisitions per batch")
-    parser.add_argument("--batches", type=int, default=10, help="Number of acquisition batches")
-    parser.add_argument("--timeout-s", type=float, default=5.0, help="Timeout per acquisition batch")
-    parser.add_argument("--pat-gain", type=int, default=1, help="Trigger preamp paT gain code, 1=max, 63=min")
+    parser.add_argument("--threshold-dac", type=int, help="T1/T2 threshold DAC before acquisition")
+    parser.add_argument("--hold-delay-ns", type=int, help="External hold delay in ns")
+    parser.add_argument("--conversion-delay-ns", type=int, help="ADC conversion delay in ns")
+    parser.add_argument("--acquisitions-per-batch", type=int, help="Requested ADC acquisitions per batch")
+    parser.add_argument("--batches", type=int, help="Number of acquisition batches")
+    parser.add_argument("--timeout-s", type=float, help="Timeout per acquisition batch")
+    parser.add_argument("--pat-gain", type=int, help="Trigger preamp paT gain code, 1=max, 63=min")
     parser.add_argument("--hg-gain-code", type=int, help="High-gain ADC shaper gain code, 1..15")
     parser.add_argument("--lg-gain-code", type=int, help="Low-gain ADC shaper gain code, 1..15")
     parser.add_argument("--peak-sensing", action="store_true", help="Use external peak-sensing ADC path")
     parser.add_argument("--t2", action="store_true", help="Use T2 threshold instead of T1")
     parser.add_argument("--no-mask", action="store_true", help="Do not isolate the trigger channel with masks")
-    parser.add_argument("--adc-trigger-type", type=int, default=0, help="Vendor ADC trigger type code")
-    parser.add_argument("--adc-trigger-source", type=int, default=3, help="Vendor ADC trigger source code")
-    parser.add_argument("--adc-window-ns", type=int, default=50, help="ADC coincidence/window width")
-    parser.add_argument("--adc-nb-trig", type=int, default=1, help="ADC time-window trigger count")
+    parser.add_argument("--adc-trigger-type", type=int, help="Vendor ADC trigger type code")
+    parser.add_argument("--adc-trigger-source", type=int, help="Vendor ADC trigger source code")
+    parser.add_argument("--adc-window-ns", type=int, help="ADC coincidence/window width")
+    parser.add_argument("--adc-nb-trig", type=int, help="ADC time-window trigger count")
     parser.add_argument("--rstn-manual", action="store_true", help="Set vendor ADC reset-n manual bit")
     parser.add_argument("--synchro-trigger", action="store_true", help="Pulse FPGA synchro trigger for each ADC batch")
     parser.add_argument("--live-plot", action="store_true", help="Refresh a spectrum PNG during acquisition")
     parser.add_argument("--plot-channel", type=int, help="Channel for live plot; defaults to trigger channel")
-    parser.add_argument("--plot-gain", choices=["hg", "lg"], default="hg", help="Gain for live plot")
-    parser.add_argument("--plot-bins", type=int, default=100, help="Histogram bins for live plot")
-    parser.add_argument("--plot-yscale", choices=["log", "linear"], default="log", help="Live plot y-axis scale")
-    parser.add_argument("--plot-every", type=int, default=1, help="Refresh live plot every N batches")
+    parser.add_argument("--plot-gain", choices=["hg", "lg"], help="Gain for live plot")
+    parser.add_argument("--plot-bins", type=int, help="Histogram bins for live plot")
+    parser.add_argument("--plot-yscale", choices=["log", "linear"], help="Live plot y-axis scale")
+    parser.add_argument("--plot-every", type=int, help="Refresh live plot every N batches")
     parser.add_argument("--plot-out", type=Path, help="Live plot PNG path; defaults beside events.csv")
     parser.add_argument("--append", action="store_true", help="Append to an existing events.csv instead of overwriting")
     parser.add_argument("--out-dir", type=Path, help="Output directory; default is under radioroc_runs/")
@@ -185,6 +185,38 @@ def main() -> int:
 
     preset_path, preset = load_preset_from_argv()
     args = build_parser(preset, preset_path).parse_args()
+    if args.channels is None:
+        args.channels = "4"
+    if args.threshold_dac is None:
+        args.threshold_dac = 530
+    if args.hold_delay_ns is None:
+        args.hold_delay_ns = 530
+    if args.conversion_delay_ns is None:
+        args.conversion_delay_ns = 400
+    if args.acquisitions_per_batch is None:
+        args.acquisitions_per_batch = 50
+    if args.batches is None:
+        args.batches = 10
+    if args.timeout_s is None:
+        args.timeout_s = 5.0
+    if args.pat_gain is None:
+        args.pat_gain = 1
+    if args.adc_trigger_type is None:
+        args.adc_trigger_type = 0
+    if args.adc_trigger_source is None:
+        args.adc_trigger_source = 3
+    if args.adc_window_ns is None:
+        args.adc_window_ns = 50
+    if args.adc_nb_trig is None:
+        args.adc_nb_trig = 1
+    if args.plot_gain is None:
+        args.plot_gain = "hg"
+    if args.plot_bins is None:
+        args.plot_bins = 100
+    if args.plot_yscale is None:
+        args.plot_yscale = "log"
+    if args.plot_every is None:
+        args.plot_every = 1
     connection = connection_config_from_args(args)
     channels = parse_channels(args.channels)
     trigger_channel = args.trigger_channel if args.trigger_channel is not None else channels[0]

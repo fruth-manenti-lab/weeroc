@@ -89,12 +89,11 @@ def add_connection_args(parser: argparse.ArgumentParser) -> None:
     - `None`
     """
 
-    parser.add_argument("--port", default=DEFAULT_PORT, help=f"Serial port (default: {DEFAULT_PORT})")
-    parser.add_argument("--baud", type=int, default=DEFAULT_BAUD, help=f"Serial baud rate (default: {DEFAULT_BAUD})")
+    parser.add_argument("--port", help=f"Serial port (default: {DEFAULT_PORT})")
+    parser.add_argument("--baud", type=int, help=f"Serial baud rate (default: {DEFAULT_BAUD})")
     parser.add_argument(
         "--timeout",
         type=float,
-        default=DEFAULT_TIMEOUT_SECONDS,
         help=f"Serial timeout in seconds (default: {DEFAULT_TIMEOUT_SECONDS})",
     )
 
@@ -110,7 +109,7 @@ def add_write_safety_args(parser: argparse.ArgumentParser) -> None:
     """
 
     parser.add_argument("--execute", action="store_true", help="Write hardware. Without this, run in dry-run mode.")
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help=f"I2C config CSV (default: {DEFAULT_CONFIG})")
+    parser.add_argument("--config", type=Path, help=f"I2C config CSV (default: {DEFAULT_CONFIG})")
     parser.add_argument("--skip-fpga-init", action="store_true", help="Do not write the standard FPGA init words.")
     parser.add_argument("--apply-defaults", action="store_true", help="Apply the default I2C table before the command.")
 
@@ -125,7 +124,11 @@ def connection_config_from_args(args: argparse.Namespace) -> RadiorocConnectionC
     - `RadiorocConnectionConfig`: Library connection dataclass.
     """
 
-    return RadiorocConnectionConfig(port=args.port, baud=args.baud, timeout_s=args.timeout)
+    return RadiorocConnectionConfig(
+        port=args.port if args.port is not None else DEFAULT_PORT,
+        baud=args.baud if args.baud is not None else DEFAULT_BAUD,
+        timeout_s=args.timeout if args.timeout is not None else DEFAULT_TIMEOUT_SECONDS,
+    )
 
 
 def prepare_device(device: RadiorocDevice, args: argparse.Namespace) -> str:
@@ -143,7 +146,7 @@ def prepare_device(device: RadiorocDevice, args: argparse.Namespace) -> str:
     - May initialize FPGA words and apply default ASIC configuration.
     """
 
-    device.load_default_config(Path(args.config))
+    device.load_default_config(Path(args.config) if args.config is not None else DEFAULT_CONFIG)
     firmware_word: str = device.read_word(FPGA_FIRMWARE_STATUS_WORD)
     print(f"firmware/status word: {firmware_word} ({parse_bits(firmware_word)})")
     if not args.skip_fpga_init:

@@ -347,6 +347,8 @@ class HoldScanConfig:
         if self.mode not in {"internal", "external"}:
             raise ValueError("hold mode must be 'internal' or 'external'")
         validate_channels(self.channels)
+        if len(set(self.channels)) != len(self.channels):
+            raise ValueError("channels must be unique")
         validate_channel(self.trigger_channel)
         validate_scan_range(self.hold_min, self.hold_max, self.hold_step, name="hold")
         if self.mode == "internal" and not (0 <= self.hold_min <= 255 and 0 <= self.hold_max <= 255):
@@ -513,6 +515,7 @@ class HoldScanResult:
     - `channels` (`list[int]`): Channels summarized in the scan.
     - `mode` (`str`): Hold mode used for the scan.
     - `warnings` (`list[str]`): Non-fatal warnings.
+    - `verification` (`dict | None`): Optional independent restoration report.
     """
 
     csv_path: Path
@@ -522,6 +525,13 @@ class HoldScanResult:
     channels: list[int] = field(default_factory=list)
     mode: str = "internal"
     warnings: list[str] = field(default_factory=list)
+    status: str = "completed"
+    cleanup_status: str = "not_required"
+    cleanup_errors: list[str] = field(default_factory=list)
+    persistence_errors: list[str] = field(default_factory=list)
+    error: BaseException | None = None
+    execution_mode: str = "hardware"
+    verification: dict | None = None
 
 
 @dataclass
@@ -1787,94 +1797,25 @@ class RadiorocDevice:
             return values[0], 0.0
         return statistics.mean(values), statistics.stdev(values)
 
-    def run_hold_scan(self, config: HoldScanConfig, *, metadata: RadiorocRunMetadata | None = None) -> HoldScanResult:
-        """Run an internal or external hold scan and return output paths.
+    def run_hold_scan(
+        self,
+        config: HoldScanConfig,
+        *,
+        metadata: RadiorocRunMetadata | None = None,
+        cancellation=None,
+        on_event=None,
+    ) -> HoldScanResult:
+        """Compatibility entry point for the shared hold-scan job.
 
-        **Inputs**
-        - `config` (`HoldScanConfig`): Hold scan settings.
-        - `metadata` (`RadiorocRunMetadata | None`): Optional metadata to
-          write beside the CSV.
-
-        **Returns**
-        - `HoldScanResult`: CSV path, metadata path, channels, and point count.
-
-        **Hardware side effects**
-        - Writes ADC hold-control registers and acquires ADC FIFO samples.
+        Failures raise HoldScanJobError carrying a durable partial ``result``.
+        The application runner returns that result directly for UI consumers.
         """
-
-        config.validate()
-        if config.trigger_preamp_gain is not None:
-            self.set_trigger_preamp_gain(config.trigger_preamp_gain, channels=[config.trigger_channel])
-        out_dir: Path = config.out_dir
-        csv_path: Path = write_csv_rows([], out_dir, "holdscan.csv")
-        if config.threshold_dac is not None:
-            self.set_threshold_dac(config.threshold_dac, t1=config.t1)
-        self.prepare_trigger_masks(t1=config.t1, use_mask=config.use_mask, use_ctest=config.use_ctest)
-        if config.use_mask:
-            self.set_mask_for_channel(config.trigger_channel, t1=config.t1, enabled=True)
-        if config.use_ctest:
-            self.set_ctest_for_channel(config.trigger_channel, enabled=True)
-        saved_w2: str = self.read_word(2) if not self.dry_run else "00000000"
-        saved_i2c65_12: str = self.read_register_bits(65, 12)
-        rows: list[dict[str, object]] = []
-        start_time: float = time.perf_counter()
-        x_name: str = "hold_code" if config.mode == "internal" else "hold_delay_ns"
-        try:
-            for hold_value in scan_values(config.hold_min, config.hold_max, config.hold_step, name="hold"):
-                if config.mode == "internal":
-                    self.configure_adc_internal_hold(
-                        trigger_channel=config.trigger_channel,
-                        hold_code=hold_value,
-                        nb_acq=config.acquisitions,
-                    )
-                else:
-                    self.configure_adc_external_hold(
-                        trigger_channel=config.trigger_channel,
-                        hold_delay_ns=hold_value,
-                        conversion_delay_ns=config.conversion_delay_ns,
-                        nb_acq=config.acquisitions,
-                        trigger_type=config.trigger_type,
-                        trigger_source=config.trigger_source,
-                        rstn_manual=config.rstn_manual,
-                        ext_trig=config.external_trigger,
-                        peak_sensing=config.peak_sensing,
-                        adc_window_ns=config.adc_window_ns,
-                        adc_nb_trig=config.adc_nb_trig,
-                    )
-                high_gain, low_gain = self.acquire_adc_batch(
-                    nb_acq=config.acquisitions,
-                    timeout_s=config.timeout_s,
-                    synchro_trigger=config.synchro_trigger,
-                )
-                row: dict[str, object] = {x_name: hold_value}
-                summary: list[tuple[int, float, float, int]] = []
-                for channel in config.channels:
-                    hg_mean, hg_stdev = self.mean_stdev(high_gain[channel])
-                    lg_mean, lg_stdev = self.mean_stdev(low_gain[channel])
-                    row[f"ch{channel}_hg_mean"] = hg_mean
-                    row[f"ch{channel}_hg_stdev"] = hg_stdev
-                    row[f"ch{channel}_lg_mean"] = lg_mean
-                    row[f"ch{channel}_lg_stdev"] = lg_stdev
-                    row[f"ch{channel}_count"] = len(high_gain[channel])
-                    summary.append((channel, hg_mean, lg_mean, len(high_gain[channel])))
-                rows.append(row)
-                write_csv_rows(rows, out_dir, "holdscan.csv")
-                print(f"hold {x_name}={hold_value} values={summary[:4]}", flush=True)
-        finally:
-            if config.use_mask or config.use_ctest:
-                self.prepare_trigger_masks(t1=config.t1, use_mask=config.use_mask, use_ctest=config.use_ctest)
-            self.write_register(65, 12, saved_i2c65_12)
-            self.write_word(2, saved_w2)
-            print(f"holdscan measurement time: {time.perf_counter() - start_time:.3f} seconds", flush=True)
-        metadata_path = write_metadata_json(metadata, out_dir) if metadata else None
-        return HoldScanResult(
-            csv_path=csv_path,
-            metadata_path=metadata_path,
-            metadata=metadata,
-            points=len(rows),
-            channels=list(config.channels),
-            mode=config.mode,
-        )
+        from radioroc.application.hold_scan import HoldScanJob, HoldScanJobConfig, HoldScanJobError
+        result = HoldScanJob().run(self, HoldScanJobConfig(config), metadata=metadata,
+                                   cancellation=cancellation, on_event=on_event)
+        if result.status not in ("completed", "cancelled") or result.cleanup_errors or result.persistence_errors:
+            raise HoldScanJobError(result) from result.error
+        return result
 
     def pulse_synchro_trigger(self, *, count: int, period_ms: float) -> None:
         """Pulse the FPGA synchro-trigger output.

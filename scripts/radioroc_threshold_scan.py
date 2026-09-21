@@ -29,7 +29,9 @@ else:
         run_metadata,
         settings_from_args,
     )
-from radioroc_client import RadiorocDevice, RadiorocSerial, ThresholdScanConfig, default_run_dir, parse_channels
+from radioroc_client import (
+    DEFAULT_CONFIG, RadiorocDevice, RadiorocSerial, ThresholdScanConfig, default_run_dir, parse_channels,
+)
 from radioroc.application import CancellationToken
 from radioroc.application.threshold import ThresholdJob, ThresholdJobConfig
 
@@ -48,12 +50,12 @@ def build_parser(preset: dict[str, object] | None = None, preset_path: Path | No
     apply_preset_defaults(parser, preset or {}, preset_path)
     add_connection_args(parser)
     add_write_safety_args(parser)
-    parser.add_argument("--channels", default="4", help="Channels to scan, e.g. 4, 0-15, or all (default: 4)")
-    parser.add_argument("--dac-min", type=int, default=0, help="First threshold DAC code")
-    parser.add_argument("--dac-max", type=int, default=600, help="Last threshold DAC code")
-    parser.add_argument("--dac-step", type=int, default=5, help="Threshold DAC step")
-    parser.add_argument("--window-ms", type=float, default=100.0, help="Counter window per DAC/channel")
-    parser.add_argument("--averages", type=int, default=1, help="Repeated windows to average per point")
+    parser.add_argument("--channels", help="Channels to scan, e.g. 4, 0-15, or all (default: 4)")
+    parser.add_argument("--dac-min", type=int, help="First threshold DAC code")
+    parser.add_argument("--dac-max", type=int, help="Last threshold DAC code")
+    parser.add_argument("--dac-step", type=int, help="Threshold DAC step")
+    parser.add_argument("--window-ms", type=float, help="Counter window per DAC/channel")
+    parser.add_argument("--averages", type=int, help="Repeated windows to average per point")
     parser.add_argument("--pat-gain", type=int, help="Optional trigger preamp paT gain code, 1=max, 63=min")
     parser.add_argument("--t2", action="store_true", help="Use T2 instead of T1")
     parser.add_argument("--no-mask", action="store_true", help="Do not isolate the measured channel with masks")
@@ -76,6 +78,18 @@ def main() -> int:
 
     preset_path, preset = load_preset_from_argv()
     args = build_parser(preset, preset_path).parse_args()
+    if args.channels is None:
+        args.channels = "4"
+    if args.dac_min is None:
+        args.dac_min = 0
+    if args.dac_max is None:
+        args.dac_max = 600
+    if args.dac_step is None:
+        args.dac_step = 5
+    if args.window_ms is None:
+        args.window_ms = 100.0
+    if args.averages is None:
+        args.averages = 1
     connection = connection_config_from_args(args)
     channels = parse_channels(args.channels)
     out_dir = Path(args.out_dir) if args.out_dir else default_run_dir("threshold_scan", channels=channels)
@@ -94,7 +108,8 @@ def main() -> int:
     )
     try:
         connection.validate()
-        operation = ThresholdJobConfig(scan_config, config_path=Path(args.config),
+        operation = ThresholdJobConfig(scan_config,
+                                       config_path=Path(args.config) if args.config is not None else DEFAULT_CONFIG,
                                        initialize_fpga=not args.skip_fpga_init,
                                        apply_defaults=args.apply_defaults)
         preview = ThresholdJob.preview(operation)

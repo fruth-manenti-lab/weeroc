@@ -51,10 +51,10 @@ def build_parser(preset: dict[str, object] | None = None, preset_path: Path | No
     add_connection_args(parser)
     add_write_safety_args(parser)
     parser.add_argument("--tq-mask", help="Channels to set the TQ mask for, e.g. 4 or 0-15 or all")
-    parser.add_argument("--tq-mask-value", type=int, choices=[0, 1], default=1,
+    parser.add_argument("--tq-mask-value", type=int, choices=[0, 1],
                         help="TQ mask bit to write (default: 1/enabled)")
     parser.add_argument("--input-dac-enable", help="Channels to set input DAC enable for")
-    parser.add_argument("--input-dac-enable-value", type=int, choices=[0, 1], default=1,
+    parser.add_argument("--input-dac-enable-value", type=int, choices=[0, 1],
                         help="Input DAC enable bit to write (default: 1/enabled)")
     parser.add_argument("--input-dac-value", help="Channels to set the input DAC raw value for")
     parser.add_argument("--value", type=int, help="Raw 8-bit input DAC code, 0..255; required with --input-dac-value")
@@ -81,6 +81,10 @@ def main() -> int:
 
     preset_path, preset = load_preset_from_argv()
     args = build_parser(preset, preset_path).parse_args()
+    if args.tq_mask_value is None:
+        args.tq_mask_value = 1
+    if args.input_dac_enable_value is None:
+        args.input_dac_enable_value = 1
     if args.input_dac_value is not None and args.value is None:
         print("ERROR: --input-dac-value requires --value", file=sys.stderr)
         return 1

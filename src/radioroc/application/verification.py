@@ -1,4 +1,4 @@
-"""Side-effect-safe readback checks for threshold-scan restoration."""
+"""Side-effect-safe readback checks for scan-job restoration."""
 
 from __future__ import annotations
 
@@ -7,16 +7,13 @@ from collections.abc import Mapping, Sequence
 from radioroc_client import I2CRow, RadiorocDevice, bits
 
 
-_FPGA_ADDRESSES = (0, 1, 6)
-
-
 def _valid_bits(value) -> bool:
     return isinstance(value, str) and len(value) == 8 and not (set(value) - {"0", "1"})
 
 
-def _fpga_rows(values: Mapping[int, str]) -> list[dict]:
+def _fpga_rows(values: Mapping[int, str], fpga_addresses: Sequence[int]) -> list[dict]:
     return [{"address": address, "data": values[address]}
-            for address in _FPGA_ADDRESSES if address in values]
+            for address in fpga_addresses if address in values]
 
 
 def _asic_rows(values: Mapping[tuple[int, int], str], order: Sequence[tuple[int, int]]) -> list[dict]:
@@ -36,19 +33,25 @@ def _error(label: str, exc: BaseException) -> str:
     return f"{label}: {'; caused by: '.join(details)}"
 
 
-def verify_threshold_restoration(
+def verify_restoration(
     device: RadiorocDevice,
     snapshot,
     expected_asic_registers: Sequence[tuple[int, int]],
     *,
     execution_mode: str,
+    fpga_addresses: Sequence[int] = (0, 1, 6),
 ) -> dict:
     """Compare live FPGA/ASIC state with one in-memory pre-scan snapshot.
 
     ASIC FIFO reads temporarily alter FPGA I2C controls.  The verifier therefore
     captures live FPGA words first, idles word 60 and restores the exact observed
-    word 0 after its FIFO read, then rereads words 0, 1 and 6.  It never writes an
-    ASIC register and never fills missing snapshot values from configuration.
+    word 0 after its FIFO read, then rereads the same FPGA words. It never writes
+    an ASIC register and never fills missing snapshot values from configuration.
+
+    `fpga_addresses` names the job's own state words to snapshot/verify (the
+    threshold scan uses words 0, 1 and 6; other jobs pass their own footprint).
+    Word 0 restoration around the FIFO read is a fixed side effect of the
+    readback mechanism itself, independent of `fpga_addresses`.
     """
 
     try:
@@ -98,7 +101,7 @@ def verify_threshold_restoration(
     snapshot_asic = snapshot_asic or {}
 
     expected_fpga = {}
-    for address in _FPGA_ADDRESSES:
+    for address in fpga_addresses:
         if address not in snapshot_fpga:
             complete_snapshot = False
             report["missing"].append({"kind": "snapshot_fpga", "address": address})
@@ -140,7 +143,7 @@ def verify_threshold_restoration(
             continue
         expected_asic[register] = value
 
-    report["expected"]["fpga"] = _fpga_rows(expected_fpga)
+    report["expected"]["fpga"] = _fpga_rows(expected_fpga, fpga_addresses)
     report["expected"]["asic"] = _asic_rows(expected_asic, registers)
 
     # Without a complete, trustworthy snapshot there is nothing safe to compare
@@ -149,7 +152,7 @@ def verify_threshold_restoration(
         return report
 
     observed_before = {}
-    for address in _FPGA_ADDRESSES:
+    for address in fpga_addresses:
         try:
             value = device.read_word(address)
             if not _valid_bits(value):
@@ -161,11 +164,24 @@ def verify_threshold_restoration(
                                              "observed": value})
         except BaseException as exc:
             report["errors"].append(_error(f"read FPGA {address} before ASIC verification", exc))
-    report["observed"]["fpga_before_asic"] = _fpga_rows(observed_before)
+    report["observed"]["fpga_before_asic"] = _fpga_rows(observed_before, fpga_addresses)
 
-    # All three words are needed to prove that the verifier did not change FPGA
-    # state.  In particular, without word 0 the I2C side effect cannot be undone.
-    valid_baseline = all(address in observed_before for address in _FPGA_ADDRESSES)
+    # Word 0 is needed regardless of the job's own footprint: the ASIC FIFO
+    # read below always perturbs it, and undoing that requires its pre-read value.
+    word0_before = observed_before.get(0)
+    if word0_before is None:
+        try:
+            word0_before = device.read_word(0)
+            if not _valid_bits(word0_before):
+                raise ValueError("readback is not an eight-bit binary value")
+        except BaseException as exc:
+            report["errors"].append(_error("read FPGA 0 before ASIC verification", exc))
+            word0_before = None
+
+    # Every job word plus word 0 is needed to prove that the verifier did not
+    # change FPGA state. In particular, without word 0 the I2C side effect
+    # cannot be undone.
+    valid_baseline = word0_before is not None and all(address in observed_before for address in fpga_addresses)
     asic_attempted = bool(registers) and valid_baseline
     observed_asic = {}
     incomplete_readback = False
@@ -206,14 +222,14 @@ def verify_threshold_restoration(
                 report["cleanup"]["errors"].append(_error("idle I2C control", exc))
             report["cleanup"]["word0_restore_attempted"] = True
             try:
-                device.write_word(0, observed_before[0])
+                device.write_word(0, word0_before)
             except BaseException as exc:
                 report["cleanup"]["errors"].append(_error("restore observed FPGA 0", exc))
 
     report["observed"]["asic"] = _asic_rows(observed_asic, registers)
     if asic_attempted:
         observed_after = {}
-        for address in _FPGA_ADDRESSES:
+        for address in fpga_addresses:
             try:
                 value = device.read_word(address)
                 if not _valid_bits(value):
@@ -226,9 +242,9 @@ def verify_threshold_restoration(
                     })
             except BaseException as exc:
                 report["errors"].append(_error(f"reread FPGA {address} after ASIC verification", exc))
-        report["observed"]["fpga_after_asic"] = _fpga_rows(observed_after)
+        report["observed"]["fpga_after_asic"] = _fpga_rows(observed_after, fpga_addresses)
         report["cleanup"]["status"] = (
-            "failed" if report["cleanup"]["errors"] or len(observed_after) != len(_FPGA_ADDRESSES) or
+            "failed" if report["cleanup"]["errors"] or len(observed_after) != len(fpga_addresses) or
             any(item["kind"] == "verifier_fpga_restoration" for item in report["mismatches"])
             else "restored"
         )

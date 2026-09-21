@@ -1,5 +1,137 @@
 # Implementation status
 
+## RADIOROC 24 — Hold-scan job migration and first physical GUI hardware validation (PASSED)
+
+Continuation on `feat/desktop-hardware-threshold` at `04054ff774abc35d075c6f7f114f1a6510fbd162`
+(clean tree before this run), on a **Raspberry Pi** — the first physical run of this
+codebase on Linux. `.conda-radioroc` did not exist on this machine; rebuilt it from
+`environment-radioroc.yml` (aarch64) and added `pyvisa-py` (not in the yml, matching
+RADIOROC 23's mac session). All four bench instruments confirmed present and
+responding: RADIOROC board (`/dev/ttyUSB0` control interface, matching the
+`...320`-suffix macOS convention), Aim-TTi TGF4162, Tektronix MSO56B, Keysight
+EDU36311A, all reached via `pyvisa`/`pyusb`.
+
+**First-boot anomaly, resolved:** an initial read-only board status check returned
+non-protocol garbage (`f7 ff c0 00 00 ...`, not the documented `AA...55` frame) on
+two separate attempts via two different code paths (raw `pyserial`, VISA ASRL).
+Root cause was not a Linux/driver issue: the PSU's CH1 5V/1A rail was off (matching
+how RADIOROC 23 left it), so the board was running on USB power only. Enabling CH1
+(operator-authorized) fixed it immediately — `radioroc_check_connection.py` then
+returned the expected `00000101 (5)`, matching the known-good macOS value.
+
+**Preset-defaults bug found and fixed, then swept project-wide.** Running the
+known-good external track-and-hold Ctest config
+(`configs/presets/hold_external_track_ctest_ch4.json`, `hold_min=440,
+acquisitions=30`) produced a scan that used `hold_min=0, acquisitions=10` instead —
+silently wrong, no error. Root cause: `apply_preset_defaults()` (`radioroc_cli_common.py`)
+applies a preset via `parser.set_defaults(**preset)`, but any `add_argument(...,
+default=X)` call for the same field always wins over an earlier `set_defaults()` in
+argparse, regardless of call order — so any preset field whose CLI flag also carried
+a hardcoded default was silently dropped. Fixed in `radioroc_hold_scan.py` by
+removing the redundant hardcoded defaults and adding explicit `None`-fallback
+resolution after `parse_args()` (per the operator's explicit choice over reordering
+the `apply_preset_defaults()` call). A follow-up audit (delegated) swept all 7 other
+scripts using the same helper (`apply_defaults`, `sync_pulse`, `acquire`,
+`io_mux_scan`, `threshold_scan`, `scurve`, `channel_config`) and found the identical
+defect in all of them — two were live, not just latent: `sync_pulse`'s `pulses`
+default (1000) was silently overriding its preset's `100`, and `acquire`'s
+`threshold_dac` default (530) was silently overriding its preset's `100`. Also
+closed the same gap in the shared `add_connection_args`/`add_write_safety_args`
+helpers (`port`/`baud`/`timeout`/`config`), previously flagged but unfixed by the
+audit as a broader cross-cutting change — fixed centrally in
+`connection_config_from_args`/`prepare_device` plus the two scripts
+(`hold_scan`/`threshold_scan`) that read `args.config` directly. Verified with a
+synthetic preset overriding port/baud/timeout end-to-end.
+
+**Hold scan migrated onto the shared-job architecture** (previously only threshold
+scans had this rigor; hold scan was still a synchronous legacy function). New
+`HoldScanJob`/`HoldScanJobConfig` (`src/radioroc/application/hold_scan.py`) mirror
+`ThresholdJob` exactly: cooperative cancellation (checkpointed per hold point, plus
+automatically on every `read_word`/`write_word`/FIFO call via `device._job_checkpoint`),
+a durable JSON manifest + CSV writer (`HoldRunWriter`), an exact pre-scan ASIC/FPGA
+snapshot-restore (register footprint: `(66,ch)`×64 always, `(ch,6)`/`(ch,7)`×64 if
+mask/Ctest used, gain/preamp/threshold-DAC registers if set; FPGA words
+21/22/23/24/25/26/27/30/31/77/78), and opt-in independent restoration verification.
+Generalized `verify_threshold_restoration` → `verify_restoration`
+(`application/verification.py`) to take an explicit `fpga_addresses` parameter
+instead of a hardcoded `(0,1,6)`, so both jobs share it — caught and fixed a real
+bug while doing so: the verifier's word-0 restore-around-FIFO-read step assumed `0`
+was always in the caller's own address set, which would `KeyError` for hold scan's
+different footprint. `HoldScanResult` extended with the same status-tracking fields
+`ThresholdScanResult` already had (`status`, `cleanup_status`, `cleanup_errors`,
+`persistence_errors`, `error`, `execution_mode`, `verification`). Legacy
+`RadiorocDevice.run_hold_scan()` and `scripts/radioroc_hold_scan.py` rewired onto
+the new job (added `--verify-restoration`, SIGINT-cancellation, matching
+`radioroc_threshold_scan.py`'s CLI contract exactly).
+
+A delegated test pass (`tests/test_hold_scan_jobs.py`,
+`tests/test_hold_scan_verification.py`, 33 tests, fake ADC-batch transport) found
+one more real bug before any hardware ran: `HoldScanJobConfig.registers()` omitted
+the ASIC threshold-DAC registers `(65,2)`/`(65,1 or 3)` even when `scan.threshold_dac`
+was set, so any hold scan with an explicit threshold DAC would silently leave it
+unrestored after cleanup with no error or verification mismatch reported. Fixed
+(mirrors `ThresholdJobConfig.registers()`, which already covered this). Also added
+the missing duplicate-channel check to `HoldScanConfig.validate()` (present on
+`ThresholdScanConfig`, absent here) and fixed `radioroc_hold_scan.py` validating
+outside its `try` block (unhandled traceback on bad input instead of a clean error).
+
+**GUI layer added** (delegated, reviewed): `HoldScanWorker`
+(`application/hold_scan_worker.py`, mirrors `ThresholdWorker`), `HoldScanWindow`
+(`gui/hold_scan_window.py`, mirrors `ThresholdWindow`), a synthetic (explicitly
+non-physics-validated) hold-scan simulator (`transport/hold_scan_simulator.py`), a
+minimal saved-run reader (`data/hold_reader.py`, a deliberate v1 scope reduction vs.
+`threshold_reader.py`'s full fault-tolerance), hardware-mode wiring into the
+existing `ConnectionWorker` (additive only, existing threshold path untouched), and
+a `QTabWidget` shell (`gui/__main__.py`) hosting both workflows as independent tabs.
+While driving it live with the operator, found and fixed one more gap: the window
+had no field for `sync_io`/`sync_io_mux_index` — without it, the FPGA sync trigger
+routing to the signal generator (`IO1` mux index `5` in this bench setup) could only
+work by coincidence, relying on whatever the mux happened to already be set to.
+Added the missing controls. (Initially misdiagnosed the fault-review workflow as a
+second bug — reverted that: `Disconnect` → `Acknowledge fault review` →
+`Connect` is the intended sequence, not a stuck button; the review action is
+correctly restricted to non-connected states, and disconnect is already enabled
+while faulted.)
+
+**Physical confirmation:** CLI hold scan via `RadiorocSerial`/`RadiorocDevice`
+directly (first with the still-buggy defaults — clean shape but noisier, 10
+acquisitions; then corrected — 21 points, 440-640ns, 30 acquisitions), then the
+**first-ever physical hardware run through the new GUI path**: 21/21 points,
+`status: completed`, `cleanup: restored`, `verification: passed`, peak
+796-798 at hold_delay 500-550ns falling to baseline ~127 by 440-450ns and ~299 by
+640ns — matching the CLI run and the 2026-06-26 known-good shape closely (peak
+location and baseline both consistent). Generator config from RADIOROC 23
+(PULSE, 100ns, external-triggered single-cycle burst, `AMPL 1.0`/`ZLOAD OPEN`,
+20dB attenuator into `in_test1`/Ctest) re-applied and confirmed with `EER?` after
+every write before the first CLI run.
+
+**Known gap, deferred:** the operator noted that `ThresholdWindow` and
+`HoldScanWindow` each own an independent connection/channel-config panel instead of
+sharing one — exactly the "one shell, one connection" architecture
+`CROSS_PLATFORM_REBUILD_PLAN.md` M3 already calls for but was never actually built
+that way. Deferred pending Windows vendor-app reference screenshots the operator
+will provide, so the shared page is designed against the real reference UI rather
+than guessed.
+
+**Evidence:** all 176 offline tests + 16 CLI `--help` checks pass after every
+change (re-verified repeatedly through the session, including after the final
+connection-args fix). No hardware scans run as CI/offline tests, per standing
+policy — every hardware-touching step above was interactively authorized.
+
+## Next bounded task
+
+Two independent options, operator's choice:
+1. Design and build the shared connection/channel-config shell once Windows
+   vendor-app screenshots are available (`ThresholdWindow`/`HoldScanWindow` each
+   currently duplicate this instead of sharing one connected session).
+2. Continue the feature-parity backlog (`CROSS_PLATFORM_REBUILD_PLAN.md` §3) with a
+   slice independent of the shared-shell work, e.g. S-curves GUI (`F07`, core/CLI
+   exists, no GUI yet) or full DAQ trigger/visualization (`F11`-`F13`).
+
+Whichever is chosen, keep the same discipline: fresh authorization per hardware
+action, stop on any implausible result, record commit/checks/limitations here and
+in `NEXT_SESSION.md` at the next handoff.
+
 ## RADIOROC 23 — First Stage D signal-injection confirmation (PASSED)
 
 Continuation on `feat/desktop-hardware-threshold` at

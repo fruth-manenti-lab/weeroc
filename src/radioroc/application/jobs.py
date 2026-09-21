@@ -31,7 +31,7 @@ class JobEvent:
     status: str
     completed_points: int
     total_points: int
-    dac: int | None = None
+    point: int | None = None
     values: tuple[tuple[str, object], ...] = ()
     message: str | None = None
 
