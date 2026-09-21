@@ -8,11 +8,12 @@ from unittest.mock import patch
 
 # Bootstrap the checkout package when test discovery uses an older installed wheel.
 import radioroc_client  # noqa: F401
-from radioroc_client import ThresholdScanConfig, ThresholdScanResult
+from radioroc_client import I2CRow, ThresholdScanConfig, ThresholdScanResult, bits
 
 from radioroc.application.channel_config import ChannelConfigOperation
 from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.application.jobs import JobBusyError
+from radioroc.application.raw_registers import RawRegisterWrite
 from radioroc.application.threshold import ThresholdJobConfig
 from radioroc.transport.config import RadiorocConnectionConfig
 from radioroc.transport.discovery import BoardPort
@@ -416,7 +417,59 @@ class ConnectionWorkerTests(unittest.TestCase):
         idle = self.wait_for(worker, "idle")
         self.assertIsNotNone(idle.fault)
         worker.review_fault()
-        self.assertIsNone(worker.snapshot().fault)
+
+    def test_read_all_registers_reflects_hardware_and_stays_on_worker_thread(self):
+        transport = OwnedThresholdTransport()
+        session = ThresholdSession(transport)
+        worker = self.started(session_factory=lambda config: session)
+        worker.connect(RadiorocConnectionConfig(port="fake-control"))
+        self.wait_for(worker, "connected")
+
+        # A small, deliberately narrow row set: OwnedThresholdTransport's
+        # synthetic ASIC map only covers add 0..66 / subadd 0..63, unlike the
+        # real packaged default config CSV, which also carries reserved
+        # (add, subadd>=64) probe-block rows -- see test_raw_registers.py for
+        # the same reasoning against the shared core directly.
+        device = worker._device
+        device.i2c_rows = [I2CRow(4, 0, bits(0, 8)), I2CRow(4, 6, bits(0, 8))]
+
+        worker.read_all_registers()
+        self.assertEqual(worker.snapshot().state, "reading")
+        self.wait_for(worker, "connected")
+        rows = worker.raw_registers_snapshot()
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(set(transport.thread_ids + session.thread_ids),
+                         {worker._thread.ident})
+
+    def test_write_raw_register_writes_verifies_and_faults_on_mismatch(self):
+        transport = OwnedThresholdTransport()
+        session = ThresholdSession(transport)
+        worker = self.started(session_factory=lambda config: session)
+        worker.connect(RadiorocConnectionConfig(port="fake-control"))
+        self.wait_for(worker, "connected")
+        device = worker._device
+        device.i2c_rows = [I2CRow(4, 0, bits(0, 8))]
+
+        worker.write_raw_register(RawRegisterWrite(4, 0, bits(200, 8)))
+        self.wait_for(worker, "connected")
+        result = worker.raw_register_write_snapshot()
+        self.assertEqual(result.written, bits(200, 8))
+        self.assertEqual(result.observed, bits(200, 8))
+        self.assertFalse(result.mismatch)
+
+        original_read_register_bits = device.read_register_bits
+
+        def flaky_read_register_bits(add, subadd):
+            if (add, subadd) == (4, 0):
+                return bits(0, 8)
+            return original_read_register_bits(add, subadd)
+
+        device.read_register_bits = flaky_read_register_bits
+        worker.write_raw_register(RawRegisterWrite(4, 0, bits(200, 8)))
+        snap = self.wait_for(worker, "faulted", timeout=5)
+        self.assertIn("raw register write mismatch", snap.fault)
+        self.assertTrue(worker.raw_register_write_snapshot().mismatch)
 
     def test_verified_cancellation_returns_to_connected_after_cleanup(self):
         transport = OwnedThresholdTransport(counts=(10,))

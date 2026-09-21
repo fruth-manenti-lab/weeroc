@@ -20,6 +20,7 @@ from radioroc.transport.serial import RadiorocSerial
 from .channel_config import ChannelConfigOperation, apply_channel_config
 from .hold_scan import HoldScanJob, HoldScanJobConfig
 from .jobs import CancellationToken, JobBusyError, JobCancelled
+from .raw_registers import RawRegisterWrite, read_all_registers, write_raw_register
 from .scurve import ScurveJob, ScurveJobConfig
 from .threshold import ThresholdJob, ThresholdJobConfig
 from .threshold_worker import WorkerOutcome, WorkerSnapshot
@@ -73,6 +74,8 @@ class ConnectionWorker:
         self._scurve_coalesced = 0
         self._scurve_outcome = None
         self._channel_config_outcome = None
+        self._raw_registers_rows = None
+        self._raw_register_write_result = None
         self._hold_shutdown_for_job_fault = False
         self._pending = False
         self._shutdown_queued = False
@@ -143,6 +146,25 @@ class ConnectionWorker:
         """Apply one input DAC / TQ mask configuration on the owned session."""
         operation.validate()
         self._submit("apply_channel_config", operation, "configuring", {"connected"})
+
+    def read_all_registers(self):
+        """Load (if needed) and re-read every ASIC register from hardware."""
+        self._submit("read_all_registers", None, "reading", {"connected"})
+
+    def write_raw_register(self, write: RawRegisterWrite):
+        """Write one raw ASIC register on the owned session."""
+        write.validate()
+        self._submit("write_raw_register", write, "configuring", {"connected"})
+
+    def raw_registers_snapshot(self):
+        """Rows from the most recent `read_all_registers`, if any."""
+        with self._lock:
+            return deepcopy(self._raw_registers_rows)
+
+    def raw_register_write_snapshot(self):
+        """Outcome of the most recent `write_raw_register`, if any."""
+        with self._lock:
+            return deepcopy(self._raw_register_write_result)
 
     def disconnect(self):
         self._submit("disconnect", None, "disconnecting",
@@ -379,6 +401,10 @@ class ConnectionWorker:
                 self._read_status()
             elif command == "apply_channel_config":
                 self._apply_channel_config(argument)
+            elif command == "read_all_registers":
+                self._read_all_registers()
+            elif command == "write_raw_register":
+                self._write_raw_register(argument)
             elif command == "disconnect":
                 self._disconnect(stop=False)
             elif command == "run_threshold":
@@ -676,6 +702,49 @@ class ConnectionWorker:
         if result.verify_mismatches or result.restore_mismatches:
             fault = (f"channel config mismatch: verify={len(result.verify_mismatches)} "
                      f"restore={len(result.restore_mismatches)}")
+            self._latch_fault(fault)
+            self._publish("faulted", error=fault)
+        else:
+            self._publish("connected")
+
+    def _read_all_registers(self):
+        try:
+            rows = read_all_registers(self._device)
+        except Exception as exc:
+            primary_error = self._describe(exc)
+            close_error = self._close_session()
+            if not close_error:
+                with self._lock:
+                    self._port = None
+                    self._status_word = None
+            with self._lock:
+                self._raw_registers_rows = None
+            self._publish("close_failed" if close_error else "error",
+                          error=primary_error, close_error=close_error)
+            return
+        with self._lock:
+            self._raw_registers_rows = tuple(rows)
+        self._publish("connected")
+
+    def _write_raw_register(self, write):
+        try:
+            result = write_raw_register(self._device, write)
+        except Exception as exc:
+            primary_error = self._describe(exc)
+            close_error = self._close_session()
+            if not close_error:
+                with self._lock:
+                    self._port = None
+                    self._status_word = None
+            with self._lock:
+                self._raw_register_write_result = None
+            self._publish("close_failed" if close_error else "error",
+                          error=primary_error, close_error=close_error)
+            return
+        with self._lock:
+            self._raw_register_write_result = result
+        if result.mismatch:
+            fault = f"raw register write mismatch: add={result.add} subadd={result.subadd}"
             self._latch_fault(fault)
             self._publish("faulted", error=fault)
         else:
