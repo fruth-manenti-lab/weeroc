@@ -66,6 +66,70 @@ of the new tab matches the vendor screenshot's layout. Not independently
 verified against real hardware (same caveat as every other register
 recovered this way in this codebase).
 
+**Then: first-ever physical hardware run through the S-curve GUI path**,
+the item RADIOROC 25 left pending. Operator confirmed the board still
+connected/powered from a prior session and explicitly authorized hardware
+use. `scripts/radioroc_check_connection.py --port /dev/ttyUSB0` read the
+same known-good `00000101 (5)` status word RADIOROC 24 saw. Reused the exact
+settings from `radioroc_runs/diag_scurve_ch4_defaults_20260921/` (a CLI
+diagnostic run from earlier the same day, found already sitting in the repo
+rather than needing to be re-derived: channel 4, trigger preamp gain code 1,
+T1, mask on, no Ctest, clock index 3, DAC 80..160 step 5 — no signal
+generator needed, since this is the bare-board internal-noise pedestal
+turn-off curve), driving the real `MainWindow`/`ScurveWindow` production
+classes directly (not a bespoke harness) via a one-off offscreen-Qt script,
+not committed to the repo.
+
+**Found and fixed two real bugs this surfaced, both now covered by a new
+regression test:**
+1. After connecting through the shared `ConnectionPanel`, none of the three
+   embedded scan windows' run buttons ever became enabled. Each window's own
+   `status_changed -> poll_connection_worker` wiring (`gui/scurve_window.py`
+   and siblings) only self-connects when the window owns its own
+   `ConnectionPanel`; with an injected worker (the whole point of RADIOROC
+   26's shared shell) nothing told the window the connection changed state.
+   Fixed in `MainWindow.__init__` by wiring the shared panel's
+   `status_changed` to each scan window's `poll_connection_worker` directly.
+2. `tests/test_main_window.py`'s `_FakeSession` fixture returned a bare
+   `RadiorocMemoryTransport` from `__enter__` instead of matching the
+   session contract every other GUI test fixture in this codebase already
+   uses (`__enter__` returns `self`, which answers `read_word`/`close`
+   directly). Nothing in that file had ever actually connected through it
+   before the new test below did, so it was a latent bug: it left
+   `ConnectionWorker`'s background thread stuck in `"close_failed"` instead
+   of `"stopped"` on shutdown, hanging the whole test process at interpreter
+   exit — reproduced and confirmed directly with a small non-Qt repro script
+   before touching any test file, isolating it from Qt/threading noise.
+
+New `test_scan_windows_reflect_a_shared_connection_reaching_connected`
+(`tests/test_main_window.py`) reproduces the original bug and guards both
+fixes. 269/269 offline tests, 3 clean full-suite runs, and confirmed the
+full suite's own process now exits cleanly (it silently hadn't been,
+before — `tools/check_development.py`'s subprocess call happens to wait for
+the child regardless, so this had not been visibly breaking CI-equivalent
+runs, but any direct/manual single-test invocation would hang forever).
+
+**Physical result:** `status: completed`, `cleanup: restored`,
+`verification.status: passed` (zero mismatches), 17/17 DAC points. Measured
+curve: 100% through DAC 115, 98.5% at 120, 36.5% at 125, 3.5% at 130, 0%
+from 135 — same shape and same DAC 120-130 transition window as the CLI
+diagnostic run from earlier the same day (99.5%/60.0%/6.0% at the same
+three points), the difference being ordinary shot-noise variation between
+two independent measurements of a statistical trigger-efficiency curve, not
+a discrepancy. Evidence local under
+`radioroc_runs/hardware/20260922-075139-52019b25/` (uncommitted, per policy).
+Board left connected but idle afterward (disconnected cleanly via the same
+script), matching every prior session's handoff discipline. No push to
+`main`.
+
+**Not established:** hardware validation for anything beyond this one
+S-curve case (Threshold/Hold-scan GUI hardware paths were already validated
+in earlier sessions); whether the same shared-connection-state gap affects
+any other not-yet-hardware-tested control on the ASIC-config page tabs
+built earlier this session (input DAC grid, mask grids, threshold
+calibration grid) — plausible given the shared root cause, worth a
+targeted follow-up rather than assuming either way.
+
 ## RADIOROC 26 — Shared connection/channel-config shell; GUI-test SIGSEGV fix (offline)
 
 Autonomous overnight session (no operator present; scope explicitly limited to
