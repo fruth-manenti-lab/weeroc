@@ -201,6 +201,8 @@ class ScurveConfig:
         """
 
         validate_channels(self.channels)
+        if len(set(self.channels)) != len(self.channels):
+            raise ValueError("channels must be unique")
         validate_scan_range(self.dac_min, self.dac_max, self.dac_step, name="DAC")
         if not 0 <= self.clock_index <= 3:
             raise ValueError("clock_index must be in range 0..3")
@@ -461,14 +463,24 @@ class ScurveResult:
     - `metadata_path` (`Path | None`): Output metadata JSON path.
     - `metadata` (`RadiorocRunMetadata | None`): Run metadata.
     - `points` (`int`): Number of DAC points written.
+    - `channels` (`list[int]`): Channels included in the scan.
     - `warnings` (`list[str]`): Non-fatal warnings.
+    - `verification` (`dict | None`): Optional independent restoration report.
     """
 
     csv_path: Path
     metadata_path: Path | None = None
     metadata: RadiorocRunMetadata | None = None
     points: int = 0
+    channels: list[int] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    status: str = "completed"
+    cleanup_status: str = "not_required"
+    cleanup_errors: list[str] = field(default_factory=list)
+    persistence_errors: list[str] = field(default_factory=list)
+    error: BaseException | None = None
+    execution_mode: str = "hardware"
+    verification: dict | None = None
 
 
 @dataclass
@@ -1530,65 +1542,25 @@ class RadiorocDevice:
             if remaining > 0.003:
                 time.sleep(remaining - 0.001)
 
-    def run_scurve(self, config: ScurveConfig, *, metadata: RadiorocRunMetadata | None = None) -> ScurveResult:
-        """Run an S-curve scan and return output paths.
+    def run_scurve(
+        self,
+        config: ScurveConfig,
+        *,
+        metadata: RadiorocRunMetadata | None = None,
+        cancellation=None,
+        on_event=None,
+    ) -> ScurveResult:
+        """Compatibility entry point for the shared S-curve job.
 
-        **Inputs**
-        - `config` (`ScurveConfig`): Scan settings.
-        - `metadata` (`RadiorocRunMetadata | None`): Optional metadata to
-          write beside the CSV.
-
-        **Returns**
-        - `ScurveResult`: CSV path, metadata path, and point count.
-
-        **Hardware side effects**
-        - Writes FPGA and ASIC scan-control registers.
+        Failures raise ScurveJobError carrying a durable partial ``result``.
+        The application runner returns that result directly for UI consumers.
         """
-
-        config.validate()
-        if config.trigger_preamp_gain is not None:
-            self.set_trigger_preamp_gain(config.trigger_preamp_gain, channels=config.channels)
-        out_dir: Path = config.out_dir
-        csv_path: Path = write_csv_rows([], out_dir, "scurve.csv")
-        self.configure_scurve_firmware(clock_index=config.clock_index, trigger_level=config.trigger_level)
-        self.prepare_trigger_masks(t1=config.t1, use_mask=config.use_mask, use_ctest=config.use_ctest)
-        saved_w1: str = self.read_word(1) if not self.dry_run else "00000000"
-        rows: list[dict[str, object]] = []
-        try:
-            for dac in scan_values(config.dac_min, config.dac_max, config.dac_step, name="DAC"):
-                self.set_threshold_dac(dac, t1=config.t1)
-                time.sleep(0.001)
-                row: dict[str, object] = {"DAC": dac}
-                for channel in config.channels:
-                    self.write_word(6, bits(channel))
-                    if config.use_mask:
-                        self.set_mask_for_channel(channel, t1=config.t1, enabled=True)
-                    if config.use_ctest:
-                        self.set_ctest_for_channel(channel, enabled=True)
-                    self.write_word(1, saved_w1[:6] + "00")
-                    self.write_word(1, saved_w1[:6] + "10")
-                    self.write_word(1, saved_w1[:6] + "11")
-                    time.sleep(0.2 if self.dry_run else (220 / (10**config.clock_index)) / 1000)
-                    if self.dry_run:
-                        value: float = math.nan
-                    else:
-                        pulse_data, fifo9 = self.transport.read_words(8, 2)
-                        value = round(min(fifo9, 200) * 100.0 / pulse_data, 1) if pulse_data >= 200 else math.nan
-                    row[f"ch{channel}"] = value
-                    if config.use_mask:
-                        self.set_mask_for_channel(channel, t1=config.t1, enabled=False)
-                    if config.use_ctest:
-                        self.set_ctest_for_channel(channel, enabled=False)
-                    self.write_word(1, saved_w1[:6] + "10")
-                rows.append(row)
-                write_csv_rows(rows, out_dir, "scurve.csv")
-                print(f"scurve dac={dac} values={[row[f'ch{ch}'] for ch in config.channels[:8]]}", flush=True)
-        finally:
-            if config.use_mask or config.use_ctest:
-                self.prepare_trigger_masks(t1=config.t1, use_mask=config.use_mask, use_ctest=config.use_ctest)
-            self.write_word(1, saved_w1[:6] + "00")
-        metadata_path: Path | None = write_metadata_json(metadata, out_dir) if metadata else None
-        return ScurveResult(csv_path=csv_path, metadata_path=metadata_path, metadata=metadata, points=len(rows))
+        from radioroc.application.scurve import ScurveJob, ScurveJobConfig, ScurveJobError
+        result = ScurveJob().run(self, ScurveJobConfig(config), metadata=metadata,
+                                 cancellation=cancellation, on_event=on_event)
+        if result.status not in ("completed", "cancelled") or result.cleanup_errors or result.persistence_errors:
+            raise ScurveJobError(result) from result.error
+        return result
 
     def run_threshold_scan(
         self,

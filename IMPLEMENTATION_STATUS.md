@@ -1,5 +1,76 @@
 # Implementation status
 
+## RADIOROC 25 — S-curve job migration and GUI tab (offline; physical validation pending)
+
+Same session/branch as RADIOROC 24, continuing immediately after it (not yet a
+new chat handoff). Migrated S-curve scans onto the same shared-job architecture
+as threshold and hold scans, following the exact pattern established in
+RADIOROC 24 — the same day's second application of the same playbook, this
+time with no bugs found in the core migration (the delegated test pass reviewed
+`scurve.py` line-by-line against the pre-migration function and both sibling
+jobs and found none), likely because the register-footprint reasoning from
+hold scan directly informed this one.
+
+New `ScurveJob`/`ScurveJobConfig` (`src/radioroc/application/scurve.py`) mirror
+`ThresholdJob`/`HoldScanJob`: cancellation (per-DAC-point checkpoint plus the
+automatic per-transaction one), durable manifest + `ScurveRunWriter` CSV
+(`src/radioroc/data/scurve.py`, single `scurve.csv`, one value per
+channel/DAC point — no averaged-attempts concept, unlike threshold), exact
+ASIC/FPGA snapshot-restore (registers: `(66,ch)`×64 always, `(65,2)`/`(65,1 or
+3)` unconditionally since DAC is this scan's own variable, `(ch,6)`/`(ch,7)`×64
+if mask/Ctest used, preamp-gain registers if set; FPGA words `1`/`3`/`6`), and
+opt-in restoration verification via the same generalized `verify_restoration`
+(`fpga_addresses=(1,3,6)`). `configure_scurve_firmware` (clock index,
+trigger-level bit — both persist, matching the module's own "preparation is
+intentional, temporary settings are restored" convention already used for
+`initialize_fpga`/`apply_defaults`) now runs during preparation, snapshotted
+*after* being set — so cleanup restores word 1 to the post-configure baseline,
+not the pre-run default; this is deliberate, flagged explicitly by the test
+agent for review, and confirmed correct on inspection. Added the same
+duplicate-channel check to `ScurveConfig.validate()` that was missing (mirrors
+the same gap found and fixed in `HoldScanConfig` during RADIOROC 24).
+`ScurveResult` extended with the same status-tracking fields as
+`HoldScanResult`. Legacy `RadiorocDevice.run_scurve()` and
+`scripts/radioroc_scurve.py` rewired onto the new job (added
+`--verify-restoration`, SIGINT-cancellation, matching the other two CLI
+scripts' contract exactly).
+
+**GUI layer added** (delegated, reviewed): `ScurveWorker`
+(`application/scurve_worker.py`, mirrors `HoldScanWorker`), `ScurveWindow`
+(`gui/scurve_window.py`, mirrors `HoldScanWindow` but with S-curve's smaller
+config surface — no hold-mode/sync-IO/ADC-timing/gain-override groups, a plain
+per-channel turn-on-percentage-vs-DAC plot instead of hg/lg mean+stdev error
+bars), a synthetic-but-physically-motivated S-curve simulator
+(`transport/scurve_simulator.py`, reusing `ThresholdSimulationTransport`'s
+already-validated logistic-curve math rather than inventing new math, since
+unlike hold scan's synthetic bump this scan type has a legitimate precedent in
+the codebase), a minimal saved-run reader (`data/scurve_reader.py`, same v1
+scope reduction as `hold_reader.py`), hardware-mode wiring into
+`ConnectionWorker` (additive `run_scurve`/`cancel_scurve` trio, mirroring the
+hold-scan trio exactly), and a third "S-curve" tab in the app shell
+(`gui/__main__.py`), alongside Threshold and Hold Scan. Curve
+fitting/50%-point extraction (`F08`) and data export beyond the durable
+CSV/manifest were explicitly scoped out of this pass.
+
+**Evidence:** 222/222 offline tests (46 new: 23 job tests, 9 verification
+tests, 8 worker tests, 6 GUI tests) plus 16 CLI `--help` checks, all passing.
+GUI launches offscreen with all three tabs; a manual simulated run produces the
+expected monotonic turn-on-percentage curve. **Not yet physically validated on
+hardware** — RADIOROC 24's hold-scan GUI work was hardware-validated same-day;
+this S-curve work has not been, pending the operator's decision on whether to
+do that now or move on.
+
+## Next bounded task
+
+Ask the operator directly:
+1. Physically validate the new S-curve GUI path on real hardware now (mirrors
+   how RADIOROC 24 validated hold scan) — needs a channel/DAC range and
+   injection setup the operator picks, following the same
+   fresh-authorization-per-action discipline.
+2. Or move to the shared connection/channel-config shell once Windows
+   vendor-app screenshots arrive (still pending as of this entry).
+3. Or something else from `CROSS_PLATFORM_REBUILD_PLAN.md` §3.
+
 ## RADIOROC 24 — Hold-scan job migration and first physical GUI hardware validation (PASSED)
 
 Continuation on `feat/desktop-hardware-threshold` at `04054ff774abc35d075c6f7f114f1a6510fbd162`

@@ -1,8 +1,8 @@
-"""Launch the optional threshold, hold-scan and connection desktop.
+"""Launch the optional threshold, hold-scan, S-curve and connection desktop.
 
-Threshold and hold-scan are two independent workflow verticals (each owns its
-own worker/session lifecycle); this module hosts both as tabs of one window
-rather than unifying them into a shared shell. See
+Threshold, hold-scan and S-curve are three independent workflow verticals
+(each owns its own worker/session lifecycle); this module hosts all three as
+tabs of one window rather than unifying them into a shared shell. See
 CROSS_PLATFORM_REBUILD_PLAN.md for that longer-term direction.
 """
 
@@ -11,13 +11,14 @@ import argparse
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="RADIOROC desktop: threshold/hold-scan simulation and hardware connection")
+        description="RADIOROC desktop: threshold/hold-scan/S-curve simulation and hardware connection")
     parser.parse_args(argv)
     try:
         from PySide6.QtCore import QTimer
         from PySide6.QtWidgets import QApplication, QTabWidget
         from .threshold_window import ThresholdWindow
         from .hold_scan_window import HoldScanWindow
+        from .scurve_window import ScurveWindow
     except ModuleNotFoundError as exc:
         if exc.name and (exc.name.startswith("PySide6") or exc.name.startswith("matplotlib")):
             parser.exit(1, "Desktop dependencies are missing. Install radioroc-tools[gui].\n")
@@ -32,12 +33,14 @@ def main(argv=None):
     # its central widget) keeps that lifecycle and its own closeEvent intact.
     threshold_window = ThresholdWindow()
     hold_scan_window = HoldScanWindow()
+    scurve_window = ScurveWindow()
     tabs.addTab(threshold_window, "Threshold")
     tabs.addTab(hold_scan_window, "Hold Scan")
+    tabs.addTab(scurve_window, "S-curve")
 
     def busy():
         return any(sub_window.worker is not None or sub_window.connection_worker is not None
-                   for sub_window in (threshold_window, hold_scan_window))
+                   for sub_window in (threshold_window, hold_scan_window, scurve_window))
 
     finish_timer = QTimer()
     finish_timer.setInterval(150)
@@ -53,7 +56,7 @@ def main(argv=None):
         # Give each workflow window's own closeEvent a chance to cancel an
         # in-flight job or disconnect hardware before the shell exits; poll
         # until both are idle, then actually quit.
-        for sub_window in (threshold_window, hold_scan_window):
+        for sub_window in (threshold_window, hold_scan_window, scurve_window):
             if sub_window.worker is not None or sub_window.connection_worker is not None:
                 sub_window.close()
         if busy():
