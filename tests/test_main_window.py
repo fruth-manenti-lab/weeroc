@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QApplication
 import radioroc_client  # noqa: F401  (side effect: puts src/ on sys.path for radioroc.*)
 from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.gui.main_window import MainWindow
-from radioroc.transport.memory import RadiorocMemoryTransport
+from radioroc.transport.config import RadiorocConnectionConfig
 
 
 def _app():
@@ -21,11 +21,24 @@ class _FakeConnectionWorker(ConnectionWorker):
 
 
 class _FakeSession:
-    def __enter__(self):
-        return RadiorocMemoryTransport()
+    """Matches the session contract other GUI tests already use (e.g.
+    tests/test_connection_gui.py's own FakeSession): __enter__ returns self,
+    which then answers read_word/close directly -- not a raw transport.
+    A prior version of this fixture returned a bare RadiorocMemoryTransport,
+    which nothing here ever actually connected through until RADIOROC 27's
+    new connection-propagation test tried to -- and it left the worker
+    thread stuck in "close_failed" instead of "stopped" on shutdown, hanging
+    the whole test process at interpreter exit.
+    """
 
-    def __exit__(self, *exc_info):
-        return False
+    def __enter__(self):
+        return self
+
+    def read_word(self, address):
+        return "00000101"
+
+    def close(self):
+        pass
 
 
 class MainWindowTests(unittest.TestCase):
@@ -81,6 +94,38 @@ class MainWindowTests(unittest.TestCase):
         window = self._make_window()
         window._refresh_status_strip()
         self.assertIn("Not connected", window.status_strip.text())
+
+    def test_scan_windows_reflect_a_shared_connection_reaching_connected(self):
+        # Found by physically validating the S-curve GUI path on real
+        # hardware (RADIOROC 27): each scan window's own
+        # status_changed -> poll_connection_worker wiring only self-connects
+        # when it owns its ConnectionPanel; an injected worker means nothing
+        # tells the window the shared connection changed state, so its run
+        # button gating would otherwise stay stuck at its just-constructed
+        # "not connected" reading forever.
+        window = self._make_window()
+        scan_windows = (window.threshold_window, window.hold_scan_window, window.scurve_window)
+        for scan_window in scan_windows:
+            scan_window.mode.setCurrentIndex(1)  # Hardware connection
+        _app().processEvents()
+        for scan_window in scan_windows:
+            self.assertFalse(scan_window.run_button.isEnabled())
+
+        worker = window.connection_panel.connection_worker
+        worker.connect(RadiorocConnectionConfig("fake-port", 115200, 0.5))
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and worker.snapshot().state != "connected":
+            _app().processEvents()
+            time.sleep(0.01)
+        self.assertEqual(worker.snapshot().state, "connected")
+        # Deterministic instead of waiting on the ConnectionPanel's own
+        # 100ms poll timer to happen to tick before the next assertion.
+        window.connection_panel.poll()
+
+        for scan_window in scan_windows:
+            self.assertTrue(scan_window.run_button.isEnabled(),
+                            f"{type(scan_window).__name__} run button should reflect the "
+                            "now-connected shared worker")
 
     def test_close_shuts_down_the_shared_worker_once(self):
         window = self._make_window()

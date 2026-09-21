@@ -131,6 +131,14 @@ class MainWindow(QMainWindow):
         self.calibration_tabs.addTab(self.scurve_window, "S-curve")
         self.pages.addWidget(calibration_page)
 
+        # An injected connection_worker means each scan window's own
+        # ConnectionPanel-owning code path (which self-wires this on the
+        # panel it owns) never runs, so nothing tells it the shared
+        # connection changed state -- its run/cancel button gating would
+        # otherwise never leave its just-constructed "not connected" state.
+        for scan_window in self._scan_windows():
+            self.connection_panel.status_changed.connect(scan_window.poll_connection_worker)
+
         self.sidebar.setCurrentRow(0)
 
         # -- Persistent connection status strip (mirrors the vendor app's
