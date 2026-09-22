@@ -26,6 +26,7 @@ from radioroc.application.hold_scan import HoldScanJob, HoldScanJobConfig
 from radioroc.application.hold_scan_worker import HoldScanWorker
 from radioroc.data.hold_reader import read_hold_run
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
+from radioroc.gui.channel_select import ChannelSelectGrid
 from radioroc.gui.connection_panel import ConnectionPanel
 from radioroc.gui.hint_bar import HintBar
 from radioroc.transport.hold_scan_simulator import HoldSimulationConfig
@@ -137,7 +138,7 @@ class HoldScanWindow(QMainWindow):
             self.connection_label.setWordWrap(True)
             form.addRow("Connection", self.connection_label)
 
-        self.channels = QLineEdit("4,5")
+        self.channel_select = ChannelSelectGrid(initial_channels=(4, 5))
         self.trigger_channel = _integer(0, 63, 4)
         self.hold_mode = QComboBox()
         self.hold_mode.addItems(["Internal (ASIC delay-cell code)", "External (FPGA delay, ns)"])
@@ -158,8 +159,8 @@ class HoldScanWindow(QMainWindow):
         threshold_dac_row = QHBoxLayout()
         threshold_dac_row.addWidget(self.set_threshold_dac)
         threshold_dac_row.addWidget(self.threshold_dac)
-        for label, field in [("Channels (comma separated)", self.channels),
-                             ("Trigger channel", self.trigger_channel),
+        form.addRow(self.channel_select)
+        for label, field in [("Trigger channel", self.trigger_channel),
                              ("Hold mode", self.hold_mode),
                              ("First hold code / delay (ns)", self.hold_min),
                              ("Last hold code / delay (ns)", self.hold_max),
@@ -303,7 +304,10 @@ class HoldScanWindow(QMainWindow):
             "generator. Hover a control to see what it does.")
         self.hint.attach(self.mode, "Simulation previews a synthetic curve with no "
                           "board attached; Hardware connection runs on the real ASIC/FPGA.")
-        self.hint.attach(self.channels, "Channels to record and plot (comma separated).")
+        self.hint.attach(self.channel_select.toggle_button,
+                         "Channels to record and plot. Click to choose which channels.")
+        self.hint.attach(self.channel_select.select_all_button, "Select every channel.")
+        self.hint.attach(self.channel_select.select_none_button, "Deselect every channel.")
         self.hint.attach(self.trigger_channel, "Channel whose discriminator/Ctest pulse "
                           "times the acquisition.")
         self.hint.attach(self.hold_mode, "Internal sweeps the ASIC's own delay-cell code "
@@ -624,7 +628,7 @@ class HoldScanWindow(QMainWindow):
             self.channel_config_apply_button.setEnabled(hardware_run_available)
 
     def operation(self):
-        channels = [int(value.strip()) for value in self.channels.text().split(",")]
+        channels = self.channel_select.selected_channels()
         output = self.output.text().strip()
         if not output:
             raise ValueError("choose a new run directory")

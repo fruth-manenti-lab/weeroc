@@ -66,11 +66,16 @@ class HoldScanGuiTests(unittest.TestCase):
         self.assertIn("temporary_asic_registers", self.window.details.toPlainText())
         self.assertIn("persist", self.window.details.toPlainText())
         self.assertFalse(self.directory.exists())
-        self.window.channels.setText("4,")
+        self.window.channel_select.set_channels([])
         self.window.trigger_channel.setValue(999)
         self.window.start_run()
         self.assertIsNone(self.window.worker)
         self.assertFalse(self.directory.exists())
+
+    def test_operation_uses_selected_channels(self):
+        self.window.channel_select.set_channels([2, 5, 9])
+        operation = self.window.operation()
+        self.assertEqual(operation.scan.channels, [2, 5, 9])
 
     def test_configure_finish_plot_reopen(self):
         self.window.discriminator.setCurrentIndex(1)

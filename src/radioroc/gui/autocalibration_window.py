@@ -29,6 +29,7 @@ from matplotlib.figure import Figure
 
 from radioroc.application.autocalibration import AutocalibrationJob, AutocalibrationJobConfig
 from radioroc.data.autocalibration_reader import read_autocalibration_run
+from radioroc.gui.channel_select import ChannelSelectGrid
 from radioroc.gui.hint_bar import HintBar
 
 _STEP_ORDER = ("step1_zero", "step1_full", "step2", "final")
@@ -96,12 +97,11 @@ class AutocalibrationWindow(QMainWindow):
 
         # Autocalibration needs at least a reference channel plus others to
         # align against, unlike a single-channel S-curve default.
-        self.channels = QLineEdit("4,5")
+        self.channel_select = ChannelSelectGrid(initial_channels=(4, 5))
         self.discriminator = QComboBox()
         self.discriminator.addItems(["T1", "T2"])
-        for label, field in [("Channels (comma separated)", self.channels),
-                             ("Discriminator", self.discriminator)]:
-            form.addRow(label, field)
+        form.addRow(self.channel_select)
+        form.addRow("Discriminator", self.discriminator)
         self.use_mask = QCheckBox("Mask other channels")
         self.use_mask.setChecked(True)
         self.use_ctest = QCheckBox("Enable Ctest")
@@ -215,8 +215,11 @@ class AutocalibrationWindow(QMainWindow):
             "corrects each channel's calibration trim DAC to align them on the mean crossing, "
             "then runs one final scan to verify the alignment. Hover a control to see what it "
             "does.")
-        self.hint.attach(self.channels, "Channels to calibrate together (comma separated); "
+        self.hint.attach(self.channel_select.toggle_button,
+                         "Channels to calibrate together. Click to choose which channels; "
                           "the first channel is the reference used for the LSB-ratio probe.")
+        self.hint.attach(self.channel_select.select_all_button, "Select every channel.")
+        self.hint.attach(self.channel_select.select_none_button, "Deselect every channel.")
         self.hint.attach(self.discriminator, "Which ASIC discriminator output (T1/T2) -- and "
                           "which channel's calibration trim DAC -- this run calibrates.")
         self.hint.attach(self.use_mask, "Mask every channel except the one(s) being scanned in "
@@ -319,7 +322,7 @@ class AutocalibrationWindow(QMainWindow):
         self.run_button.setEnabled(self._hardware_run_available())
 
     def operation(self):
-        channels = [int(value.strip()) for value in self.channels.text().split(",")]
+        channels = self.channel_select.selected_channels()
         output = self.output.text().strip()
         if not output:
             raise ValueError("choose a new run directory")

@@ -59,11 +59,16 @@ class ThresholdGuiTests(unittest.TestCase):
         self.assertIn("temporary_asic_registers", self.window.details.toPlainText())
         self.assertIn("persist", self.window.details.toPlainText())
         self.assertFalse(self.directory.exists())
-        self.window.channels.setText("4,4")
+        self.window.channel_select.set_channels([])
         self.window.start_run()
         self.assertIsNone(self.window.worker)
-        self.assertIn("unique", self.window.status.text())
+        self.assertIn("at least one channel is required", self.window.status.text())
         self.assertFalse(self.directory.exists())
+
+    def test_operation_uses_selected_channels(self):
+        self.window.channel_select.set_channels([1, 3, 6])
+        operation = self.window.operation()
+        self.assertEqual(operation.scan.channels, [1, 3, 6])
 
     def test_configure_finish_plot_reopen(self):
         self.window.discriminator.setCurrentIndex(1)

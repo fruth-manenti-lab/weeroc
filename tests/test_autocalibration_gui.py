@@ -113,7 +113,7 @@ class AutocalibrationGuiTests(unittest.TestCase):
 
     def test_default_field_values(self):
         window = self.window
-        self.assertEqual(window.channels.text(), "4,5")
+        self.assertEqual(window.channel_select.selected_channels(), [4, 5])
         self.assertEqual(window.discriminator.currentIndex(), 0)  # T1
         self.assertTrue(window.use_mask.isChecked())
         self.assertFalse(window.use_ctest.isChecked())
@@ -126,9 +126,10 @@ class AutocalibrationGuiTests(unittest.TestCase):
 
     def test_build_operation_produces_a_valid_config(self):
         from radioroc.application.autocalibration import AutocalibrationJobConfig
+        self.window.channel_select.set_channels([4, 5, 6])
         operation = self.window.operation()
         self.assertIsInstance(operation, AutocalibrationJobConfig)
-        self.assertEqual(operation.channels, [4, 5])
+        self.assertEqual(operation.channels, [4, 5, 6])
         self.assertTrue(operation.t1)
         self.assertEqual(operation.probe_dac_min, 0)
         self.assertEqual(operation.probe_dac_max, 20)
@@ -137,10 +138,11 @@ class AutocalibrationGuiTests(unittest.TestCase):
         self.assertEqual(operation.final_dac_step, 5)
         operation.validate()  # raises on invalid input; must not raise here.
 
-    def test_operation_rejects_invalid_channels(self):
-        self.window.channels.setText("4,")
-        with self.assertRaises(ValueError):
-            self.window.operation()
+    def test_preview_rejects_no_channels_selected(self):
+        self.window.channel_select.set_channels([])
+        result = self.window.preview()
+        self.assertIsNone(result)
+        self.assertIn("at least one channel is required", self.window.status.text())
 
     def test_preview_is_offline_and_shows_a_dry_run(self):
         trace_before = list(self.transport.trace)  # connect() already read the status word.

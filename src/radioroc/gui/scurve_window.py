@@ -29,6 +29,7 @@ from radioroc.application.scurve import ScurveJob, ScurveJobConfig
 from radioroc.application.scurve_worker import ScurveWorker
 from radioroc.data.scurve_reader import read_scurve_run
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
+from radioroc.gui.channel_select import ChannelSelectGrid
 from radioroc.gui.connection_panel import ConnectionPanel
 from radioroc.gui.hint_bar import HintBar
 from radioroc.transport.scurve_simulator import ScurveSimulationConfig
@@ -140,15 +141,15 @@ class ScurveWindow(QMainWindow):
             self.connection_label.setWordWrap(True)
             form.addRow("Connection", self.connection_label)
 
-        self.channels = QLineEdit("4")
+        self.channel_select = ChannelSelectGrid(initial_channels=(4,))
         self.dac_min = _integer(0, 1023, 0)
         self.dac_max = _integer(0, 1023, 1023)
         self.dac_step = _integer(1, 1023, 50)
         self.clock_index = _integer(0, 3, 3)
         self.discriminator = QComboBox()
         self.discriminator.addItems(["T1", "T2"])
-        for label, field in [("Channels (comma separated)", self.channels),
-                             ("First DAC code", self.dac_min),
+        form.addRow(self.channel_select)
+        for label, field in [("First DAC code", self.dac_min),
                              ("Last DAC code", self.dac_max),
                              ("DAC step", self.dac_step),
                              ("S-curve clock index (0..3)", self.clock_index),
@@ -249,7 +250,10 @@ class ScurveWindow(QMainWindow):
             "to calibrate the 50%-efficiency threshold. Hover a control to see what it does.")
         self.hint.attach(self.mode, "Simulation previews a synthetic curve with no "
                           "board attached; Hardware connection runs on the real ASIC/FPGA.")
-        self.hint.attach(self.channels, "Channels to scan and plot (comma separated).")
+        self.hint.attach(self.channel_select.toggle_button,
+                         "Channels to scan and plot. Click to choose which channels.")
+        self.hint.attach(self.channel_select.select_all_button, "Select every channel.")
+        self.hint.attach(self.channel_select.select_none_button, "Deselect every channel.")
         self.hint.attach(self.dac_min, "First threshold DAC code in the sweep.")
         self.hint.attach(self.dac_max, "Last threshold DAC code in the sweep.")
         self.hint.attach(self.dac_step, "Step size between sweep points.")
@@ -511,7 +515,7 @@ class ScurveWindow(QMainWindow):
             self.channel_config_apply_button.setEnabled(hardware_run_available)
 
     def operation(self):
-        channels = [int(value.strip()) for value in self.channels.text().split(",")]
+        channels = self.channel_select.selected_channels()
         output = self.output.text().strip()
         if not output:
             raise ValueError("choose a new run directory")

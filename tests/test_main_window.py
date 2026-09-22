@@ -244,7 +244,7 @@ class MainWindowTests(unittest.TestCase):
         tw.poll_connection_worker()
         tw.mode.setCurrentIndex(1)  # Hardware connection
         self.assertEqual(tw.mode.currentIndex(), 1)
-        tw.channels.setText("4")
+        tw.channel_select.set_channels([4])
         tw.dac_min.setValue(0)
         tw.dac_max.setValue(0)
         tw.dac_step.setValue(1)
@@ -283,7 +283,7 @@ class MainWindowTests(unittest.TestCase):
         sw.poll_connection_worker()
         sw.mode.setCurrentIndex(1)  # Hardware connection
         self.assertEqual(sw.mode.currentIndex(), 1)
-        sw.channels.setText("4")
+        sw.channel_select.set_channels([4])
         sw.dac_min.setValue(0)
         sw.dac_max.setValue(0)
         sw.dac_step.setValue(1)
