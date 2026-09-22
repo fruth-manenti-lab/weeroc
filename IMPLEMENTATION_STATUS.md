@@ -1,5 +1,42 @@
 # Implementation status
 
+## RADIOROC 34 — Live-visual-checked the GUI (Probes/Masks grids, Autocalibration tab), both items deferred since RADIOROC 31/32
+
+Short session (~30 min), operator present but not at the board; offline only.
+
+**Did the live visual check deferred twice before.** Checked `ps aux` first
+for an already-running `radioroc.gui` (none), then launched the real app on
+the shared display (`DISPLAY=:0`, `PYTHONPATH=src:. .conda-radioroc/bin/python
+-m radioroc.gui`) and screenshotted with `scrot`. Installed `xdotool`
+(`sudo apt-get install -y xdotool`, reversible, standard package) to drive
+tab/menu clicks since no window-control tool was present.
+
+Confirmed by screenshot (saved to session scratchpad, not committed):
+- **Probes/Masks tab (RADIOROC 32 channel-select grids)**: "Enable T1" /
+  "Enable T2" / "Enable TQ" grids of 64 channel buttons each render cleanly,
+  correctly aligned, teal styling matches the vendor look established in
+  RADIOROC 32. No layout or overlap issues.
+- **Calibration → Autocalibration tab (RADIOROC 31 `AutocalibrationWindow`)**:
+  all fields render correctly -- Connection, Channels, Discriminator, Mask
+  other channels, Enable Ctest, S-curve clock index, Count trigger level,
+  Optional gain override (Trigger preamp gain code dropdown), Preview / Run
+  autocalibration / Cancel / Open saved result buttons, "HARDWARE — no data
+  yet" plot placeholder, and the hardware-safety banner text. No layout
+  issues.
+- Main / Channel config / Threshold scan tabs also spot-checked in passing;
+  all rendered as expected, nothing broken.
+
+Closed the app cleanly afterward (`kill` on the launched PID, confirmed no
+`radioroc.gui` process remained). No hardware touched, no board connection
+attempted -- `Connect` was never clicked.
+
+**Both of the "explicitly still missing" visual-check items from
+RADIOROC 33/32/31's handoffs are now done.** Remaining backlog (T1/T2/TQ
+enable bits, F11-F13, `check_installed_package.py --gui` not in routine
+checks, `ProbesMasksPanel` hardware read-back, `AutocalibrationJob` never
+run against real hardware) is unchanged -- this session only closed out the
+visual-check item, nothing else.
+
 ## RADIOROC 33 — Documented local_artifacts in AGENTS.md; three real CI bugs found and fixed, confirmed green via gh
 
 Continuing on `feat/desktop-hardware-threshold`, operator present and directing.
