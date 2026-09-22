@@ -1,5 +1,70 @@
 # Implementation status
 
+## RADIOROC 35 — Solo overnight continuation: closed the GUI-default blind spot; started porting DAQ acquisition to core (F12)
+
+Operator went home and explicitly authorized continuing unattended, offline
+only -- no hardware access, per the standing per-action/present-operator
+rule in `AGENTS.md`, which this session declined to weaken even though
+asked to; see the conversation record for the reasoning given at the time.
+Flying solo: no one to check in with mid-session, so bias toward small,
+independently-verified, reversible steps over anything requiring judgment
+calls only the operator should make.
+
+**Closed backlog item "`check_installed_package.py --gui` isn't part of
+routine local checks."** Investigated what was actually missing rather than
+assuming: found that no test in `tests/` ever asserted the scan windows'
+*default* `Device / mode` selection -- every existing GUI test (e.g.
+`test_threshold_gui.py`) explicitly sets `window.mode.setCurrentIndex(...)`
+itself before use. The *only* place that ever asserted a specific default
+was the hardcoded `GUI_PROBE` string inside `check_installed_package.py`,
+which only runs in CI's separate wheel-verification stage -- confirming
+exactly why RADIOROC 33's stale-default bug had zero local signal. Added
+`tests/test_scan_window_defaults.py`, asserting `ThresholdWindow`/
+`HoldScanWindow`/`ScurveWindow` all default `mode` to `"Hardware
+connection"` (all three windows share the identical
+`self.mode.setCurrentIndex(1)` pattern, confirmed by grep -- not just
+Threshold). No wheel build needed; runs in the normal `unittest discover`
+path `check_development.py` already uses. Verified the test actually
+catches the regression it targets, not just that it passes: temporarily
+reverted `threshold_window.py`'s default to Simulation, confirmed the new
+test fails with exactly the `'Simulation' != 'Hardware connection'`
+mismatch RADIOROC 33 hit, then restored the source (`git checkout --`,
+confirmed clean diff after). Full suite re-run clean: 357/357 (354 + 3
+new), `tools/check_development.py` exits 0.
+
+**Started F12 (`DAQ internal/external acquisition trigger and hold... ADC
+primitives and batch CLI exist; orchestration must move to core`,
+`CROSS_PLATFORM_REBUILD_PLAN.md`).** Read `scripts/radioroc_acquire.py`
+(today's direct-primitive-calling CLI, no snapshot/restore-verification/
+cancellation) against `scripts/radioroc_hold_scan.py` +
+`src/radioroc/application/hold_scan.py` (the established, most recent
+`*Job` pattern) to settle the contract myself before delegating
+implementation, per `AGENTS.md`'s "lead owns... shared contracts...
+uncertain hardware reasoning" -- not left for the delegated agent to
+invent. Settled and specified: `AcquisitionConfig`/`AcquisitionResult` in
+`radioroc_client.py` alongside `HoldScanConfig`/`HoldScanResult`;
+`AcquisitionJobConfig`/`AcquisitionJob` in a new
+`src/radioroc/application/acquisition.py` mirroring `HoldScanJob` but
+writing one CSV row per `(batch, event, channel, hg, lg)` instead of one
+aggregated row per hold-sweep point (schema is load-bearing: it must match
+`scripts/plot_acquisition_spectrum.py`'s existing expectations exactly);
+deliberately widened the ASIC-register snapshot to `HoldScanJobConfig`'s
+full external-mode `registers()` breadth rather than the current script's
+much narrower ad-hoc snapshot (`[(65,12)] + [(channel,2) for channel]`) --
+a real safety improvement, not scope creep, since more complete
+snapshot/restore coverage is strictly safer; added `append: bool` support
+to the new `AcquisitionRunWriter` (`src/radioroc/data/acquisition.py`) to
+preserve the script's existing `--append` flag, which the plain
+exclusive-create `HoldRunWriter` pattern can't support as-is. Delegated the
+actual implementation (new job/writer/simulator files, the
+`radioroc_acquire.py` refactor to use the new job, and matching offline
+tests mirroring `tests/test_hold_scan_jobs.py`) to a background agent in an
+isolated git worktree, with the full contract above spelled out explicitly
+so it has no ambiguous design decisions left to make on its own. Result not
+yet reviewed or merged as of this entry -- **do not treat F12 as landed
+until a following entry says the diff was reviewed and
+`check_development.py` passed against it.**
+
 ## RADIOROC 34 — Live-visual-checked the GUI (Probes/Masks grids, Autocalibration tab), both items deferred since RADIOROC 31/32
 
 Short session (~30 min), operator present but not at the board; offline only.
