@@ -90,8 +90,14 @@ class MainWindowTests(unittest.TestCase):
         self.assertIs(worker, window.threshold_window.connection_worker)
         self.assertIs(worker, window.hold_scan_window.connection_worker)
         self.assertIs(worker, window.scurve_window.connection_worker)
+        self.assertIs(worker, window.autocalibration_window.connection_worker)
         self.assertIs(worker, window.channel_config_panel.connection_worker)
         self.assertIs(worker, window.main_panel.connection_worker)
+
+    def test_autocalibration_window_is_the_fourth_calibration_tab(self):
+        window = self._make_window()
+        self.assertIs(window.calibration_tabs.widget(3), window.autocalibration_window)
+        self.assertEqual(window.calibration_tabs.tabText(3), "Autocalibration")
 
     def test_main_panel_is_the_first_asic_config_tab(self):
         window = self._make_window()
@@ -147,11 +153,15 @@ class MainWindowTests(unittest.TestCase):
         # button gating would otherwise stay stuck at its just-constructed
         # "not connected" reading forever.
         window = self._make_window()
+        # threshold/hold-scan/S-curve each have their own Simulation/Hardware
+        # mode combo box; Autocalibration is hardware-only and has none, so
+        # it is exercised alongside the others but not mode-toggled.
         scan_windows = (window.threshold_window, window.hold_scan_window, window.scurve_window)
+        all_scan_windows = scan_windows + (window.autocalibration_window,)
         for scan_window in scan_windows:
             scan_window.mode.setCurrentIndex(1)  # Hardware connection
         _app().processEvents()
-        for scan_window in scan_windows:
+        for scan_window in all_scan_windows:
             self.assertFalse(scan_window.run_button.isEnabled())
 
         worker = window.connection_panel.connection_worker
@@ -165,7 +175,7 @@ class MainWindowTests(unittest.TestCase):
         # 100ms poll timer to happen to tick before the next assertion.
         window.connection_panel.poll()
 
-        for scan_window in scan_windows:
+        for scan_window in all_scan_windows:
             self.assertTrue(scan_window.run_button.isEnabled(),
                             f"{type(scan_window).__name__} run button should reflect the "
                             "now-connected shared worker")
