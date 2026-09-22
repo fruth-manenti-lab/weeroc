@@ -1,5 +1,98 @@
 # Implementation status
 
+## RADIOROC 32 — Channel selection redesigned to match the vendor app; survived a mid-session Pi restart (offline)
+
+Continuing on `feat/desktop-hardware-threshold`, operator present and directing.
+
+**The problem, raised by the operator:** every scan window (S-curve,
+Threshold, Hold-scan, Autocalibration) asked for channels as free text
+("4,5" or "0-15") -- easy to typo, no visual feedback, and disconnected
+from the Probes/Masks tab's own per-channel grid, which raised the
+reasonable question of why scanning didn't just reuse that. Investigation
+found `ProbesMasksPanel` is write-only with no hardware read-back (its
+grid always shows "all enabled" regardless of real ASIC state, a
+pre-existing gap already flagged in `CROSS_PLATFORM_REBUILD_PLAN.md`'s F04
+backlog), so tying scan channel selection to it directly wasn't viable
+without first building that read-back.
+
+**Found the real answer in the vendor's own compiled app instead.** The
+operator recalled a "slide popup" for choosing channels in the original
+Windows app. Reverse-engineered directly from the extracted PyInstaller
+`.pyc` files (`marshal.loads` + `dis`, the same technique used throughout
+this project's register-recovery work):
+- `scurves.pyc`/`thresholdscan.pyc`: a `pushButton_setignorescurves`
+  toggles `groupBox_setignorescurves` open/closed via
+  `Radioroc2.slide_groupbox` (`main.pyc`, outside the PYZ) -- a
+  `QPropertyAnimation` sliding the groupbox's height, not a `QDialog`/
+  `QMenu` popup. `pushButton_ignoreallscurves`/`pushButton_plotallscurves`
+  call `Radioroc2.set_all_checked`, which just finds every checkable
+  `QAbstractButton` child and sets it.
+- The channels themselves are `WCheckBox` instances (`uiroc/weedgets.pyc`)
+  whose `draw_checked` paints pen `QColor(2,65,103)` (`#024167`) and fill
+  `QColor(0,121,144)` (`#007990`) -- confirmed against the Probes/Masks
+  screenshot, which shows the same solid-blue-when-enabled buttons, not
+  checkbox tickmarks.
+- Also confirmed (separately, answering "does the vendor even do this
+  masking automatically" along the way): yes -- `scurves.pyc`/
+  `thresholdscan.pyc`'s own scan loop masks every channel, then unmasks
+  one at a time per DAC point, exactly matching this codebase's
+  `use_mask`/`prepare_trigger_masks` behavior. Not a lab invention; a
+  faithful port of real vendor behavior.
+
+**Built to match:** new `radioroc.gui.channel_select.ChannelSelectGrid`
+(`src/radioroc/gui/channel_select.py`) -- a collapsible 64-button grid
+(`#007990` fill / `#024167` border when selected), `Select all`/
+`Select none`, collapsed by default showing a one-line summary (e.g.
+`"Channels: 4-7,63"` -- `format_channels()` collapses consecutive runs,
+tested directly). The vendor's own 200ms slide animation was deliberately
+not reproduced: a plain show/hide toggle gives the same "collapsed by
+default, one click to edit" behavior without adding animation-timing
+surface to test.
+
+`ProbesMasksPanel`'s three mask grids were restyled to the same button
+look in place (`QCheckBox` -> checkable `QPushButton` with the shared
+stylesheet), keeping the exact `isChecked()`/`setChecked()` API so no
+other code or existing test needed to change -- confirmed by the six
+existing Probes/Masks tests passing unmodified.
+
+All four scan windows' free-text "Channels (comma separated)" field was
+replaced with `ChannelSelectGrid`, each `operation()` now reading
+`selected_channels()` instead of parsing text. A malformed or duplicate
+channel string is now structurally impossible (each channel is one
+toggle), so the three tests that used to cover `"4,"`/`"4,4"` now cover
+"no channels selected" instead -- the one way this input can still be
+invalid -- asserting against `validate_channels`'s actual "at least one
+channel is required" message rather than a guessed one.
+
+**Survived a mid-session interruption.** The scan-window wiring was
+delegated and the Raspberry Pi running this session restarted partway
+through (unrelated to this work) before the agent could report back. Its
+task showed as "stopped" with no completion record. Rather than assume
+anything was lost, checked the working tree directly: all nine intended
+files already had complete, correct changes sitting there uncommitted.
+Reviewed every diff against the original delegation spec line by line (not
+just the earlier session's memory of having sent it) and ran the full
+offline suite fresh before trusting any of it, exactly as if it were a
+newly-completed delegation.
+
+**Evidence:** 357/357 offline tests (3 new: one `test_operation_uses_
+selected_channels` per S-curve/Threshold/Hold-scan window, confirming
+`operation()` reflects the grid's selection end-to-end), plus 10 tests for
+`ChannelSelectGrid` itself (collapsed-by-default state, toggle/select-all/
+select-none, `set_channels`/`selected_channels`, the theme color, and
+`format_channels`'s range-collapsing). `tools/check_development.py` clean
+under a hard `timeout` with confirmed process exit, independently re-run
+after reviewing the full diff (not just trusting the delegated agent's
+now-unavailable final report).
+
+**Not done:** `ProbesMasksPanel` still has no hardware read-back (the
+pre-existing gap that ruled out directly reusing it for scan channel
+selection) -- still tracked as open in `CROSS_PLATFORM_REBUILD_PLAN.md`'s
+F04 backlog, unchanged by this session. No live visual/screenshot check of
+the new channel-select grids in any of the four windows -- worth doing
+alongside the still-outstanding Autocalibration-tab visual check from
+RADIOROC 31.
+
 ## RADIOROC 31 — Hover hints wired everywhere; F08 autocalibration job + CLI + GUI built end to end (offline)
 
 Continuing the same session as RADIOROC 30, per operator direction to keep

@@ -1,4 +1,4 @@
-# RADIOROC 32 — Live-visual-check the new Autocalibration tab, hardware-validate F08, or pick up T1/T2/TQ enable bits / F11-F13
+# RADIOROC 33 — Live-visual-check the channel-select grids and Autocalibration tab, hardware-validate F08, or pick up T1/T2/TQ enable bits / F11-F13
 
 Continuing on `feat/desktop-hardware-threshold`. Working tree clean once this
 handoff is committed. Read `AGENTS.md` first for delegation, recording, and
@@ -6,86 +6,74 @@ offline-testing discipline; the standing per-action hardware-authorization
 rule applies as always (a grant given in one conversation is for that
 conversation only — don't assume it forward to a new chat).
 
-## What RADIOROC 31 did
+## What RADIOROC 32 did
 
-See `IMPLEMENTATION_STATUS.md`'s RADIOROC 31 entry for full detail. Summary:
+See `IMPLEMENTATION_STATUS.md`'s RADIOROC 32 entry for full detail. Summary:
 
-1. **Hover hints now cover the whole app** — `MainWindow` and all six
-   ASIC-config panels, closing the gap from RADIOROC 29/30.
-2. **F08 (automatic threshold calibration) is fully built, end to end**:
-   - `AutocalibrationJob` (the real 4-step hardware sequence) — lead-built,
-     lead-owned register/hardware-safety reasoning.
-   - A CLI command, `scripts/radioroc_autocalibrate.py`.
-   - Wired into the shared `ConnectionWorker` (`run_autocalibration`/
-     `cancel_autocalibration`/`autocalibration_snapshot`), mirroring the
-     existing scurve/hold/threshold pattern — lead-built (shared, critical
-     file).
-   - A saved-run reader, `read_autocalibration_run`.
-   - A full GUI tab, `AutocalibrationWindow`, wired into `MainWindow` as a
-     fourth Calibration tab — delegated, reviewed diff-by-diff.
-   - **Deliberately hardware-only**: no standalone simulation mode/worker,
-     confirmed with the operator before proceeding on that basis. If
-     simulation-mode parity (matching S-curve/Threshold/Hold-scan's own
-     synthetic-curve preview) is wanted later, that is new, separately
-     scoped work — building a believable 4-step calibration-convergence
-     simulator, not a small addition.
-3. **Two real bugs caught and fixed during this build**, both before or via
-   a test that specifically caught them (not by later discovery): a
-   cleanup-clobbers-primary-error hazard in the restoration `finally` block,
-   and a missing `status = "preparing"` reset that would have silently
-   frozen the GUI's step-progress tracking on step 1 forever.
+1. **Channel selection redesigned across the whole app**, prompted by the
+   operator finding free-text channel entry confusing. Reverse-engineered
+   the vendor's own "set ignore channel" slide panel from its compiled
+   `.pyc` files (colors, mechanism, and confirmed along the way that the
+   vendor's own scan loop masks/unmasks channels exactly like this
+   codebase already does — not a lab invention).
+2. **New shared widget**, `radioroc.gui.channel_select.ChannelSelectGrid` —
+   a collapsible 64-button grid matching the vendor's real blue
+   (`#007990`/`#024167`), `Select all`/`Select none`, one-line summary when
+   collapsed.
+3. **`ProbesMasksPanel` restyled** to the same button look (drop-in swap,
+   same API, existing tests unchanged).
+4. **All four scan windows** (S-curve, Threshold, Hold-scan, Autocalibration)
+   now use `ChannelSelectGrid` instead of a "4,5"-style text field.
+5. **Survived a mid-session Pi restart** that killed a delegated agent
+   before it could report back — recovered by checking the working tree
+   directly rather than assuming anything was lost, reviewing the diff
+   against the original spec, and re-running the full suite fresh.
 
-344/344 offline tests total this session, `tools/check_development.py`
-clean under a hard `timeout` with confirmed process exit, re-run
-independently at every stage (not just trusting delegated reports).
+357/357 offline tests, `tools/check_development.py` clean under a hard
+`timeout` with confirmed process exit.
 
 ## What's explicitly still missing
 
-1. **No live visual/screenshot check of the new `AutocalibrationWindow` tab.**
-   Every other GUI change this session got one (it's how the window-sizing
-   bug earlier in this session was actually found); this one didn't,
-   because the operator appeared to be actively using the app on the shared
-   display when the GUI work landed, and touching it uninvited risked
-   disruption or an accidental hardware action. This tab has 13 form fields
-   grouped into four boxes (Trigger preamplifier, Energy measurement, three
-   DAC-range groups, common controls) — more than any existing tab — so a
-   screen-fit/scroll check is worth doing deliberately, not skipping twice.
-   **Do this early next session**: launch the app for real
+1. **No live visual/screenshot check of the new channel-select grids** in
+   any of the four scan windows, or of the `AutocalibrationWindow` tab from
+   RADIOROC 31 (that check was already deferred once — don't defer it
+   again). Do this first: launch the app for real
    (`PYTHONPATH=src:. .conda-radioroc/bin/python -m radioroc.gui` with
-   `DISPLAY` set, screenshot with `scrot`) and look at the Autocalibration
-   tab specifically.
-2. **Never run against real hardware.** Every test at every layer (job,
-   CLI, worker, GUI) uses a scripted fake transport. The main *new*
-   hardware-facing risk, since the sub-scans reuse `ScurveJob`'s
-   already-hardware-validated logic verbatim: the calibration-DAC
-   force/restore sequencing around the reference channel, and the dynamic
-   DAC-range computation between steps. A first real-hardware test should
-   focus narrowly on those two things (small channel set, conservative
-   ranges), not a full production calibration run.
-3. **T1/T2/TQ *enable* bits still unimplemented** (address 65, subaddress
+   `DISPLAY` set, screenshot with `scrot`) — but **check for signs of an
+   active operator session first** (e.g. `ps aux` for an already-running
+   `radioroc.gui` you didn't start) before launching or interacting with
+   one yourself, same discipline as RADIOROC 31.
+2. **`ProbesMasksPanel` still has no hardware read-back.** Its grid always
+   shows "all enabled" regardless of real ASIC state — this is *why*
+   scan-window channel selection couldn't just reuse it directly this
+   session, and remains open in `CROSS_PLATFORM_REBUILD_PLAN.md`'s F04
+   backlog. Worth revisiting once/if read-back is built.
+3. **`AutocalibrationJob` has never run against real hardware.** Every test
+   at every layer (job, CLI, worker, GUI) uses a scripted fake transport.
+   The main *new* hardware-facing risk: the calibration-DAC force/restore
+   sequencing around the reference channel, and the dynamic DAC-range
+   computation between steps. A first real-hardware test should focus
+   narrowly on those two things, not a full production calibration run.
+4. **T1/T2/TQ *enable* bits still unimplemented** (address 65, subaddress
    7) — carried over from RADIOROC 30, untouched since.
-4. **F11–F13 (DAQ trigger logic/acquisition orchestration/spectra GUI)
+5. **F11–F13 (DAQ trigger logic/acquisition orchestration/spectra GUI)
    are still entirely unstarted**, and all of M5 (Windows-comparison bench,
    performance, packaging/release) hasn't begun. See
    `CROSS_PLATFORM_REBUILD_PLAN.md` §3/§4 for the full list.
-5. **Hardware follow-up, generally:** none of the ASIC-config panels
-   (channel config, input DAC grid, mask grids, threshold calibration grid,
-   raw registers, "Main") have been validated against the real board yet —
-   only S-curve/Hold-scan/Threshold-scan have real hardware evidence.
 
 ## Suggested next task (pick with judgment, same as always)
 
-1. **Live-visual-check the Autocalibration tab** (item 1) — cheap, fast,
-   directly continues this session's own established discipline.
+1. **Live-visual-check the channel-select grids and Autocalibration tab**
+   (item 1) — cheap, fast, overdue twice now.
 2. **If the operator is present with the board**, do the narrow, deliberate
-   first hardware test described in item 2 — the calibration-DAC
+   first hardware test described in item 3 — the calibration-DAC
    force/restore sequencing and dynamic range computation are the specific
    things worth watching, not a full production run.
 3. **Or start F11–F13** if there's more appetite for a new vertical slice —
    larger and less scoped, expect real scoping time before delegating any
    of it.
 
-## Standing discipline (unchanged)
+## Standing discipline (unchanged, plus one addition)
 
 Offline tests and fake transports only unless the operator is present and
 explicitly authorizes a specific hardware action, per-action. Never run
@@ -94,14 +82,21 @@ after every meaningful change — wrap it in a hard `timeout` and confirm the
 process itself exits. A7585 (F15) is permanently out of scope. Delegate
 bounded, well-specified implementation/test work to subagents per
 `AGENTS.md`; keep shared contracts, uncertain hardware/register reasoning,
-and integration for the lead — this session delegated HintBar wiring and
-the `AutocalibrationWindow` GUI (both mechanical, well-specified once their
-contracts were fixed) but built `AutocalibrationJob` and the
-`ConnectionWorker` wiring directly (new hardware-orchestrating logic and a
-shared critical file), and reviewed every delegated diff line by line
-before trusting it. For any GUI change, do a live visual check when the
-display is actually free to use — check for signs of an active operator
-session (e.g. `ps aux` for an already-running `radioroc.gui` you didn't
-start) before launching or interacting with one yourself. Record what you
-did, what's next, and any real findings in `IMPLEMENTATION_STATUS.md` and a
-fresh `NEXT_SESSION.md` before you stop.
+and integration for the lead. Reverse-engineer vendor UI/behavior from the
+extracted `.pyc` files (`marshal.loads` + `dis`) when the question is "what
+does the real app actually do" rather than guessing — this session's
+channel-select colors/mechanism and the earlier confirmation that vendor
+scans mask channels the same way this codebase does both came from that
+technique, not inference.
+
+**New this session:** a delegated background agent can be interrupted by
+the environment itself (this session's Pi restarted mid-task). A "stopped"
+task with no completion record does not mean the work is lost — check the
+working tree directly first (`git status`/`git diff`) before assuming
+anything needs redoing, then review whatever is there against the original
+delegation spec exactly as carefully as a normal completion report, and
+re-run the full test suite fresh regardless of what the (now unavailable)
+agent might have already checked.
+
+Record what you did, what's next, and any real findings in
+`IMPLEMENTATION_STATUS.md` and a fresh `NEXT_SESSION.md` before you stop.
