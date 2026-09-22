@@ -1,6 +1,6 @@
 # Implementation status
 
-## RADIOROC 31 — Hover hints wired everywhere; F08 autocalibration job + CLI built end to end (offline)
+## RADIOROC 31 — Hover hints wired everywhere; F08 autocalibration job + CLI + GUI built end to end (offline)
 
 Continuing the same session as RADIOROC 30, per operator direction to keep
 going after the "Main" tab/window-sizing work landed.
@@ -145,13 +145,65 @@ any hardware access. 330/330 offline tests (17 legacy CLI help checks, up
 from 16), independently re-run clean under a hard `timeout` with confirmed
 process exit.
 
-**Not done:** no GUI panel/button for `AutocalibrationJob` yet -- CLI only.
-Never run against real hardware -- only the scripted fake-transport tests
-above. The T1/T2/TQ enable bits (address 65 subaddress 7) from RADIOROC 30
+**`AutocalibrationJob` is now wired into the shared `ConnectionWorker`**
+(lead-owned: `run_autocalibration`/`cancel_autocalibration`/
+`autocalibration_snapshot`, mirroring the existing `run_scurve`/
+`run_hold_scan`/`run_threshold` pattern exactly) **and has a full GUI window**,
+`AutocalibrationWindow` (delegated, reviewed diff-by-diff), wired into
+`MainWindow` as a fourth Calibration tab alongside Threshold/Hold/S-curve.
+
+Deliberately **hardware-only** by design, not an oversight: unlike the other
+three scan workflows, there is no standalone simulation mode/worker/mode
+combo box here. Building a believable synthetic 4-step calibration-
+convergence simulator (matching what `ScurveSimulationConfig`/
+`scurve_simulator.py` do for a single S-curve) was judged out of scope for
+this pass; autocalibration is a maintenance procedure only meaningful
+against real hardware anyway, unlike S-curve/threshold which get used for
+offline preview routinely. Confirmed with the operator before proceeding on
+this basis. If simulation-mode parity is wanted later, it is a separate,
+scoped follow-up, not a gap in what was attempted here.
+
+New `AutocalibrationWorkerSnapshot` (in `connection_worker.py`) tracks which
+of the four sub-scans is currently active, inferred from the fixed step
+order and each sub-scan's own "preparing" state event rather than threading
+step identity through `JobEvent`; its `rows` buffer resets on every step
+change, since the four sub-scans are separate CSVs that shouldn't be
+plotted as one concatenated series. New `read_autocalibration_run`
+(`src/radioroc/data/autocalibration_reader.py`) composes the existing
+`read_scurve_run` for each of the four named sub-run directories, for the
+window's "Open saved result" feature.
+
+**A second real bug caught via the new worker-level test** (not by
+inspection this time): `AutocalibrationJob._run_sub_scan` never set its
+`ScurveResult`'s initial `status` to `"preparing"` before handing it to
+`ScurveJob`'s internals (`ScurveJob.run()` always does this itself;
+composing `_run_locked` directly, as this job does, skipped it silently).
+Every sub-scan's first state event therefore carried the dataclass default
+(`"completed"`) instead of `"preparing"` -- the exact status the new
+step-tracking logic above watches for -- so it would have silently stayed
+on `"step1_zero"` forever, undetected by the job-level tests (which only
+check *final* result status, insensitive to this). Fixed in
+`autocalibration.py`; the worker-level test that caught it is now a
+permanent regression guard.
+
+**Evidence:** 344/344 offline tests total this session (12 new across the
+worker wiring, reader, and GUI window), `tools/check_development.py` clean
+under a hard `timeout` with confirmed process exit, independently re-run
+(not just trusting the delegated report) after reviewing the full diff.
+
+**Not done:** never run against real hardware -- only scripted
+fake-transport tests throughout every layer (job, CLI, worker, GUI). No
+live visual/screenshot check of the new GUI tab this time (unlike the
+window-sizing fix earlier this session) -- the operator appeared to be
+actively using the app on the shared display when this was ready, so it was
+left untouched rather than risking disruption or an accidental hardware
+action; worth a live check next session, especially given this tab has more
+form fields (13) than any existing ASIC-config/scan-window tab and could in
+principle have its own scroll/layout surprises the offscreen tests can't
+see. The T1/T2/TQ enable bits (address 65 subaddress 7) from RADIOROC 30
 are still unimplemented for the same reason as before. `HintBar`'s wording
-(this session's own text, not verbatim vendor tooltips beyond the three
-threshold one-liners already in `main_panel.py`) hasn't been read over by
-the operator.
+across this whole session's work (own text, not verbatim vendor tooltips
+beyond a few specific one-liners) hasn't been read over by the operator.
 
 ## RADIOROC 30 — Hold-scan diagnosis confirmed; A7585 descoped; "Main" (F02) register map recovered (offline)
 
