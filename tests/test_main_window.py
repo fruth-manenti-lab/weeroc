@@ -91,6 +91,7 @@ class MainWindowTests(unittest.TestCase):
         self.assertIs(worker, window.hold_scan_window.connection_worker)
         self.assertIs(worker, window.scurve_window.connection_worker)
         self.assertIs(worker, window.autocalibration_window.connection_worker)
+        self.assertIs(worker, window.acquisition_window.connection_worker)
         self.assertIs(worker, window.channel_config_panel.connection_worker)
         self.assertIs(worker, window.main_panel.connection_worker)
 
@@ -98,6 +99,11 @@ class MainWindowTests(unittest.TestCase):
         window = self._make_window()
         self.assertIs(window.calibration_tabs.widget(3), window.autocalibration_window)
         self.assertEqual(window.calibration_tabs.tabText(3), "Autocalibration")
+
+    def test_acquisition_window_is_the_fifth_calibration_tab(self):
+        window = self._make_window()
+        self.assertIs(window.calibration_tabs.widget(4), window.acquisition_window)
+        self.assertEqual(window.calibration_tabs.tabText(4), "Acquisition")
 
     def test_main_panel_is_the_first_asic_config_tab(self):
         window = self._make_window()
@@ -111,14 +117,14 @@ class MainWindowTests(unittest.TestCase):
     def test_scan_windows_have_no_embedded_connection_ui_when_shared(self):
         window = self._make_window()
         for scan_window in (window.threshold_window, window.hold_scan_window,
-                           window.scurve_window):
+                           window.scurve_window, window.acquisition_window):
             self.assertIsNone(scan_window._connection_panel)
             self.assertIsNone(scan_window._channel_config_panel)
 
     def test_scan_windows_default_to_hardware_mode(self):
         window = self._make_window()
         for scan_window in (window.threshold_window, window.hold_scan_window,
-                            window.scurve_window):
+                            window.scurve_window, window.acquisition_window):
             self.assertEqual(scan_window.mode.currentIndex(), 1)
             self.assertEqual(scan_window.mode.currentText(), "Hardware connection")
 
@@ -153,10 +159,12 @@ class MainWindowTests(unittest.TestCase):
         # button gating would otherwise stay stuck at its just-constructed
         # "not connected" reading forever.
         window = self._make_window()
-        # threshold/hold-scan/S-curve each have their own Simulation/Hardware
-        # mode combo box; Autocalibration is hardware-only and has none, so
-        # it is exercised alongside the others but not mode-toggled.
-        scan_windows = (window.threshold_window, window.hold_scan_window, window.scurve_window)
+        # threshold/hold-scan/S-curve/acquisition each have their own
+        # Simulation/Hardware mode combo box; Autocalibration is
+        # hardware-only and has none, so it is exercised alongside the
+        # others but not mode-toggled.
+        scan_windows = (window.threshold_window, window.hold_scan_window, window.scurve_window,
+                        window.acquisition_window)
         all_scan_windows = scan_windows + (window.autocalibration_window,)
         for scan_window in scan_windows:
             scan_window.mode.setCurrentIndex(1)  # Hardware connection
@@ -203,7 +211,8 @@ class MainWindowTests(unittest.TestCase):
         self.assertEqual(worker.snapshot().state, "connected")
         window.connection_panel.poll()
 
-        scan_windows = (window.threshold_window, window.hold_scan_window, window.scurve_window)
+        scan_windows = (window.threshold_window, window.hold_scan_window, window.scurve_window,
+                       window.acquisition_window)
         for scan_window in scan_windows:
             scan_window.poll_connection_worker()
             self.assertTrue(scan_window.mode.isEnabled(),
