@@ -1,5 +1,45 @@
 # Implementation status
 
+## RADIOROC 38 (continued) — Landed and live-visual-checked F13's spectra/histogram rendering
+
+Same conversation, after the visual check above. Operator asked to
+continue with all three open threads at once: F13 spectra rendering,
+real-hardware F12 validation, and the T1/T2/TQ enable-bit investigation.
+Delegated the spectra work (offline, no operator attention needed while it
+built) while turning to hardware-test planning for the other two.
+
+**Landed spectra/histogram rendering in `AcquisitionWindow`.** A
+matplotlib histogram of raw per-channel HG/LG values, per-channel
+visibility checkboxes scoped to the run's actual channels, HG/LG toggle,
+bins/log-scale controls, a display-only clear, live updates during a run,
+and vendor-file import via the already-landed `read_vendor_acquisition_file`
+for direct comparison against a real vendor-collected file. Live updates
+deliberately re-read the run's own `events.csv` from disk on a throttled
+~1/second timer rather than adding a second in-memory raw-sample buffer
+alongside the already-established bounded summary mailbox -- consistent
+with "the job writes every sample to disk" already being this codebase's
+design. Reviewed line-by-line (throttling logic, concurrent-writer
+tolerance in the disk re-read, segment-scoped rendering for saved/vendor
+data), independently verified 447/447 under `.conda-radioroc` before and
+after merging.
+
+**Live-visual-checked with the operator actually watching**, not just
+offline: launched the app fresh, ran a real 10-batch simulation, watched
+the histogram populate with a real Gaussian-shaped ch4 HG distribution,
+confirmed the per-channel checkbox and legend both appeared correctly, and
+toggled Log Y (hint text and control wiring confirmed correct; the visual
+difference between log/linear was subtle for this run's small 0-25 count
+range, but the delegated test suite already asserts `axes.get_yscale()`
+actually changes, which is the load-bearing check, not the eyeball one).
+No layout issues found.
+
+**F13's GUI is now functionally complete for its originally scoped slice**
+(connect/configure/run/cancel/reopen, live batch summary, spectra
+rendering, vendor-file comparison). Not yet done: any real-hardware
+exercise of `AcquisitionWindow`/`AcquisitionJob` (still offline/simulation
+only), and the broader F13 items further out of scope from the start
+(separate scatter/timeline event view, vendor-format export).
+
 ## RADIOROC 38 — Live-visual-checked the new `AcquisitionWindow`, operator back in the lab
 
 New conversation, operator physically back at the board. Found an older
