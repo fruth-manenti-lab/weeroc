@@ -1,5 +1,34 @@
 # Implementation status
 
+## RADIOROC 38 — Live-visual-checked the new `AcquisitionWindow`, operator back in the lab
+
+New conversation, operator physically back at the board. Found an older
+`radioroc.gui` process already running (started before RADIOROC 37's
+`AcquisitionWindow` merge) -- confirmed with the operator it wasn't in use,
+closed it, and relaunched fresh from the current `feat/daq-results-gui`
+head so the new "Acquisition" tab would actually be present.
+
+**Visually confirmed the `AcquisitionWindow` skeleton for the first time**
+(built and reviewed offline/headless in RADIOROC 37, never seen on a real
+display until now): the tab appears correctly alongside Threshold scan/
+Hold scan/S-curve/Autocalibration; the Hardware-mode banner, form fields
+(Trigger channel, Threshold DAC showing "Keep current" for the sentinel
+value, Hold/conversion delay, Acquisitions per batch, Batches, output
+directory), and the "Deterministic synthetic ADC response" group
+(correctly greyed out outside Simulation mode) all render cleanly. Switched
+to Simulation, clicked Preview (dry-run JSON showed `threshold_dac: null`,
+confirming the 0-sentinel maps to `None` as designed), then ran a full
+10-batch simulation to completion: the live batch-summary panel showed
+real per-channel stats (`ch4_hg: n=50 min=717.0 max=902.8 mean=799.8`),
+progress bar reached 100%, and the final status/details JSON matched the
+code exactly (`status: completed`, `cleanup: restored`). No layout issues
+found. Closed the app cleanly afterward; no hardware touched, no board
+connection attempted.
+
+This closes out the "get a screenshot check on this before iterating
+further" item RADIOROC 37's handoff flagged as the most important
+follow-up for F13.
+
 ## RADIOROC 37 — M3 milestone squash-merged to `main` via PR #1; started F13's `AcquisitionWindow` skeleton on a new branch
 
 Same conversation as RADIOROC 36, continuing after the operator returned.
