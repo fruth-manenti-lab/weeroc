@@ -124,6 +124,11 @@ class MainWindow(QMainWindow):
         self.threshold_calibration_panel.connection_worker = worker
         self.probes_masks_panel.connection_worker = worker
         self.raw_register_panel.connection_worker = worker
+        # The worker is already running at this point (unlike a standalone
+        # scan window, which stays lazy until the user does something), so
+        # there is no reason to also make the user click Refresh once before
+        # a USB board candidate shows up at all.
+        self.connection_panel.refresh()
 
         # -- Calibration: the three scan workflows as sub-tabs ---------------
         calibration_page = QWidget()
