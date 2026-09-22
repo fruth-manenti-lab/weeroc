@@ -1,6 +1,6 @@
 # Implementation status
 
-## RADIOROC 33 — Documented local_artifacts in AGENTS.md; found and fixed a real, currently-broken CI step
+## RADIOROC 33 — Documented local_artifacts in AGENTS.md; three real CI bugs found and fixed, confirmed green via gh
 
 Continuing on `feat/desktop-hardware-threshold`, operator present and directing.
 
@@ -111,12 +111,50 @@ caught a missing-extra-only failure no matter how many times it ran
 correctly. A genuine repro needs a venv built the same way CI builds one,
 checked to confirm the thing that's supposed to be absent actually is.
 
+**Third fix, and final confirmation.** After the `format_channels` fix
+above landed, the operator checked the Actions UI again directly: macOS
+jobs (both Python versions) now passed cleanly, confirming that fix was
+real -- but both Ubuntu jobs still failed, with a completely different,
+unrelated error: `ImportError: libEGL.so.1: cannot open shared object
+file`, raised just importing `PySide6.QtWidgets`. Not a bug in this repo
+at all -- a well-known PySide6/Qt6-on-headless-Linux-CI issue (Qt6
+dynamically loads EGL/OpenGL libraries during `QtGui` initialization
+regardless of which QPA platform plugin is selected, and GitHub's
+`ubuntu-24.04` runner image doesn't ship them; `macos-14`'s image
+apparently does, or Qt's macOS backend doesn't need them, which is why
+only Linux hit this). Fixed by adding a Linux-only step to
+`.github/workflows/python.yml` installing `libegl1` (confirmed via
+`dpkg -L` to be the exact package providing `libEGL.so.1`) plus the
+commonly-needed xkbcommon/xcb/dbus runtime libraries Qt6 typically needs
+even under "offscreen", to avoid a fourth round-trip discovering one more
+missing `.so`. Package names verified against Debian's own package pool
+(this environment can't run an actual x86 `ubuntu-24.04` runner locally),
+since Ubuntu tracks these particular base libraries closely.
+
+**This session also installed and authenticated the `gh` CLI** (`sudo apt
+install gh`, then the operator ran `gh auth login` interactively) --
+`gh` wasn't available for any of the earlier checks above, which is why
+each one relied on the operator manually reading the Actions UI and
+pasting output back. With `gh` now authenticated, `gh run list --branch
+feat/desktop-hardware-threshold` / `gh run view <id>` directly confirmed
+the fix: **all four matrix jobs (`ubuntu-24.04`/`macos-14` x
+`3.11`/`3.13`) passed** on the push containing this fix
+(`7e69776`) -- an actual, direct confirmation this time, not the
+inference-based claim made (and shown wrong) twice earlier in this same
+CI saga. `gh` should remove the need for that manual back-and-forth in
+future sessions.
+
 **Not done:** the same "regular test suite never exercises this script"
 gap could hide a similar issue again in the future for any GUI-default
 change -- worth considering whether `check_installed_package.py --gui`
 should run as part of routine `tools/check_development.py` checks (it
 currently only runs in CI's separate wheel-verification stage) so this
-class of bug surfaces locally next time, not just on push.
+class of bug surfaces locally next time, not just on push. The CI run's
+own annotations flagged `actions/checkout@v4`/`actions/setup-python@v5`
+as targeting a deprecated Node.js version (GitHub is handling this
+automatically for now, per the linked changelog) -- not urgent, but worth
+bumping to `@v5`/latest at some point rather than waiting for it to become
+a hard failure.
 
 ## RADIOROC 32 — Channel selection redesigned to match the vendor app; survived a mid-session Pi restart (offline)
 
