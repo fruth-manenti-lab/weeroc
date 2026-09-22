@@ -1,5 +1,85 @@
 # Implementation status
 
+## RADIOROC 36 — Landed F13 Phase A: acquisition-run reader and vendor-file reader, one more real bug found in review
+
+New conversation continuing directly from RADIOROC 35's handoff (`NEXT_SESSION.md`
+named it "RADIOROC 37" at the time, one ahead of this session's own number --
+this heading uses 36, the number actually next in sequence for
+`IMPLEMENTATION_STATUS.md`; see AGENTS.md's "increment the number at each
+handoff" -- the two counters track slightly different things and aren't
+expected to match exactly). Operator asked whether context was still good,
+to continue, and to think about when merging `feat/desktop-hardware-threshold`
+into `main` would be appropriate.
+
+**On the merge question**: `main` hasn't been touched since 2026-06-29,
+nearly three months, while this branch has diverged by 88 commits and
++28k/-978 lines. In practice this branch, not `main`, is the one actually
+relied on for real lab work (RADIOROC 35's operator-run hardware test used
+this branch's code). Recommended targeting the plan's own M3 gate ("a
+useful desktop application through one complete workflow") rather than
+waiting for the much-further-out M4/M5, but flagged that M3 itself isn't
+fully met yet either -- checked and confirmed the "one shell, one
+connection" architecture M3 calls for was never actually built (recorded
+as a known gap in an earlier session): `ThresholdWindow`/`HoldScanWindow`/
+`ScurveWindow`/`AutocalibrationWindow` each still own an independent
+connection panel instead of sharing one. No merge decision made -- this
+was analysis and a recommendation, not an action; the operator hasn't
+weighed in on what `main` needs to represent (other consumers? a release
+process?) which would change the calculus.
+
+**Landed F13 Phase A**, per RADIOROC 35's handoff: `src/radioroc/data/
+acquisition_reader.py` (`read_acquisition_run`, adapting `threshold_
+reader.py`'s defensive manifest-vs-CSV cross-validation to acquisition's
+tall/long, variable-length schema and `AcquisitionRunWriter`'s append-mode
+multi-segment subtlety) and `src/radioroc/data/vendor_acquisition.py`
+(`read_vendor_acquisition_file`, reading a real vendor-collected
+`readable_adc_acq.txt` using the format recovered from `adc.pyc` in
+RADIOROC 35, normalized into the same `channel`/`hg`/`lg` shape as our own
+reader so a vendor file and one of our own runs are directly diffable).
+Reader only for the vendor format -- no writer, no evidenced consumer for
+one.
+
+Delegated with a fully specified contract (same process as F12), then
+reviewed line-by-line rather than trusting the agent's own report. **Found
+and fixed one more real bug**, the same way F12's review did:
+`_read_rows`' original implementation raised inside row parsing on any CSV
+row whose `channel` wasn't in the *current* manifest's declared channel
+set. That's correct for genuine corruption, but wrong for an append-mode
+run: nothing prevents a later `--append` invocation from using a different
+`--channels` value than an earlier one, and the row-parser's `csv.Error`
+handling treats any raised row as "the tail is truncated," discarding
+every row after it -- including the *current*, later segment's genuinely
+valid data, whenever an earlier segment's now-irrelevant channel set
+happened to appear first in the file. Reproduced the data loss empirically
+before fixing (a two-segment CSV with channel 4 then channel 5, current
+manifest declaring channels `[5]`, returned zero rows and a misleading
+"CSV tail" warning instead of the one genuinely valid current-segment row).
+Fixed by moving the channel check out of the hard-fail parser into a
+warn-and-downgrade check scoped to `current_segment_rows` only, mirroring
+the existing batch-completeness check's own pattern; verified the fix
+against the repro and confirmed genuine corruption (a non-numeric field)
+still truncates correctly; added two regression tests documenting exactly
+why (the old test asserting the previous, wrong behavior was rewritten,
+not just patched). Also strengthened one test that only checked the vendor
+header constant against a tautological re-derivation of its own formula
+(would pass even if the formula itself were wrong) with a literal-value
+spot-check.
+
+**Caught a real verification-environment gap in the agent's own report**:
+it ran `check_development.py` under a `.venv-dev` it created itself, which
+lacked PySide6/matplotlib, silently skipping 128 GUI tests and reporting
+"OK (skipped=128)" as if that were full coverage. Independently re-ran
+everything under `.conda-radioroc` (the project's actual GUI-capable
+environment) both in the reviewed worktree and again after merging:
+416/416, no skips, `check_development.py` exit 0 both times.
+
+**F13's implementation is not complete** -- this is "Phase A" only (the
+data-reading foundation), not the GUI. The GUI itself (spectra display,
+HG/LG channel and event views, selection/visibility/clear, bins/scales,
+live updates) is still unstarted and remains a good candidate for the
+operator to be able to glance at a screenshot for, rather than being
+designed fully blind in another unattended session.
+
 ## RADIOROC 35 — Solo overnight continuation: closed the GUI-default blind spot; started porting DAQ acquisition to core (F12)
 
 Operator went home and explicitly authorized continuing unattended, offline
