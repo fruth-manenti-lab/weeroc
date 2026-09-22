@@ -102,6 +102,67 @@ workflow in this codebase has, with a wider (safer) register footprint than
 before. Not yet run against real hardware -- offline/simulation only, same
 as every other job type before its first hardware validation.
 
+**Recovered the real vendor acquisition file format from `adc.pyc`
+(`local_artifacts/extracted/.../PYZ-00.pyz_extracted/adc.pyc`) as
+groundwork for F13** ("DAQ results... save/load/export including vendor
+acquisition files"), per `AGENTS.md`'s standing instruction to check the
+vendor's actual compiled behavior before guessing. This module wasn't
+previously identified in `generated_notes/` -- a dedicated `adc.pyc` (plus
+sibling `holdscan.pyc`/`scurves.pyc`/`thresholdscan.pyc`/`tdc.pyc`) sits
+alongside `radioroc2UI.pyc` in the vendor PYZ archive; grepping the whole
+extraction for acquisition/file-format strings only surfaces something
+useful once you think to check the per-feature modules too, not just the
+main UI module RADIOROC 31-34's register recoveries mostly came from.
+Disassembled `write_out_file`/`get_acq_setup`/`load_adc_data`/`get_hg_lg`
+directly (`marshal.loads`+`dis`, real bytecode, not inferred from strings)
+and reconstructed, with high confidence:
+- The vendor GUI writes **two** files per acquisition run, not one:
+  `raw_adc_acq.txt` (every received byte, one per line, formatted as hex --
+  not literally binary despite the extension) and `readable_adc_acq.txt`
+  (the human/analysis-facing one).
+- `readable_adc_acq.txt` is a **wide** format, structurally different from
+  the `batch,event,channel,hg,lg` **tall/long** schema F12 just landed
+  with: line 1 is the file's own path; lines 2-3 are a prose setup summary
+  (`get_acq_setup` -- trigger type/T1/T2 text, window width, nb triggers,
+  Nb acq, Reset_n manual/auto, Acquisition trigger external/internal, Hold
+  external/internal [+ delay]); line 4 is the header row
+  `#Acq,HG0,LG0,HG1,LG1,...,HG63,LG63` (64 channels, always all of them,
+  interleaved HG then LG per channel); then one row per **event/acquisition
+  index** (1-based), each with 129 columns (`#Acq` index + 128 HG/LG
+  values). `load_adc_data` dispatches on whether the filename *contains*
+  the substring `"raw"` or `"readable"` -- a real vendor quirk, not a
+  format marker to imitate, just something to know if ever reading a
+  vendor-named file directly.
+- This does **not** mean F12's `events.csv` schema was a mistake -- it's
+  intentionally different (normalized, works for any channel subset, matches
+  the already-existing `plot_acquisition_spectrum.py`) and is not being
+  revisited. The vendor wide format only matters for **reading** a
+  vendor-collected file for comparison (the exact use M5's
+  "Windows-comparison bench" and F13's own validation column -- "Recorded
+  data, known ADC vectors, signal runs" -- call for), not for how this
+  codebase writes its own data. Writing our *own* data out in the vendor's
+  wide format was considered and deliberately left out of scope: F13 lists
+  vendor-file support as one bullet among several (selection/visibility/
+  clear, bins/scales, live updates, save/load/export), and there's no
+  identified consumer for a vendor-formatted export today -- reading a real
+  Windows-app-collected file for comparison is the evidenced, valuable
+  direction; writing one is speculative until something needs to consume it.
+
+**F13 was deliberately not started beyond this research.** After landing
+and thoroughly reviewing F12 (a full job-pattern port, its own review pass,
+and a real bug fix), a second large implementation thread (a proper
+`SavedAcquisitionRun` reader adapting `data/threshold_reader.py`'s
+defensive manifest-vs-CSV cross-validation pattern to acquisition's
+different, non-fixed-grid schema, plus a vendor-format parser, plus
+eventually the GUI itself) is real, valuable, well-bounded future work --
+but starting it fresh this deep into an unattended session, after already
+spending real review attention on F12, risked exactly the kind of drift
+`AGENTS.md`'s "keep each task bounded" discipline exists to prevent. This
+research was worth finishing and recording either way -- it converts F13's
+riskiest unknown (does vendor-file interop mean a real, specific format, or
+guesswork?) into settled, evidenced fact, so whoever picks up F13 next
+does not have to re-derive it.
+
 ## RADIOROC 34 — Live-visual-checked the GUI (Probes/Masks grids, Autocalibration tab), both items deferred since RADIOROC 31/32
 
 Short session (~30 min), operator present but not at the board; offline only.
