@@ -1,9 +1,20 @@
 # Implementation status
 
-## RADIOROC 31 (in progress) — F08 autocalibration: crossing-analysis extracted, job design scoped (offline)
+## RADIOROC 31 — Hover hints wired everywhere; F08 autocalibration job built end to end (offline)
 
 Continuing the same session as RADIOROC 30, per operator direction to keep
 going after the "Main" tab/window-sizing work landed.
+
+**Hover hints (RADIOROC 29/30's other open item) are done.** Delegated,
+reviewed diff-by-diff against the actual panel files (not just the report):
+`MainWindow` and all six ASIC-config panels (`ConnectionPanel`, `MainPanel`,
+`ChannelConfigPanel`, `InputDacGridPanel`, `ThresholdCalibrationPanel`,
+`ProbesMasksPanel`, `RawRegisterPanel`) now report hover text into a shared
+`HintBar` over `MainWindow.statusBar()`, the same way the three scan windows
+already did. Each panel gained an `attach_hints(hint_bar)` method (one shared
+hint per 64-cell grid, not 64 distinct strings); `RawRegisterPanel.table` was
+correctly skipped (not hoverable per-cell). 321/321 offline tests (16 new)
+after this piece, independently re-run clean.
 
 **Extracted the pure half of F08 (automatic threshold calibration).**
 `scripts/radioroc_standard_scurves.py`'s `RadiorocOps.autocalibrate_scurve`/
@@ -34,14 +45,16 @@ path) and directly unit-tested (`tests/test_radioroc_core.py`'s
 `None`, channel absent -> `None`, exact-match short-circuit, non-default
 `target_percent`).
 
-**Scoped, not yet implemented: the orchestration half** (the actual
-`AutocalibrationJob` that runs the 4 S-curve sub-scans in sequence against
-real hardware and applies the corrected trim DACs). This is a materially
-bigger and more hardware-sensitive piece than the extraction above, so it
-is being handed off as its own bounded task rather than rushed within this
-session - see the design below and `NEXT_SESSION.md`.
+**The orchestration half is now built too** (operator confirmed continuing
+rather than deferring it). New `AutocalibrationJob`/`AutocalibrationJobConfig`
+/`AutocalibrationResult` in `src/radioroc/application/autocalibration.py`
+implement the full 4-step sequence against real hardware, per the settled
+design below. Built and tested directly by the lead (not delegated): this is
+exactly the "uncertain hardware reasoning" work `AGENTS.md` asks the lead to
+own, given the non-reentrant session-lock composition and the safety-critical
+restoration requirement (see below).
 
-**Design settled (the shared contract a future implementation must follow):**
+**Design (what was actually built):**
 - `AutocalibrationJobConfig` mirrors `ScurveJobConfig` (`src/radioroc/
   application/scurve.py`): `channels`, `t1`, `use_mask`, `use_ctest`,
   `clock_index`, `trigger_level`, `out_dir`, `config_path`,
@@ -83,21 +96,45 @@ session - see the design below and `NEXT_SESSION.md`.
   persistent output (like `set_calibration_dac_for_channel`'s existing
   contract) and are not restored.
 
-**Why this wasn't implemented this session:** it is a genuinely new
-hardware-orchestrating job type (composing four sequential sub-scans under
-one lock, with its own cancellation/restoration/manifest semantics) - closer
-in size and hardware-safety risk to the original `ScurveJob`/`ThresholdJob`
-migrations (each its own dedicated effort per the delivery history) than to
-a bounded, mechanical extension. Implementing it correctly needs the same
-careful, uninterrupted attention those got, not a tail-end addition to an
-already large session. The design above is settled and ready to build from
-directly; `NEXT_SESSION.md` carries it forward as the next bounded task.
+**A real bug was found and fixed while writing the restoration path.** The
+first draft restored the reference channel's calibration DAC directly inside
+a bare `finally:` block with no exception guard of its own. Since a `return`
+statement's value (or a propagating exception) from the `try` block is
+silently replaced by anything the `finally` block itself raises, an
+unrelated restore-write failure there would have masked the *actual* scan
+failure that triggered the restore in the first place -- exactly the
+cleanup-clobbers-primary-error class of bug `ScurveJob`'s own `cleanup_call`
+helper exists to prevent. Fixed by wrapping the restore (and its optional
+verification read) in their own try/except, recording any failure as a
+warning on the result instead of letting it propagate. Caught in self-review
+before any test ran, not by a failing test -- worth remembering that a
+"looks right" `try/finally` restoration pattern still needs this check.
 
-**Evidence:** the crossing-estimation extraction alone: offline tests pass
-(1 new test, 5 assertions covering the cases above), `radioroc_analysis.py`
-and the updated test file both compile clean. Full-suite re-run deferred
-until the concurrently-running HintBar work (below) lands, to avoid
-conflating two in-flight change sets' test results.
+**Evidence:** new `tests/test_autocalibration_jobs.py` (6 tests, reusing
+`test_scurve_jobs.ScurveTransport` -- the same scripted fake ASIC/FPGA
+transport `ScurveJob` itself is tested against, not a lighter-weight
+double) drives the real `AutocalibrationJob` through a complete, worked
+4-step sequence with hand-computed expected values at every stage: exact
+`lsb_ratio`/crossings/`mean_position`, exact before/after calibration DAC
+values for two channels (including the reference channel itself, which is
+also one of the calibrated channels -- its *final* value is its own
+correction, not its temporarily-restored probe value, a distinction the
+first draft of this test got backwards before being corrected), reference-
+channel restoration on a mid-sequence cancellation, `verify_restoration`,
+dry-run touching nothing, session-lock rejection of a concurrent job (this
+end-to-end run is what actually proves the non-reentrant lock composition
+works, not just that it compiles), and invalid-config rejection before any
+hardware/file access. 327/327 offline tests total this session (6 new here),
+independently re-run clean under a hard `timeout` with confirmed process
+exit.
+
+**Not done:** `AutocalibrationJob` has no CLI or GUI entry point yet (no
+`scripts/radioroc_autocalibrate.py`, no GUI button/panel) and has never run
+against real hardware -- only the scripted fake-transport tests above. The
+T1/T2/TQ enable bits (address 65 subaddress 7) from RADIOROC 30 are still
+unimplemented for the same reason as before. `HintBar`'s wording (this
+session's own text, not verbatim vendor tooltips beyond the three threshold
+one-liners already in `main_panel.py`) hasn't been read over by the operator.
 
 ## RADIOROC 30 — Hold-scan diagnosis confirmed; A7585 descoped; "Main" (F02) register map recovered (offline)
 
