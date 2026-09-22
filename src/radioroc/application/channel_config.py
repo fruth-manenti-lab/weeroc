@@ -58,6 +58,37 @@ class ChannelConfigOperation:
       for a 64-channel grid UI.
     - `t2_calibration_dac_values` (`dict[int, int] | None`): Same as
       `t1_calibration_dac_values`, for the T2 trim DAC.
+    - `trigger_preamp_gain_values` (`dict[int, int] | None`): Per-channel
+      trigger-preamplifier (paT) gain codes (channel -> 0..63).
+    - `trigger_preamp_compensation_values` (`dict[int, int] | None`):
+      Per-channel trigger-preamplifier feedback-compensation codes
+      (channel -> 0..3).
+    - `high_gain_values` (`dict[int, int] | None`): Per-channel high-gain
+      (HG) energy-preamplifier gain codes (channel -> 0..15).
+    - `low_gain_values` (`dict[int, int] | None`): Per-channel low-gain (LG)
+      energy-preamplifier gain codes (channel -> 0..15).
+    - `high_gain_shaping_values` (`dict[int, int] | None`): Per-channel
+      high-gain CRRC shaper time codes (channel -> 0..15).
+    - `low_gain_shaping_values` (`dict[int, int] | None`): Per-channel
+      low-gain CRRC shaper time codes (channel -> 0..15).
+    - `high_gain_shaping_slow_states` (`dict[int, bool] | None`): Per-channel
+      high-gain shaper LSB scale (channel -> `True` for 120 ns/code, `False`
+      for 20 ns/code).
+    - `low_gain_shaping_slow_states` (`dict[int, bool] | None`): Same as
+      `high_gain_shaping_slow_states`, for the low-gain shaper.
+    - `t1_threshold_dac` (`int | None`): Common (ASIC-wide) T1
+      trigger-threshold DAC code, 0..1023.
+    - `t2_threshold_dac` (`int | None`): Common (ASIC-wide) T2
+      trigger-threshold DAC code, 0..1023.
+    - `tq_threshold_dac` (`int | None`): Common (ASIC-wide) TQ
+      trigger-threshold DAC code, 0..1023.
+    - `trigger_selection` (`str | None`): Common (ASIC-wide) trigger
+      selection; must be a key of `RadiorocDevice.TRIGGER_SELECTION_CODES`
+      when set.
+    - `delay_code` (`int | None`): Common (ASIC-wide) peak-detector hold
+      delay code, 0..255.
+    - `delay_slope` (`int | None`): Common (ASIC-wide) delay-slope trim code,
+      0..15.
     - `verify` (`bool`): Independently read back every touched register after
       writing.
     - `restore` (`bool`): Snapshot every touched register before writing and
@@ -86,6 +117,20 @@ class ChannelConfigOperation:
     input_dac_impedance: bool | None = None
     t1_calibration_dac_values: dict[int, int] | None = None
     t2_calibration_dac_values: dict[int, int] | None = None
+    trigger_preamp_gain_values: dict[int, int] | None = None
+    trigger_preamp_compensation_values: dict[int, int] | None = None
+    high_gain_values: dict[int, int] | None = None
+    low_gain_values: dict[int, int] | None = None
+    high_gain_shaping_values: dict[int, int] | None = None
+    low_gain_shaping_values: dict[int, int] | None = None
+    high_gain_shaping_slow_states: dict[int, bool] | None = None
+    low_gain_shaping_slow_states: dict[int, bool] | None = None
+    t1_threshold_dac: int | None = None
+    t2_threshold_dac: int | None = None
+    tq_threshold_dac: int | None = None
+    trigger_selection: str | None = None
+    delay_code: int | None = None
+    delay_slope: int | None = None
     verify: bool = True
     restore: bool = False
     config_path: Path | None = None
@@ -152,12 +197,55 @@ class ChannelConfigOperation:
                     raise ValueError(f"channel must be in range 0..{N_CHANNELS - 1}")
                 if not 0 <= value <= 63:
                     raise ValueError(f"{name} values must be in range 0..63")
+        for values, name, max_value in (
+            (self.trigger_preamp_gain_values, "trigger_preamp_gain_values", 63),
+            (self.trigger_preamp_compensation_values, "trigger_preamp_compensation_values", 3),
+            (self.high_gain_values, "high_gain_values", 15),
+            (self.low_gain_values, "low_gain_values", 15),
+            (self.high_gain_shaping_values, "high_gain_shaping_values", 15),
+            (self.low_gain_shaping_values, "low_gain_shaping_values", 15),
+        ):
+            if values is None:
+                continue
+            for channel, value in values.items():
+                if not 0 <= channel < N_CHANNELS:
+                    raise ValueError(f"channel must be in range 0..{N_CHANNELS - 1}")
+                if not 0 <= value <= max_value:
+                    raise ValueError(f"{name} values must be in range 0..{max_value}")
+        for states, name in ((self.high_gain_shaping_slow_states, "high_gain_shaping_slow_states"),
+                             (self.low_gain_shaping_slow_states, "low_gain_shaping_slow_states")):
+            if states is None:
+                continue
+            for channel in states:
+                if not 0 <= channel < N_CHANNELS:
+                    raise ValueError(f"channel must be in range 0..{N_CHANNELS - 1}")
+        if self.t1_threshold_dac is not None and not 0 <= self.t1_threshold_dac <= 1023:
+            raise ValueError("t1_threshold_dac must be in range 0..1023")
+        if self.t2_threshold_dac is not None and not 0 <= self.t2_threshold_dac <= 1023:
+            raise ValueError("t2_threshold_dac must be in range 0..1023")
+        if self.tq_threshold_dac is not None and not 0 <= self.tq_threshold_dac <= 1023:
+            raise ValueError("tq_threshold_dac must be in range 0..1023")
+        if self.trigger_selection is not None and \
+                self.trigger_selection not in RadiorocDevice.TRIGGER_SELECTION_CODES:
+            raise ValueError(
+                f"trigger_selection must be one of {sorted(RadiorocDevice.TRIGGER_SELECTION_CODES)}")
+        if self.delay_code is not None and not 0 <= self.delay_code <= 255:
+            raise ValueError("delay_code must be in range 0..255")
+        if self.delay_slope is not None and not 0 <= self.delay_slope <= 15:
+            raise ValueError("delay_slope must be in range 0..15")
         if not any([self.tq_mask_channels, self.input_dac_enable_channels,
                    self.input_dac_value_channels, self.input_dac_values,
                    self.t1_mask_channels, self.t2_mask_channels,
                    self.tq_mask_states, self.t1_mask_states, self.t2_mask_states,
                    self.t1_calibration_dac_values, self.t2_calibration_dac_values,
-                   self.input_dac_impedance is not None]):
+                   self.input_dac_impedance is not None,
+                   self.trigger_preamp_gain_values, self.trigger_preamp_compensation_values,
+                   self.high_gain_values, self.low_gain_values,
+                   self.high_gain_shaping_values, self.low_gain_shaping_values,
+                   self.high_gain_shaping_slow_states, self.low_gain_shaping_slow_states,
+                   self.t1_threshold_dac is not None, self.t2_threshold_dac is not None,
+                   self.tq_threshold_dac is not None, self.trigger_selection is not None,
+                   self.delay_code is not None, self.delay_slope is not None]):
             raise ValueError("at least one channel-configuration field is required")
 
     @staticmethod
@@ -238,6 +326,26 @@ def apply_channel_config(device: RadiorocDevice, operation: ChannelConfigOperati
     touched.update((ch, 5) for ch in (operation.t2_calibration_dac_values or {}))
     if operation.input_dac_impedance is not None:
         touched.update((ch, 6) for ch in range(N_CHANNELS))
+    touched.update((ch, 1) for ch in (operation.trigger_preamp_gain_values or {}))
+    touched.update((ch, 1) for ch in (operation.trigger_preamp_compensation_values or {}))
+    touched.update((ch, 2) for ch in (operation.high_gain_values or {}))
+    touched.update((ch, 2) for ch in (operation.low_gain_values or {}))
+    touched.update((ch, 3) for ch in (operation.high_gain_shaping_values or {}))
+    touched.update((ch, 3) for ch in (operation.low_gain_shaping_values or {}))
+    touched.update((ch, 7) for ch in (operation.high_gain_shaping_slow_states or {}))
+    touched.update((ch, 7) for ch in (operation.low_gain_shaping_slow_states or {}))
+    if operation.t1_threshold_dac is not None:
+        touched.update({(65, 1), (65, 2)})
+    if operation.t2_threshold_dac is not None:
+        touched.update({(65, 2), (65, 3)})
+    if operation.tq_threshold_dac is not None:
+        touched.update({(65, 3), (65, 4)})
+    if operation.trigger_selection is not None:
+        touched.add((65, 12))
+    if operation.delay_code is not None:
+        touched.add((65, 8))
+    if operation.delay_slope is not None:
+        touched.add((65, 9))
 
     snapshot: dict[tuple[int, int], str] = {}
     if operation.restore:
@@ -280,6 +388,48 @@ def apply_channel_config(device: RadiorocDevice, operation: ChannelConfigOperati
     if operation.input_dac_impedance is not None:
         device.set_input_dac_impedance(operation.input_dac_impedance)
         applied.append(f"input_dac_impedance -> {'low' if operation.input_dac_impedance else 'high'}")
+    for channel, value in (operation.trigger_preamp_gain_values or {}).items():
+        device.set_trigger_preamp_gain_for_channel(channel, value)
+        applied.append(f"trigger_preamp_gain channel={channel} -> {value}")
+    for channel, value in (operation.trigger_preamp_compensation_values or {}).items():
+        device.set_trigger_preamp_compensation_for_channel(channel, value)
+        applied.append(f"trigger_preamp_compensation channel={channel} -> {value}")
+    for channel, value in (operation.high_gain_values or {}).items():
+        device.set_high_gain_for_channel(channel, value)
+        applied.append(f"high_gain channel={channel} -> {value}")
+    for channel, value in (operation.low_gain_values or {}).items():
+        device.set_low_gain_for_channel(channel, value)
+        applied.append(f"low_gain channel={channel} -> {value}")
+    for channel, value in (operation.high_gain_shaping_values or {}).items():
+        device.set_high_gain_shaping_for_channel(channel, value)
+        applied.append(f"high_gain_shaping channel={channel} -> {value}")
+    for channel, value in (operation.low_gain_shaping_values or {}).items():
+        device.set_low_gain_shaping_for_channel(channel, value)
+        applied.append(f"low_gain_shaping channel={channel} -> {value}")
+    for channel, slow in (operation.high_gain_shaping_slow_states or {}).items():
+        device.set_high_gain_shaping_slow_for_channel(channel, slow)
+        applied.append(f"high_gain_shaping_slow channel={channel} -> {int(slow)}")
+    for channel, slow in (operation.low_gain_shaping_slow_states or {}).items():
+        device.set_low_gain_shaping_slow_for_channel(channel, slow)
+        applied.append(f"low_gain_shaping_slow channel={channel} -> {int(slow)}")
+    if operation.t1_threshold_dac is not None:
+        device.set_t1_threshold_dac(operation.t1_threshold_dac)
+        applied.append(f"t1_threshold_dac -> {operation.t1_threshold_dac}")
+    if operation.t2_threshold_dac is not None:
+        device.set_t2_threshold_dac(operation.t2_threshold_dac)
+        applied.append(f"t2_threshold_dac -> {operation.t2_threshold_dac}")
+    if operation.tq_threshold_dac is not None:
+        device.set_tq_threshold_dac(operation.tq_threshold_dac)
+        applied.append(f"tq_threshold_dac -> {operation.tq_threshold_dac}")
+    if operation.trigger_selection is not None:
+        device.set_trigger_selection(operation.trigger_selection)
+        applied.append(f"trigger_selection -> {operation.trigger_selection}")
+    if operation.delay_code is not None:
+        device.set_delay_code(operation.delay_code)
+        applied.append(f"delay_code -> {operation.delay_code}")
+    if operation.delay_slope is not None:
+        device.set_delay_slope(operation.delay_slope)
+        applied.append(f"delay_slope -> {operation.delay_slope}")
 
     verify_mismatches: list[RegisterMismatch] = []
     if operation.verify:

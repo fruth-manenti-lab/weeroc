@@ -9,14 +9,15 @@ independent top-level windows each owning their own connection.
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow,
-    QStackedWidget, QTabWidget, QVBoxLayout, QWidget,
+    QApplication, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
+    QMainWindow, QScrollArea, QStackedWidget, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .channel_config_panel import ChannelConfigPanel
 from .connection_panel import ConnectionPanel
 from .hold_scan_window import HoldScanWindow
 from .input_dac_grid_panel import InputDacGridPanel
+from .main_panel import MainPanel
 from .probes_masks_panel import ProbesMasksPanel
 from .raw_register_panel import RawRegisterPanel
 from .scurve_window import ScurveWindow
@@ -33,13 +34,37 @@ _STATUS_FAULT_BG = "#8a3b1b"
 _POWER_RED = "#c0392b"
 
 
+def _scrollable(widget):
+    """Wrap an ASIC-config panel in a vertically scrolling area.
+
+    Keeps the panel's own preferred (natural) width so 64-channel grids are
+    unaffected, while letting content taller than the available window
+    height scroll rather than clip.
+    """
+
+    scroll = QScrollArea()
+    scroll.setWidget(widget)
+    scroll.setWidgetResizable(True)
+    return scroll
+
+
 class MainWindow(QMainWindow):
     """Top-level shell: sidebar (ASIC config / Calibration) over one connection."""
 
     def __init__(self, *, connection_worker_factory=None):
         super().__init__()
         self.setWindowTitle("RADIOROC")
-        self.resize(1280, 900)
+        # A fixed 1280x900 used to be requested unconditionally, which is
+        # exactly as tall as a 1600x900 screen with no margin for the window
+        # manager's own decorations (title bar, panels) -- guaranteeing the
+        # window's bottom (Apply buttons, status text) renders off-screen on
+        # that size or anything smaller. Clamp to the actual available
+        # desktop area instead, leaving a small margin for decorations.
+        screen = QApplication.primaryScreen()
+        available = screen.availableGeometry() if screen is not None else None
+        width = min(1280, available.width() - 40) if available is not None else 1280
+        height = min(900, available.height() - 60) if available is not None else 900
+        self.resize(max(width, 640), max(height, 480))
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -77,14 +102,11 @@ class MainWindow(QMainWindow):
 
         # -- One shared connection area, over per-topic ASIC-config sub-tabs -
         # (mirrors the vendor app's "ASIC config." sidebar page, whose own
-        # tab bar is Main / input DAC / Threshold calibration / Probes-Masks;
-        # "Main" needs register mappings this codebase doesn't have yet, so
-        # only the three backed by an existing, tested core -- input DAC,
-        # threshold calibration, and the T1/T2/TQ mask grids -- are built.
-        # "Registers" (F06, raw add/subadd read-all/write-one) has no vendor
-        # sidebar-page equivalent tab; it is this app's own home for that
-        # feature, not a stand-in for the vendor's separate "Register mode"
-        # toggle on each existing tab.)
+        # tab bar is Main / input DAC / Threshold calibration / Probes-Masks,
+        # in that order. "Registers" (F06, raw add/subadd read-all/write-one)
+        # has no vendor sidebar-page equivalent tab; it is this app's own
+        # home for that feature, not a stand-in for the vendor's separate
+        # "Register mode" toggle on each existing tab.)
         asic_page = QWidget()
         asic_layout = QVBoxLayout(asic_page)
         asic_layout.setContentsMargins(0, 0, 0, 0)
@@ -92,17 +114,26 @@ class MainWindow(QMainWindow):
             connection_worker_factory=connection_worker_factory or self._default_worker_factory())
         asic_layout.addWidget(self.connection_panel)
 
+        self.main_panel = MainPanel(None)
         self.channel_config_panel = ChannelConfigPanel(None)
         self.input_dac_grid_panel = InputDacGridPanel(None)
         self.threshold_calibration_panel = ThresholdCalibrationPanel(None)
         self.probes_masks_panel = ProbesMasksPanel(None)
         self.raw_register_panel = RawRegisterPanel(None)
         self.asic_config_tabs = QTabWidget()
-        self.asic_config_tabs.addTab(self.channel_config_panel, "Channel config")
-        self.asic_config_tabs.addTab(self.input_dac_grid_panel, "input DAC")
-        self.asic_config_tabs.addTab(self.threshold_calibration_panel, "Threshold calibration")
-        self.asic_config_tabs.addTab(self.probes_masks_panel, "Probes/Masks")
-        self.asic_config_tabs.addTab(self.raw_register_panel, "Registers")
+        # Each panel is wrapped in its own scroll area: the tab bar and the
+        # connection panel above it always stay visible, and a panel taller
+        # than the available window height (MainPanel's three stacked group
+        # boxes, in particular -- see IMPLEMENTATION_STATUS.md RADIOROC 31)
+        # scrolls instead of pushing its own Apply button/status text off the
+        # bottom of the screen.
+        self.asic_config_tabs.addTab(_scrollable(self.main_panel), "Main")
+        self.asic_config_tabs.addTab(_scrollable(self.channel_config_panel), "Channel config")
+        self.asic_config_tabs.addTab(_scrollable(self.input_dac_grid_panel), "input DAC")
+        self.asic_config_tabs.addTab(
+            _scrollable(self.threshold_calibration_panel), "Threshold calibration")
+        self.asic_config_tabs.addTab(_scrollable(self.probes_masks_panel), "Probes/Masks")
+        self.asic_config_tabs.addTab(_scrollable(self.raw_register_panel), "Registers")
         asic_layout.addWidget(self.asic_config_tabs, 1)
         self.pages.addWidget(asic_page)
 
@@ -119,6 +150,7 @@ class MainWindow(QMainWindow):
         # The three scan workflows need a real (started) worker at construction
         # time, since an injected worker is never created by the window itself.
         worker = self.connection_panel.ensure_worker()
+        self.main_panel.connection_worker = worker
         self.channel_config_panel.connection_worker = worker
         self.input_dac_grid_panel.connection_worker = worker
         self.threshold_calibration_panel.connection_worker = worker

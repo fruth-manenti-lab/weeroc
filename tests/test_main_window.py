@@ -91,6 +91,16 @@ class MainWindowTests(unittest.TestCase):
         self.assertIs(worker, window.hold_scan_window.connection_worker)
         self.assertIs(worker, window.scurve_window.connection_worker)
         self.assertIs(worker, window.channel_config_panel.connection_worker)
+        self.assertIs(worker, window.main_panel.connection_worker)
+
+    def test_main_panel_is_the_first_asic_config_tab(self):
+        window = self._make_window()
+        # Each ASIC-config tab wraps its panel in a QScrollArea (see
+        # IMPLEMENTATION_STATUS.md RADIOROC 31) so tall panels can scroll
+        # instead of pushing their own controls off-screen; the panel itself
+        # is that scroll area's contained widget.
+        self.assertIs(window.asic_config_tabs.widget(0).widget(), window.main_panel)
+        self.assertEqual(window.asic_config_tabs.tabText(0), "Main")
 
     def test_scan_windows_have_no_embedded_connection_ui_when_shared(self):
         window = self._make_window()

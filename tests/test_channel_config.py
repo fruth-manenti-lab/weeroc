@@ -35,6 +35,20 @@ class ChannelConfigOperationTests(unittest.TestCase):
             ChannelConfigOperation(t1_calibration_dac_values={4: 64}).validate()
         with self.assertRaises(ValueError):
             ChannelConfigOperation(t2_calibration_dac_values={64: 0}).validate()
+        with self.assertRaises(ValueError):
+            ChannelConfigOperation(trigger_preamp_gain_values={4: 64}).validate()
+        with self.assertRaises(ValueError):
+            ChannelConfigOperation(trigger_preamp_compensation_values={64: 0}).validate()
+        with self.assertRaises(ValueError):
+            ChannelConfigOperation(high_gain_shaping_slow_states={64: True}).validate()
+        with self.assertRaises(ValueError):
+            ChannelConfigOperation(t1_threshold_dac=1024).validate()
+        with self.assertRaises(ValueError):
+            ChannelConfigOperation(delay_code=256).validate()
+        with self.assertRaises(ValueError):
+            ChannelConfigOperation(delay_slope=16).validate()
+        with self.assertRaises(ValueError):
+            ChannelConfigOperation(trigger_selection="not_a_mode").validate()
 
     def test_validate_accepts_mask_and_per_channel_values_alone(self):
         ChannelConfigOperation(t1_mask_channels=(4,)).validate()
@@ -45,6 +59,11 @@ class ChannelConfigOperationTests(unittest.TestCase):
         ChannelConfigOperation(t2_mask_states={4: True}).validate()
         ChannelConfigOperation(t1_calibration_dac_values={4: 63}).validate()
         ChannelConfigOperation(t2_calibration_dac_values={4: 0}).validate()
+        ChannelConfigOperation(trigger_preamp_gain_values={4: 63}).validate()
+        ChannelConfigOperation(high_gain_shaping_slow_states={4: True}).validate()
+        ChannelConfigOperation(t1_threshold_dac=1023).validate()
+        ChannelConfigOperation(trigger_selection="global_t1").validate()
+        ChannelConfigOperation(delay_code=255, delay_slope=15).validate()
 
     def test_load_rows_reuses_existing_when_config_path_is_none(self):
         existing = [I2CRow(4, 6, "11111111")]
@@ -173,6 +192,70 @@ class ApplyChannelConfigTests(unittest.TestCase):
         self.assertEqual(self.device.find_i2c_row(5, 5).data[2:], bits(63, 6))
         self.assertIn("t1_calibration_dac channel=4 -> 50", result.applied)
         self.assertIn("t2_calibration_dac channel=5 -> 63", result.applied)
+        self.assertEqual(result.verify_mismatches, ())
+
+    def test_per_channel_main_tab_front_end_values_write_independent_codes(self):
+        self.device.load_default_config()
+        result = apply_channel_config(self.device, ChannelConfigOperation(
+            trigger_preamp_gain_values={4: 30, 5: 10},
+            trigger_preamp_compensation_values={4: 2},
+            high_gain_values={4: 12},
+            low_gain_values={4: 9},
+            high_gain_shaping_values={4: 7},
+            low_gain_shaping_values={4: 3},
+            high_gain_shaping_slow_states={4: True},
+            low_gain_shaping_slow_states={4: True},
+            verify=True,
+        ))
+        self.assertEqual(self.device.find_i2c_row(4, 1).data[2:8], bits(30, 6))
+        self.assertEqual(self.device.find_i2c_row(5, 1).data[2:8], bits(10, 6))
+        self.assertEqual(self.device.find_i2c_row(4, 1).data[0:2], bits(2, 2))
+        self.assertEqual(self.device.find_i2c_row(4, 2).data[4:8], bits(12, 4))
+        self.assertEqual(self.device.find_i2c_row(4, 2).data[0:4], bits(9, 4))
+        self.assertEqual(self.device.find_i2c_row(4, 3).data[4:8], bits(7, 4))
+        self.assertEqual(self.device.find_i2c_row(4, 3).data[0:4], bits(3, 4))
+        self.assertEqual(self.device.find_i2c_row(4, 7).data[1], "1")
+        self.assertEqual(self.device.find_i2c_row(4, 7).data[0], "1")
+        self.assertIn("trigger_preamp_gain channel=4 -> 30", result.applied)
+        self.assertIn("trigger_preamp_gain channel=5 -> 10", result.applied)
+        self.assertEqual(result.verify_mismatches, ())
+
+    def test_common_threshold_and_trigger_selection_fields_round_trip(self):
+        self.device.load_default_config()
+        result = apply_channel_config(self.device, ChannelConfigOperation(
+            t1_threshold_dac=0x2AB,
+            trigger_selection="local_tq",
+            delay_code=200,
+            delay_slope=9,
+            verify=True,
+        ))
+        self.assertEqual(self.device.find_i2c_row(65, 1).data, bits(0x2AB & 0xFF, 8))
+        self.assertEqual(self.device.find_i2c_row(65, 2).data[0:2], bits((0x2AB >> 8) & 0x3, 2))
+        self.assertEqual(self.device.find_i2c_row(65, 12).data[4:8], bits(0b0011, 4))
+        self.assertEqual(self.device.find_i2c_row(65, 8).data, bits(200, 8))
+        self.assertEqual(self.device.find_i2c_row(65, 9).data[0:4], bits(9, 4))
+        self.assertIn("t1_threshold_dac -> 683", result.applied)
+        self.assertIn("trigger_selection -> local_tq", result.applied)
+        self.assertIn("delay_code -> 200", result.applied)
+        self.assertIn("delay_slope -> 9", result.applied)
+        self.assertEqual(result.verify_mismatches, ())
+
+    def test_t1_threshold_dac_alone_does_not_touch_t2_or_tq_independent_bits(self):
+        self.device.load_default_config()
+        before_t2_high = self.device.find_i2c_row(65, 3).data[0:4]  # dac2[9:6]
+        before_tq_low = self.device.find_i2c_row(65, 3).data[4:8]  # dacQ[3:0]
+        before_tq_high = self.device.find_i2c_row(65, 4).data  # dacQ[9:4]
+        result = apply_channel_config(self.device, ChannelConfigOperation(
+            t1_threshold_dac=0x155, verify=True,
+        ))
+        self.assertEqual(self.device.find_i2c_row(65, 1).data, bits(0x155 & 0xFF, 8))
+        self.assertEqual(self.device.find_i2c_row(65, 2).data[0:2], bits((0x155 >> 8) & 0x3, 2))
+        # T2's low 6 bits, sharing subadd 2 with T1's high bits, are untouched.
+        self.assertEqual(self.device.find_i2c_row(65, 2).data[2:8], "000010")
+        self.assertEqual(self.device.find_i2c_row(65, 3).data[0:4], before_t2_high)
+        self.assertEqual(self.device.find_i2c_row(65, 3).data[4:8], before_tq_low)
+        self.assertEqual(self.device.find_i2c_row(65, 4).data, before_tq_high)
+        self.assertEqual(result.touched_rows, 2)  # only (65, 1) and (65, 2)
         self.assertEqual(result.verify_mismatches, ())
 
 
