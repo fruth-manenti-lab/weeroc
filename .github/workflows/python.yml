@@ -36,6 +36,14 @@ jobs:
         run: |
           .venv-wheel/bin/python -m pip install 'radioroc-tools[analysis]'
           .venv-wheel/bin/python tools/check_installed_package.py --plot
+      - name: Install Qt runtime libraries (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 libdbus-1-3 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0
       - name: Verify optional simulation desktop offscreen
         shell: bash
         env:
