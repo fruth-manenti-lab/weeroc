@@ -93,6 +93,7 @@ def wait_connection(state):
             return
         time.sleep(0.01)
     raise AssertionError(f'connection did not reach {state}')
+window.mode.setCurrentIndex(0)  # Simulation; scan windows now default to Hardware.
 window.output.setText(str(Path('desktop-simulation').resolve()))
 window.dac_max.setValue(50)
 window.window_ms.setValue(1)
@@ -123,7 +124,7 @@ with patch('serial.Serial', side_effect=AssertionError('hardware opened')):
     assert window.connection_worker.snapshot().status_word == 5
     assert window.run_button.isEnabled()
     assert not window.initialize.isChecked() and not window.defaults.isChecked()
-    window.channels.setText('4')
+    window.channel_select.set_channels([4])
     window.dac_max.setValue(1)
     window.dac_step.setValue(1)
     window.window_ms.setValue(10)
