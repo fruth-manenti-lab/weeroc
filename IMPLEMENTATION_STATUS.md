@@ -37,10 +37,43 @@ built from a fresh, careful read of `threshold_worker.py`/
 flag that `connection_worker.py` (917 lines, shared by every window) is
 sensitive shared-contract territory and the agent should say so rather
 than improvise if any part of mirroring the threshold pattern there isn't
-a confident, purely-additive change. **Not yet reviewed or merged as of
-this entry** -- do not treat the `AcquisitionWindow` skeleton as landed
-until a following entry says the diff was reviewed and
-`check_development.py` passed against it under `.conda-radioroc`.
+a confident, purely-additive change.
+
+**Reviewed and landed, same entry.** Went through every changed/new file:
+`connection_worker.py`'s ~130-line addition was checked field-for-field
+against the existing `_run_threshold`/`_threshold_fault`/`run_threshold`
+methods and found to be an exact, correct structural mirror -- the agent's
+own claim of confidence held up under direct comparison, not just trusted.
+`acquisition_worker.py` was checked against `JobEvent`'s real field names
+(`point`/`values`) to confirm `summarize_acquisition_event` reads the
+right attributes. `acquisition_window.py` (813 lines) was read in full;
+one minor, non-blocking UX gap noted (the `threshold_dac` spinbox uses `0`
+as its "keep current" sentinel, but `0` is a valid real threshold DAC
+value, so this window can never explicitly request exactly `0` --
+self-evident in the UI, not silent data loss, not worth blocking on). Ran
+a real end-to-end smoke test beyond the delegated agent's own unit
+tests: constructed the window offscreen, ran a 3-batch simulation to
+completion, confirmed the live per-channel batch-summary text, the
+completed/cleanup-restored status, and reopened the saved run through a
+fresh window instance to confirm the reader round-trip -- all worked
+together, not just in isolated unit tests. Noticed the run directory got
+labeled `.../hardware/...` despite running in Simulation mode; traced it
+to `_mode_changed()` only regenerating the output path on switch-to-
+hardware, not switch-to-simulation -- checked `threshold_window.py` and
+confirmed this exact asymmetry already exists there unchanged, so it's a
+pre-existing, already-shipped quirk faithfully mirrored, not a regression
+introduced here, and out of scope to fix as part of this task (fixing it
+correctly means fixing it for all five scan windows at once, a separate,
+well-scoped follow-up if it's ever judged worth doing).
+
+Merged with `--no-ff`, no conflicts (the delegated worktree only touched
+files the contract named). Re-ran `check_development.py` on the actual
+merged tree under `.conda-radioroc` as the final gate: 440/440, matching
+the pre-merge count exactly. **`AcquisitionWindow` is landed.** F13's
+data layer (Phase A) and its GUI skeleton (this entry) are both done;
+spectra/histogram rendering, bins/scales controls, and vendor-file
+import/export UI remain the next slice, and were deliberately kept out of
+both.
 
 ## RADIOROC 36 — Landed F13 Phase A: acquisition-run reader and vendor-file reader, one more real bug found in review
 
