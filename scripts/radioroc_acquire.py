@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import math
 import os
 from pathlib import Path
+import signal
 import sys
-import time
 
 if __package__:
     from .radioroc_cli_common import (
@@ -18,7 +19,6 @@ if __package__:
         apply_preset_defaults,
         connection_config_from_args,
         load_preset_from_argv,
-        prepare_device,
         run_metadata,
         settings_from_args,
     )
@@ -29,19 +29,19 @@ else:
         apply_preset_defaults,
         connection_config_from_args,
         load_preset_from_argv,
-        prepare_device,
         run_metadata,
         settings_from_args,
     )
 from radioroc_client import (
-    AsicRegisterSnapshot,
-    FpgaWordSnapshot,
+    AcquisitionConfig,
+    DEFAULT_CONFIG,
     RadiorocDevice,
     RadiorocSerial,
     default_run_dir,
     parse_channels,
-    write_metadata_json,
 )
+from radioroc.application import CancellationToken
+from radioroc.application.acquisition import AcquisitionJob, AcquisitionJobConfig
 
 
 def write_live_spectrum(
@@ -169,6 +169,8 @@ def build_parser(preset: dict[str, object] | None = None, preset_path: Path | No
     parser.add_argument("--plot-every", type=int, help="Refresh live plot every N batches")
     parser.add_argument("--plot-out", type=Path, help="Live plot PNG path; defaults beside events.csv")
     parser.add_argument("--append", action="store_true", help="Append to an existing events.csv instead of overwriting")
+    parser.add_argument("--verify-restoration", action="store_true",
+                        help="Independently read back captured FPGA/ASIC state after acquisition cleanup")
     parser.add_argument("--out-dir", type=Path, help="Output directory; default is under radioroc_runs/")
     return parser
 
@@ -224,16 +226,53 @@ def main() -> int:
     out_dir = Path(args.out_dir) if args.out_dir else default_run_dir("acquire", channels=channels)
     csv_path = out_dir / "events.csv"
     plot_path = Path(args.plot_out) if args.plot_out else out_dir / f"live_spectrum_ch{plot_channel}_{args.plot_gain}.png"
-    out_dir.mkdir(parents=True, exist_ok=True)
     start_batch, existing_events, live_values = load_existing_events(
         csv_path,
         channel=plot_channel,
         gain=args.plot_gain,
     ) if args.append else (0, 0, [])
-    csv_mode = "a" if args.append and csv_path.exists() else "w"
-    write_header = csv_mode == "w"
 
+    acquisition_config = AcquisitionConfig(
+        channels=channels,
+        trigger_channel=trigger_channel,
+        threshold_dac=args.threshold_dac,
+        hold_delay_ns=args.hold_delay_ns,
+        conversion_delay_ns=args.conversion_delay_ns,
+        acquisitions_per_batch=args.acquisitions_per_batch,
+        batches=args.batches,
+        start_batch=start_batch,
+        timeout_s=args.timeout_s,
+        trigger_preamp_gain=args.pat_gain,
+        high_gain_code=args.hg_gain_code,
+        low_gain_code=args.lg_gain_code,
+        peak_sensing=args.peak_sensing,
+        t1=not args.t2,
+        use_mask=not args.no_mask,
+        trigger_type=args.adc_trigger_type,
+        trigger_source=args.adc_trigger_source,
+        adc_window_ns=args.adc_window_ns,
+        adc_nb_trig=args.adc_nb_trig,
+        rstn_manual=args.rstn_manual,
+        synchro_trigger=args.synchro_trigger,
+        out_dir=out_dir,
+    )
     try:
+        connection.validate()
+        operation = AcquisitionJobConfig(
+            acquisition_config,
+            config_path=Path(args.config) if args.config is not None else DEFAULT_CONFIG,
+            initialize_fpga=not args.skip_fpga_init,
+            apply_defaults=args.apply_defaults,
+        )
+        preview = AcquisitionJob.preview(operation)
+        if args.verify_restoration:
+            preview["verify_restoration"] = True
+        # Dry-run takes no dependency on transport creation or discovery.
+        if not args.execute:
+            print(json.dumps(preview, indent=2))
+            return 0
+
+        append = args.append and csv_path.exists()
         if args.live_plot:
             write_live_spectrum(
                 live_values,
@@ -248,110 +287,128 @@ def main() -> int:
             print(f"live plot: {plot_path}")
             if args.append:
                 print(f"append mode: existing_events={existing_events}; next_batch={start_batch}")
-        with RadiorocSerial.from_config(connection) as transport:
-            device = RadiorocDevice(transport, dry_run=not args.execute)
-            firmware = prepare_device(device, args)
-            metadata = run_metadata(
-                connection=connection,
-                settings=settings_from_args(
-                    args,
-                    scan="acquisition",
-                    out_dir=out_dir,
-                    trigger_channel=trigger_channel,
-                    start_batch=start_batch,
-                    existing_events=existing_events,
-                ),
-                firmware_word=firmware,
-            )
 
-            saved_fpga: FpgaWordSnapshot = device.snapshot_fpga_words([2])
-            saved_asic_registers = [(65, 12)] + [(channel, 2) for channel in channels]
-            saved_asic: AsicRegisterSnapshot = device.snapshot_asic_registers(saved_asic_registers)
-            if args.pat_gain is not None:
-                device.set_trigger_preamp_gain(args.pat_gain, channels=[trigger_channel])
-            device.set_energy_shaper_gain(
-                channels=channels,
-                high_gain_code=args.hg_gain_code,
-                low_gain_code=args.lg_gain_code,
-            )
-            device.set_threshold_dac(args.threshold_dac, t1=not args.t2)
-            device.prepare_trigger_masks(t1=not args.t2, use_mask=not args.no_mask, use_ctest=False)
-            if not args.no_mask:
-                device.set_mask_for_channel(trigger_channel, t1=not args.t2, enabled=True)
+        settings = settings_from_args(
+            args, scan="acquisition", out_dir=out_dir,
+            trigger_channel=trigger_channel, start_batch=start_batch, existing_events=existing_events,
+        )
+        metadata = run_metadata(connection=connection, settings=settings, firmware_word=None)
+        cancellation = CancellationToken()
+        total_events = existing_events
+        progress_step = max(1, math.ceil(args.batches / 10))
 
-            with csv_path.open(csv_mode, newline="") as fp:
-                writer = csv.DictWriter(fp, fieldnames=["batch", "event", "channel", "hg", "lg"])
-                if write_header:
-                    writer.writeheader()
-                start = time.perf_counter()
-                total_events = existing_events
-                progress_step = max(1, math.ceil(args.batches / 10))
+        def progress(event):
+            nonlocal total_events
+            if event.kind != "point":
+                return
+            values = dict(event.values)
+            observed = max((len(values.get(f"ch{ch}_hg", [])) for ch in channels), default=0)
+            total_events += sum(len(values.get(f"ch{ch}_hg", [])) for ch in channels)
+            if args.live_plot:
+                live_values.extend(values.get(f"ch{plot_channel}_{args.plot_gain}", []))
+                if event.completed_points % args.plot_every == 0:
+                    write_live_spectrum(
+                        live_values,
+                        out=plot_path,
+                        channel=plot_channel,
+                        gain=args.plot_gain,
+                        bins=args.plot_bins,
+                        batches_done=start_batch + event.completed_points,
+                        yscale=args.plot_yscale,
+                    )
+            if event.completed_points == event.total_points or event.completed_points % progress_step == 0:
+                percent = 100.0 * event.completed_points / event.total_points
+                print(
+                    f"progress {percent:5.1f}% ({event.completed_points}/{event.total_points} batches): "
+                    f"last_batch_events={observed}; total_events={total_events}",
+                    flush=True,
+                )
+
+        # SIGINT only requests cancellation; cleanup is allowed to finish.
+        previous_handler = signal.signal(signal.SIGINT, lambda *_: cancellation.cancel())
+        session_error = False
+        result = None
+        try:
+            if args.verify_restoration:
+                session = RadiorocSerial.from_config(connection)
+                transport = None
+                entered = False
+                primary_error = None
+                close_error = None
                 try:
-                    for batch_offset in range(args.batches):
-                        batch = start_batch + batch_offset
-                        device.configure_adc_external_hold(
-                            trigger_channel=trigger_channel,
-                            hold_delay_ns=args.hold_delay_ns,
-                            conversion_delay_ns=args.conversion_delay_ns,
-                            nb_acq=args.acquisitions_per_batch,
-                            trigger_type=args.adc_trigger_type,
-                            trigger_source=args.adc_trigger_source,
-                            rstn_manual=args.rstn_manual,
-                            ext_trig=False,
-                            peak_sensing=args.peak_sensing,
-                            adc_window_ns=args.adc_window_ns,
-                            adc_nb_trig=args.adc_nb_trig,
-                        )
-                        high_gain, low_gain = device.acquire_adc_batch(
-                            nb_acq=args.acquisitions_per_batch,
-                            timeout_s=args.timeout_s,
-                            synchro_trigger=args.synchro_trigger,
-                        )
-                        observed = max((len(high_gain[channel]) for channel in channels), default=0)
-                        for channel in channels:
-                            for event, (hg, lg) in enumerate(zip(high_gain[channel], low_gain[channel])):
-                                writer.writerow({"batch": batch, "event": event, "channel": channel, "hg": hg, "lg": lg})
-                                total_events += 1
-                                if args.live_plot and channel == plot_channel:
-                                    live_values.append(hg if args.plot_gain == "hg" else lg)
-                        fp.flush()
-                        batches_done = batch_offset + 1
-                        total_batches_done = batch + 1
-                        if args.live_plot and batches_done % args.plot_every == 0:
-                            write_live_spectrum(
-                                live_values,
-                                out=plot_path,
-                                channel=plot_channel,
-                                gain=args.plot_gain,
-                                bins=args.plot_bins,
-                                batches_done=total_batches_done,
-                                yscale=args.plot_yscale,
-                            )
-                        should_print_progress = (
-                            batches_done == args.batches
-                            or batches_done % progress_step == 0
-                        )
-                        if should_print_progress:
-                            percent = 100.0 * batches_done / args.batches
-                            print(
-                                f"progress {percent:5.1f}% ({batches_done}/{args.batches} batches): "
-                                f"last_batch_events={observed}; total_events={total_events}"
-                            )
+                    transport = session.__enter__()
+                    entered = True
+                    try:
+                        result = AcquisitionJob().run(
+                            RadiorocDevice(transport), operation, metadata=metadata,
+                            cancellation=cancellation, on_event=progress, verify_restoration=True, append=append)
+                    except BaseException as exc:
+                        primary_error = exc
+                except BaseException as exc:
+                    primary_error = exc
                 finally:
-                    if not args.no_mask:
-                        device.prepare_trigger_masks(t1=not args.t2, use_mask=True, use_ctest=False)
-                    device.restore_asic_registers(saved_asic)
-                    device.restore_fpga_words(saved_fpga)
-                elapsed = time.perf_counter() - start
-            metadata_path = write_metadata_json(metadata, out_dir)
-        if not args.live_plot:
-            print(f"events CSV: {csv_path}")
-        print(f"metadata: {metadata_path}")
-        print(f"elapsed seconds: {elapsed:.3f}")
-        return 0
+                    if entered:
+                        try:
+                            session.__exit__(None, None, None)
+                        except BaseException as exc:
+                            close_error = exc
+                if primary_error is not None:
+                    _print_error_chain("ERROR", primary_error)
+                if close_error is not None:
+                    _print_error_chain("CLOSE ERROR", close_error)
+                session_error = primary_error is not None or close_error is not None
+                if result is None:
+                    return 1
+            else:
+                with RadiorocSerial.from_config(connection) as transport:
+                    result = AcquisitionJob().run(RadiorocDevice(transport), operation, metadata=metadata,
+                                                  cancellation=cancellation, on_event=progress, append=append)
+        finally:
+            signal.signal(signal.SIGINT, previous_handler)
+        print(f"acquisition {result.status}: {result.points} batches; cleanup={result.cleanup_status}")
+        print(f"events CSV: {result.csv_path}")
+        print(f"metadata: {result.metadata_path}")
+        if result.verification is not None:
+            print("restoration verification: " + json.dumps(result.verification, sort_keys=True))
+        if result.error is not None:
+            if args.verify_restoration:
+                _print_error_chain("ERROR", result.error)
+            else:
+                print(f"{type(result.error).__name__}: {result.error}", file=sys.stderr)
+        for error in result.cleanup_errors + result.persistence_errors:
+            print(f"ERROR: {error}", file=sys.stderr)
+        if result.verification is not None:
+            for error in result.verification.get("errors", ()):
+                print(f"VERIFICATION ERROR: {error}", file=sys.stderr)
+            for error in result.verification.get("cleanup", {}).get("errors", ()):
+                print(f"VERIFIER CLEANUP ERROR: {error}", file=sys.stderr)
+        if session_error:
+            return 1
+        if result.cleanup_errors or result.persistence_errors:
+            return 1
+        if result.verification is not None and result.verification.get("status") != "passed":
+            return 1
+        return 0 if result.status == "completed" else (130 if result.status == "cancelled" else 1)
     except Exception as exc:
-        print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
+        if args.verify_restoration:
+            _print_error_chain("ERROR", exc)
+        else:
+            print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
+
+
+def _print_error_chain(label: str, error: BaseException) -> None:
+    """Print an exception plus its causal/context chain and attached notes."""
+    seen = set()
+    current = error
+    prefix = label
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        print(f"{prefix}: {type(current).__name__}: {current}", file=sys.stderr)
+        for note in getattr(current, "__notes__", ()):
+            print(f"{prefix} NOTE: {note}", file=sys.stderr)
+        current = current.__cause__ or current.__context__
+        prefix = f"{label} CAUSED BY"
 
 
 if __name__ == "__main__":
