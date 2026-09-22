@@ -412,6 +412,43 @@ def poisson_rate_errors(rates: list[float], *, window_ms: float, averages: int) 
     return errors
 
 
+def estimate_scurve_crossings(
+    rows: list[dict], channels: list[int], *, target_percent: float = 50.0,
+) -> dict[int, float | None]:
+    """Find each channel's DAC crossing of `target_percent` by linear interpolation.
+
+    `rows` are S-curve run rows shaped like `radioroc.data.scurve_reader
+    .SavedScurveRun.rows` (each a dict with an int `"DAC"` key and float
+    `"chN"` keys), in ascending DAC order. A channel absent from `rows`, or
+    whose series never crosses `target_percent` (no adjacent pair straddles
+    it), gets `None`. The first crossing found (in row order) is returned;
+    S-curves are expected to be monotonic, so this is normally the only one.
+
+    Extracted from `scripts/radioroc_standard_scurves.py`'s
+    `autocalibrate_scurve`/`_estimate_crossings` (see
+    `IMPLEMENTATION_STATUS.md`'s F08/autocalibration entry): this is the pure,
+    hardware-free half of that algorithm, decoupled from CSV file I/O so it
+    can run on data from any source (a live job's in-memory rows, a saved
+    run's `SavedScurveRun.rows`, or a test fixture) and be unit-tested
+    directly.
+    """
+
+    crossings: dict[int, float | None] = {}
+    for channel in channels:
+        column = f"ch{channel}"
+        pairs = [(row["DAC"], row[column]) for row in rows if column in row]
+        crossing = None
+        for (x0, y0), (x1, y1) in zip(pairs, pairs[1:]):
+            if y0 == target_percent:
+                crossing = float(x0)
+                break
+            if (y0 - target_percent) * (y1 - target_percent) <= 0 and y0 != y1:
+                crossing = x0 + (target_percent - y0) * (x1 - x0) / (y1 - y0)
+                break
+        crossings[channel] = crossing
+    return crossings
+
+
 def log_profile_residual_derivative(
     x_values: list[float],
     rates: list[float],

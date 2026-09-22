@@ -1,5 +1,104 @@
 # Implementation status
 
+## RADIOROC 31 (in progress) — F08 autocalibration: crossing-analysis extracted, job design scoped (offline)
+
+Continuing the same session as RADIOROC 30, per operator direction to keep
+going after the "Main" tab/window-sizing work landed.
+
+**Extracted the pure half of F08 (automatic threshold calibration).**
+`scripts/radioroc_standard_scurves.py`'s `RadiorocOps.autocalibrate_scurve`/
+`_estimate_crossings` (a legacy standalone script that duplicates its own
+copy of the ASIC/FPGA primitives rather than sharing `radioroc_client.py`)
+implements a real, complete algorithm:
+1. Pick a reference channel; run one coarse S-curve with its calibration
+   trim DAC forced to 0, another forced to 63; restore it afterward. Use
+   each run's 50%-crossing point to estimate `lsb_ratio` (how many DAC
+   codes one trim-DAC LSB shifts the threshold).
+2. Run one shared, finer S-curve across every selected channel; find each
+   channel's crossing point; average them (`mean_pos`).
+3. For each channel, compute `correction = round((crossing - mean_pos) /
+   lsb_ratio)` and write `current_trim - correction` (clamped 0..63) as its
+   new calibration trim DAC — aligning every channel's threshold crossing
+   to the same DAC value.
+4. Run one final, narrow S-curve across all channels to verify alignment.
+
+The crossing-estimation half (`_estimate_crossings`: linear interpolation
+to find where an S-curve first crosses a target percentage) is pure
+numeric analysis with no hardware dependency once it's handed parsed rows,
+so it moved to `radioroc_analysis.py` as `estimate_scurve_crossings(rows,
+channels, *, target_percent=50.0)` — decoupled from CSV file I/O (it takes
+rows shaped like `radioroc.data.scurve_reader.SavedScurveRun.rows`, so it
+can run on a live job's in-memory rows or a saved run, not just a file
+path) and directly unit-tested (`tests/test_radioroc_core.py`'s
+`test_estimate_scurve_crossings`: normal crossing, no-crossing-found ->
+`None`, channel absent -> `None`, exact-match short-circuit, non-default
+`target_percent`).
+
+**Scoped, not yet implemented: the orchestration half** (the actual
+`AutocalibrationJob` that runs the 4 S-curve sub-scans in sequence against
+real hardware and applies the corrected trim DACs). This is a materially
+bigger and more hardware-sensitive piece than the extraction above, so it
+is being handed off as its own bounded task rather than rushed within this
+session - see the design below and `NEXT_SESSION.md`.
+
+**Design settled (the shared contract a future implementation must follow):**
+- `AutocalibrationJobConfig` mirrors `ScurveJobConfig` (`src/radioroc/
+  application/scurve.py`): `channels`, `t1`, `use_mask`, `use_ctest`,
+  `clock_index`, `trigger_level`, `out_dir`, `config_path`,
+  `initialize_fpga`, `apply_defaults`, plus autocalibration-specific
+  fields (coarse/fine DAC step sizes, the step-1 probe range).
+- **Locking:** `session_lock(transport)` (`src/radioroc/application/
+  jobs.py`) is an explicitly non-reentrant `threading.Lock` shared across
+  a transport session. `ScurveJob.run()` acquires it itself, so
+  `AutocalibrationJob` cannot call that public entry point four times
+  without releasing exclusivity between sub-scans - another job could
+  interleave mid-calibration. The correct composition, matching this
+  codebase's existing lock-once-per-job-run convention: `AutocalibrationJob`
+  acquires the session lock a single time for the whole 4-step sequence,
+  then drives each sub-scan through `ScurveJob()._run_locked(...)` directly
+  (the method `ScurveJob.run()` itself calls internally after acquiring the
+  lock) - reusing the already-hardware-validated per-point scan/restore
+  logic verbatim, not reimplementing it. This needs each sub-scan's own
+  `ScurveResult`/`total`/`rows` setup (the same few lines `ScurveJob.run()`
+  does before calling `_run_locked`), which is inherent to running four
+  genuinely separate scans (each with its own CSV/manifest/out_dir), not
+  avoidable duplication.
+- **Manifests:** each of the four sub-scans writes its own manifest/CSV via
+  the existing, proven `ScurveRunWriter` (no new writer class needed).
+  `AutocalibrationJob` additionally writes one small top-level
+  `autocalibration_metadata.json` under its own `out_dir` recording: the
+  operation config, each sub-run's directory name, the computed
+  `lsb_ratio`, per-channel crossing positions and `mean_pos`, the
+  before/after calibration trim DAC values actually applied, and overall
+  status/timing - a plain JSON write (atomic, mirroring how other
+  manifests in this codebase are written), not a new bespoke format.
+- **Restoration discipline** must match every other job in this codebase:
+  the reference channel's calibration DAC is a *temporary* probe value
+  during step 1 (force 0, force 63, restore original) even on
+  cancellation/failure mid-step - this is the one place in the whole
+  algorithm where "restore on any exit path" is safety-critical, since an
+  interrupted step 1 that leaves a channel's calibration DAC stuck at 0 or
+  63 would silently corrupt every later scan against that channel. The
+  final corrected values written in step 3 are the job's intentional,
+  persistent output (like `set_calibration_dac_for_channel`'s existing
+  contract) and are not restored.
+
+**Why this wasn't implemented this session:** it is a genuinely new
+hardware-orchestrating job type (composing four sequential sub-scans under
+one lock, with its own cancellation/restoration/manifest semantics) - closer
+in size and hardware-safety risk to the original `ScurveJob`/`ThresholdJob`
+migrations (each its own dedicated effort per the delivery history) than to
+a bounded, mechanical extension. Implementing it correctly needs the same
+careful, uninterrupted attention those got, not a tail-end addition to an
+already large session. The design above is settled and ready to build from
+directly; `NEXT_SESSION.md` carries it forward as the next bounded task.
+
+**Evidence:** the crossing-estimation extraction alone: offline tests pass
+(1 new test, 5 assertions covering the cases above), `radioroc_analysis.py`
+and the updated test file both compile clean. Full-suite re-run deferred
+until the concurrently-running HintBar work (below) lands, to avoid
+conflating two in-flight change sets' test results.
+
 ## RADIOROC 30 — Hold-scan diagnosis confirmed; A7585 descoped; "Main" (F02) register map recovered (offline)
 
 Continuing on `feat/desktop-hardware-threshold`, operator present and directing.

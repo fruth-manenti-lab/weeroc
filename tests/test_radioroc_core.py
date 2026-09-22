@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 from radioroc_analysis import (
+    estimate_scurve_crossings,
     filter_hold_data,
     find_latest_scan,
     has_invalid_internal_zero_point,
@@ -287,6 +288,36 @@ class RadiorocAnalysisTests(unittest.TestCase):
             stdevs = read_threshold_attempt_std(attempts, data)
             self.assertAlmostEqual(stdevs["ch4"][0], 14.1421356237)
             self.assertEqual(stdevs["ch4"][1], 0.0)
+
+    def test_estimate_scurve_crossings(self) -> None:
+        # Same algorithm as scripts/radioroc_standard_scurves.py's legacy
+        # autocalibrate_scurve/_estimate_crossings (see IMPLEMENTATION_STATUS.md's
+        # F08/autocalibration entry), decoupled from CSV file I/O.
+        rows = [
+            {"DAC": 0, "ch4": 100.0, "ch5": 100.0},
+            {"DAC": 10, "ch4": 100.0, "ch5": 80.0},
+            {"DAC": 20, "ch4": 0.0, "ch5": 20.0},
+            {"DAC": 30, "ch4": 0.0, "ch5": 0.0},
+        ]
+        crossings = estimate_scurve_crossings(rows, [4, 5])
+        # ch4 falls 100 -> 0 between DAC 10 and 20: crosses 50 at DAC 15.
+        self.assertAlmostEqual(crossings[4], 15.0)
+        # ch5 falls 80 -> 20 between DAC 10 and 20: crosses 50 at DAC 15 too.
+        self.assertAlmostEqual(crossings[5], 15.0)
+
+        # Never crosses target_percent -> None, not an exception.
+        flat_rows = [{"DAC": 0, "ch4": 100.0}, {"DAC": 10, "ch4": 100.0}]
+        self.assertIsNone(estimate_scurve_crossings(flat_rows, [4])[4])
+
+        # Channel absent from every row -> None.
+        self.assertIsNone(estimate_scurve_crossings(rows, [6])[6])
+
+        # An exact match at a row short-circuits the interpolation.
+        exact_rows = [{"DAC": 0, "ch4": 100.0}, {"DAC": 10, "ch4": 50.0}, {"DAC": 20, "ch4": 0.0}]
+        self.assertEqual(estimate_scurve_crossings(exact_rows, [4])[4], 10.0)
+
+        # A non-default target_percent is honored.
+        self.assertAlmostEqual(estimate_scurve_crossings(rows, [4], target_percent=25.0)[4], 17.5)
 
     def test_hold_csv_filter_and_summary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
