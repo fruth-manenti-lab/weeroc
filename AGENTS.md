@@ -2,6 +2,20 @@
 
 - Read `IMPLEMENTATION_STATUS.md` for the current delivery and evidence, and
   `CROSS_PLATFORM_REBUILD_PLAN.md` for architecture and feature scope.
+- `local_artifacts/` is a primary evidence source, not just archived downloads:
+  `extracted/RadiorocUI_2_2_0_5.exe_extracted/` is a full PyInstaller extraction
+  of the vendor Windows app, and its `.pyc` files are genuine CPython 3.13
+  bytecode this machine's interpreter loads directly
+  (`marshal.loads(open(path,'rb').read()[16:])`, then `dis.dis()` or inspect
+  `co_consts` -- no decompiler needed or available for this bytecode version).
+  This is how most register maps in `radioroc_client.py` were recovered, and
+  the right first move whenever a question is "what does the real vendor app
+  actually do/look like" rather than guessing. `generated_notes/*.txt` holds
+  prior sessions' saved disassembly (check first, but it may be incomplete);
+  `downloads/*.pdf` is the vendor user guide; `app_pics/*.png` are real
+  screenshots of the Windows app (uncaptioned -- view a few directly to find
+  a specific screen). See `IMPLEMENTATION_STATUS.md`'s many "register
+  recovered from the vendor GUI's compiled widget properties" entries.
 - Keep each task bounded with acceptance checks. Preserve old CLI entry points
   and shared behavior while extracting modules. Do not put device logic in UI code.
 - Use `.conda-radioroc/bin/python` for existing lab tools. Use a separate `.venv`
