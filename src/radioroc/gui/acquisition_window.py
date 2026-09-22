@@ -7,12 +7,25 @@ two workflows share a shape. It deliberately differs in one place: threshold
 plots a full DAC-vs-rate curve because every "point" is one scalar per DAC
 code, but one acquisition "point" event is a whole batch's raw per-channel
 sample lists (see ``radioroc.application.acquisition_worker``), so this
-window shows a compact live batches-completed/total progress bar plus a
-per-channel count/min/max/mean summary of the most recent batch instead of a
-plot -- spectra/histogram rendering is a deliberately separate, later slice
-of work.
+window keeps the compact live batches-completed/total progress bar plus a
+per-channel count/min/max/mean summary of the most recent batch, and adds a
+histogram of the raw per-channel HG/LG values alongside it.
+
+The acquisition mailbox deliberately never retains raw per-event samples in
+memory (see ``summarize_acquisition_event``/``MAX_RETAINED_BATCHES``) --
+only the bounded batch summary above, because every raw sample is already
+durably written to the run's own ``events.csv`` by the job. Spectra
+rendering therefore does not add a second in-memory raw-sample buffer to
+route around that: it periodically re-reads the run's own ``events.csv``
+from disk (see ``_read_live_events``/``_refresh_live_spectra`` below) and
+re-renders the histogram from the file, throttled to roughly once per
+second (``_LIVE_REFRESH_EVERY_TICKS`` poll ticks) rather than on every
+100ms timer tick, so a long run doesn't spend all its time re-parsing a
+growing CSV. The same histogram also renders a previously saved run
+(``open_saved``) or an imported vendor-format file (``import_vendor_file``).
 """
 
+import csv
 from datetime import datetime
 import json
 from pathlib import Path
@@ -24,17 +37,27 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPlainTextEdit, QProgressBar,
     QPushButton, QScrollArea, QSpinBox, QSplitter, QVBoxLayout, QWidget,
 )
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.figure import Figure
 
 from radioroc_client import AcquisitionConfig
 from radioroc.application.acquisition import AcquisitionJob, AcquisitionJobConfig
 from radioroc.application.acquisition_worker import AcquisitionWorker
 from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.data.acquisition_reader import read_acquisition_run
+from radioroc.data.vendor_acquisition import read_vendor_acquisition_file
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
 from radioroc.gui.channel_select import ChannelSelectGrid
 from radioroc.gui.connection_panel import ConnectionPanel
 from radioroc.gui.hint_bar import HintBar
 from radioroc.transport.acquisition_simulator import AcquisitionSimulationConfig
+
+# The filename `AcquisitionRunWriter`/`AcquisitionJob` write events to inside
+# a run's `out_dir` (see `radioroc/data/acquisition.py`'s `self.csv_path` and
+# `radioroc/application/acquisition.py`'s `AcquisitionResult.csv_path`).
+# `radioroc.data.acquisition_reader` knows this same name internally but
+# does not export it, so it is repeated here rather than imported.
+_EVENTS_CSV_NAME = "events.csv"
 
 
 def _integer(low, high, value):
@@ -82,10 +105,42 @@ def _format_batch_summary(mode, row):
     return "\n".join(lines)
 
 
+def _read_live_events(path):
+    """Re-read a run's ``events.csv`` for display, tolerating a concurrent writer.
+
+    Deliberately lighter than ``read_acquisition_run``: this is called on a
+    throttled timer while a run may still be appending to the file (a torn
+    last line is expected, not an error), and a per-tick display refresh has
+    no use for that reader's manifest cross-validation -- only ``channel``/
+    ``hg``/``lg`` are needed to render a histogram. Unparseable rows
+    (including a partially flushed final line) are skipped rather than
+    truncating the whole read, since the writer may still be mid-append.
+    """
+    rows = []
+    try:
+        with path.open(newline="", encoding="utf-8") as stream:
+            for row in csv.DictReader(stream):
+                try:
+                    rows.append({
+                        "channel": int(row["channel"]),
+                        "hg": float(row["hg"]),
+                        "lg": float(row["lg"]),
+                    })
+                except (KeyError, TypeError, ValueError):
+                    continue
+    except OSError:
+        return ()
+    return tuple(rows)
+
+
 class AcquisitionWindow(QMainWindow):
     _CONNECTION_BUSY = {"discovering", "connecting", "reading", "disconnecting", "scanning",
                         "configuring"}
     _CONNECTION_LOCKS_MODE = _CONNECTION_BUSY | {"connected", "close_failed", "faulted"}
+    # Poll ticks (the 100ms timer driving `poll_worker`) between live
+    # spectra disk re-reads -- 10 ticks is roughly once per second, so a
+    # long run spends its time on the job, not re-parsing a growing CSV.
+    _LIVE_REFRESH_EVERY_TICKS = 10
 
     def __init__(self, *, worker_factory=AcquisitionWorker,
                  connection_worker_factory=ConnectionWorker, connection_worker=None):
@@ -103,6 +158,11 @@ class AcquisitionWindow(QMainWindow):
         self._last_rows = ()
         self._active_directory = None
         self._hardware_running = False
+        self._live_csv_path = None
+        self._live_refresh_tick = 0
+        self._spectra_rows = ()
+        self._spectra_title = "No data yet"
+        self.spectra_channel_checks = {}
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -229,6 +289,36 @@ class AcquisitionWindow(QMainWindow):
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
+
+        self.spectra_group = QGroupBox("Spectra display")
+        spectra_layout = QVBoxLayout(self.spectra_group)
+        spectra_controls = QHBoxLayout()
+        spectra_controls.addWidget(QLabel("Gain:"))
+        self.spectra_gain = QComboBox()
+        self.spectra_gain.addItems(["High gain (HG)", "Low gain (LG)"])
+        spectra_controls.addWidget(self.spectra_gain)
+        spectra_controls.addWidget(QLabel("Bins:"))
+        self.spectra_bins = _integer(2, 500, 50)
+        spectra_controls.addWidget(self.spectra_bins)
+        self.spectra_log_y = QCheckBox("Log Y")
+        spectra_controls.addWidget(self.spectra_log_y)
+        self.spectra_clear_button = QPushButton("Clear plot")
+        spectra_controls.addWidget(self.spectra_clear_button)
+        self.import_vendor_button = QPushButton("Import vendor file…")
+        spectra_controls.addWidget(self.import_vendor_button)
+        spectra_controls.addStretch(1)
+        spectra_layout.addLayout(spectra_controls)
+        self.spectra_channels_widget = QWidget()
+        self.spectra_channels_layout = QHBoxLayout(self.spectra_channels_widget)
+        self.spectra_channels_layout.setContentsMargins(0, 0, 0, 0)
+        spectra_layout.addWidget(self.spectra_channels_widget)
+        right_layout.addWidget(self.spectra_group)
+
+        self.figure = Figure(figsize=(6, 4), layout="constrained")
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.axes = self.figure.add_subplot(111)
+        right_layout.addWidget(self.canvas, 3)
+
         self.batch_summary = QPlainTextEdit()
         self.batch_summary.setReadOnly(True)
         self.batch_summary.setPlaceholderText(
@@ -238,7 +328,7 @@ class AcquisitionWindow(QMainWindow):
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
         self.details.setPlaceholderText("Preview, run provenance and cleanup details appear here.")
-        right_layout.addWidget(self.details, 2)
+        right_layout.addWidget(self.details, 1)
         split.addWidget(right)
         split.setSizes([410, 750])
 
@@ -260,6 +350,11 @@ class AcquisitionWindow(QMainWindow):
         self.run_button.clicked.connect(self.start_run)
         self.cancel_button.clicked.connect(self.cancel_run)
         self.reopen_button.clicked.connect(self.choose_saved)
+        self.spectra_gain.currentIndexChanged.connect(self._refresh_spectra)
+        self.spectra_bins.valueChanged.connect(self._refresh_spectra)
+        self.spectra_log_y.toggled.connect(self._refresh_spectra)
+        self.spectra_clear_button.clicked.connect(self.clear_spectra)
+        self.import_vendor_button.clicked.connect(self.choose_vendor_file)
         self.mode.currentIndexChanged.connect(self._mode_changed)
         self.timer = QTimer(self)
         self.timer.setInterval(100)
@@ -319,6 +414,16 @@ class AcquisitionWindow(QMainWindow):
         self.hint.attach(self.cancel_button, "Cancel the run currently in progress.")
         self.hint.attach(self.reopen_button, "Open a previously saved acquisition run to "
                           "view its status and data again.")
+        self.hint.attach(self.spectra_gain, "Which gain's values the histogram below "
+                          "plots -- high gain (HG) or low gain (LG).")
+        self.hint.attach(self.spectra_bins, "Number of histogram bins.")
+        self.hint.attach(self.spectra_log_y, "Plot the histogram's counts axis (Y) on a "
+                          "log scale instead of linear.")
+        self.hint.attach(self.spectra_clear_button, "Clear the histogram display. This does "
+                          "not delete any saved data -- it only resets what's shown here.")
+        self.hint.attach(self.import_vendor_button, "Load a real vendor-collected "
+                          "readable_adc_acq.txt file and plot its HG/LG values here, for "
+                          "comparison with this app's own runs.")
         if self._connection_panel is not None:
             self.hint.attach(self.port_select, "USB serial port candidate to connect to.")
             self.hint.attach(self.refresh_button, "Re-scan for USB port candidates.")
@@ -331,6 +436,8 @@ class AcquisitionWindow(QMainWindow):
             self.hint.attach(self.channel_config_apply_button, "Apply the channel "
                               "configuration fields above to the connected hardware.")
         self._mode_changed()
+        self._set_spectra_channels(())
+        self._refresh_spectra()
 
     # -- connection_worker: a plain attribute in "injected" mode, or a
     # mirror of the internal ConnectionPanel's worker otherwise, so both
@@ -614,6 +721,7 @@ class AcquisitionWindow(QMainWindow):
                 self.progress.setValue(0)
                 self._show_run_banner("HARDWARE", self._active_directory)
                 self.batch_summary.clear()
+                self._start_live_spectra(operation.acquisition.channels, "HARDWARE")
                 self._hardware_running = True
                 self._set_running(True)
                 self.status.setText("Hardware · preparing · mandatory restoration verification")
@@ -632,6 +740,7 @@ class AcquisitionWindow(QMainWindow):
             self.progress.setValue(0)
             self._show_run_banner("SIMULATION", self._active_directory)
             self.batch_summary.clear()
+            self._start_live_spectra(operation.acquisition.channels, "SIMULATION")
             self.worker = worker
             self._set_running(True)
             self.status.setText("Simulation · preparing")
@@ -646,6 +755,7 @@ class AcquisitionWindow(QMainWindow):
         self.controls.setEnabled(not running)
         self.preview_button.setEnabled(not running)
         self.reopen_button.setEnabled(not running)
+        self.import_vendor_button.setEnabled(not running)
         self.run_button.setEnabled(not running and ((self.mode.currentIndex() == 0) or
                                    (self.connection_worker is not None and
                                     self.connection_worker.snapshot().state == "connected" and
@@ -694,7 +804,12 @@ class AcquisitionWindow(QMainWindow):
                     state = "closing session"
                 self.status.setText(f"{mode.title()} · {state} · "
                                     f"{event.completed_points}/{event.total_points} batches")
-        if snapshot.outcome is None or alive:
+        still_running = snapshot.outcome is None or alive
+        if still_running:
+            self._live_refresh_tick += 1
+            if self._live_refresh_tick >= self._LIVE_REFRESH_EVERY_TICKS:
+                self._live_refresh_tick = 0
+                self._refresh_live_spectra(mode, running=True)
             return
         if self.worker is not None:
             self.worker.join()
@@ -702,6 +817,7 @@ class AcquisitionWindow(QMainWindow):
         self.timer.stop()
         self._set_running(False)
         self._hardware_running = False
+        self._refresh_live_spectra(mode, running=False)
         outcome = snapshot.outcome
         result = outcome.result
         hardware_fault = (getattr(self.connection_worker.snapshot(), "fault", None)
@@ -746,6 +862,108 @@ class AcquisitionWindow(QMainWindow):
             else:
                 self.close()
 
+    # -- spectra: histogram of raw per-channel HG/LG values, from either a
+    # live run's own events.csv (re-read on a throttled timer, never from an
+    # in-memory raw-sample buffer -- see the module docstring), a saved
+    # run's rows, or an imported vendor file. ---------------------------
+
+    def _start_live_spectra(self, channels, mode):
+        self._live_csv_path = self._active_directory / _EVENTS_CSV_NAME
+        self._live_refresh_tick = 0
+        self._set_spectra_channels(channels)
+        self._spectra_rows = ()
+        self._spectra_title = f"{mode} · running · waiting for the first batch"
+        self._refresh_spectra()
+
+    def _refresh_live_spectra(self, mode, running):
+        path = self._live_csv_path
+        if path is None or not path.exists():
+            return
+        rows = _read_live_events(path)
+        self._spectra_rows = rows
+        state = "running" if running else "finished"
+        self._spectra_title = f"{mode} · {state} · {len(rows)} events on disk"
+        self._refresh_spectra()
+
+    def _set_spectra_channels(self, channels):
+        while self.spectra_channels_layout.count():
+            item = self.spectra_channels_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+        self.spectra_channel_checks = {}
+        for channel in sorted(channels):
+            box = QCheckBox(f"ch{channel}")
+            box.setChecked(True)
+            box.setToolTip(f"Show/hide channel {channel} in the histogram below.")
+            box.toggled.connect(self._refresh_spectra)
+            self.spectra_channels_layout.addWidget(box)
+            self.spectra_channel_checks[channel] = box
+        self.spectra_channels_layout.addStretch(1)
+
+    def _refresh_spectra(self):
+        self._render_spectra(self._spectra_rows, self._spectra_title)
+
+    def _render_spectra(self, rows, title):
+        self.axes.clear()
+        self.axes.set_title(title, fontsize=11)
+        gain_field = "hg" if self.spectra_gain.currentIndex() == 0 else "lg"
+        gain_label = "HG" if gain_field == "hg" else "LG"
+        self.axes.set_xlabel(f"{gain_label} (ADC counts)")
+        self.axes.set_ylabel("Counts")
+        self.axes.set_yscale("log" if self.spectra_log_y.isChecked() else "linear")
+        self.axes.grid(True, alpha=0.2)
+        bins = self.spectra_bins.value()
+        selected = [channel for channel, box in sorted(self.spectra_channel_checks.items())
+                   if box.isChecked()]
+        plotted = False
+        if rows and selected:
+            by_channel: dict[int, list[float]] = {}
+            for row in rows:
+                by_channel.setdefault(row["channel"], []).append(row[gain_field])
+            for channel in selected:
+                values = by_channel.get(channel)
+                if values:
+                    self.axes.hist(values, bins=bins, alpha=0.55, label=f"ch{channel}")
+                    plotted = True
+        if plotted:
+            self.axes.legend(fontsize=8)
+        self.canvas.draw_idle()
+
+    def clear_spectra(self):
+        self._spectra_rows = ()
+        self._spectra_title = "Cleared — no data displayed (saved data is untouched)"
+        self._refresh_spectra()
+
+    def choose_vendor_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import vendor acquisition file", "",
+            "Vendor readable ADC files (*.txt);;All files (*)")
+        if path:
+            self.import_vendor_file(Path(path))
+
+    def import_vendor_file(self, path):
+        if self.worker is not None or self._hardware_running:
+            return
+        try:
+            vendor = read_vendor_acquisition_file(Path(path))
+            channels = sorted({row["channel"] for row in vendor.rows})
+            self.banner.setText(f"VENDOR FILE · {path}")
+            self._set_spectra_channels(channels)
+            self._spectra_rows = vendor.rows
+            self._spectra_title = f"VENDOR FILE · {Path(path).name} · {len(vendor.rows)} rows"
+            self._refresh_spectra()
+            status = f"Imported vendor file · {len(vendor.rows)} rows · channels {channels}"
+            self.status.setText(status + (" · " + "; ".join(vendor.warnings) if vendor.warnings else ""))
+            self.details.setPlainText(json.dumps({
+                "vendor_file": str(path), "row_count": len(vendor.rows),
+                "channels": channels, "setup_text": vendor.setup_text,
+                "warnings": vendor.warnings,
+            }, indent=2))
+        except Exception as exc:
+            self.status.setText(f"Cannot import vendor file: {exc}")
+
     def choose_output(self):
         label = "simulation" if self.mode.currentIndex() == 0 else "hardware"
         directory = QFileDialog.getExistingDirectory(self, f"Choose parent for a new {label} run")
@@ -781,6 +999,14 @@ class AcquisitionWindow(QMainWindow):
             self.progress.setRange(0, max(1, manifest_batches or completed or 1))
             self.progress.setValue(completed)
             self.batch_summary.clear()
+            # This run's own segment (not the whole, possibly multi-run
+            # append-mode CSV history) matches the manifest's declared
+            # channels -- see read_acquisition_run's module docstring.
+            self._set_spectra_channels(saved.channels)
+            self._spectra_rows = saved.current_segment_rows
+            self._spectra_title = (f"{label} · {saved.status} · "
+                                   f"{len(saved.current_segment_rows)} events in this run's segment")
+            self._refresh_spectra()
         except Exception as exc:
             self.status.setText(f"Cannot open result: {exc}")
 

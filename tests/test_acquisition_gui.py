@@ -151,6 +151,111 @@ class AcquisitionGuiTests(unittest.TestCase):
         self.window.open_saved(self.directory / "does-not-exist")
         self.assertIn("Cannot open result", self.window.status.text())
 
+    # -- spectra: histogram of raw per-channel HG/LG values. -----------
+
+    def test_histogram_renders_after_completed_simulation_run(self):
+        self.window.channel_select.set_channels([2, 4])
+        self.window.start_run()
+        self.wait_idle()
+        self.assertTrue(self.window._spectra_rows)
+        self.assertGreater(len(self.window.axes.patches), 0)
+
+    def test_channel_visibility_toggle_changes_what_is_plotted(self):
+        self.window.channel_select.set_channels([2, 4])
+        self.window.start_run()
+        self.wait_idle()
+        self.assertEqual(set(self.window.spectra_channel_checks), {2, 4})
+        _, labels = self.window.axes.get_legend_handles_labels()
+        self.assertIn("ch2", labels)
+        self.assertIn("ch4", labels)
+
+        self.window.spectra_channel_checks[2].setChecked(False)
+        _, labels = self.window.axes.get_legend_handles_labels()
+        self.assertNotIn("ch2", labels)
+        self.assertIn("ch4", labels)
+
+    def test_bins_and_scale_controls_affect_the_rendered_histogram(self):
+        self.window.channel_select.set_channels([4])
+        self.window.start_run()
+        self.wait_idle()
+
+        self.window.spectra_bins.setValue(5)
+        few_bins_patches = len(self.window.axes.patches)
+        self.window.spectra_bins.setValue(200)
+        many_bins_patches = len(self.window.axes.patches)
+        self.assertGreater(many_bins_patches, few_bins_patches)
+
+        self.assertEqual(self.window.axes.get_yscale(), "linear")
+        self.window.spectra_log_y.setChecked(True)
+        self.assertEqual(self.window.axes.get_yscale(), "log")
+
+    def test_clear_plot_resets_display_without_touching_saved_data(self):
+        self.window.channel_select.set_channels([4])
+        self.window.start_run()
+        self.wait_idle()
+        self.assertTrue((self.directory / "events.csv").exists())
+
+        self.window.clear_spectra()
+        self.assertEqual(self.window._spectra_rows, ())
+        self.assertEqual(len(self.window.axes.patches), 0)
+        self.assertTrue((self.directory / "events.csv").exists())
+
+    def test_open_saved_run_renders_its_data(self):
+        self.window.channel_select.set_channels([4])
+        self.window.start_run()
+        self.wait_idle()
+        self.window.clear_spectra()
+        self.assertEqual(len(self.window.axes.patches), 0)
+
+        self.window.open_saved(self.directory)
+        self.assertTrue(self.window._spectra_rows)
+        self.assertGreater(len(self.window.axes.patches), 0)
+
+    def test_import_vendor_file_renders_through_the_same_path(self):
+        fixture = (Path(__file__).parent / "fixtures" /
+                  "vendor_readable_adc_acq_sample.txt")
+        self.window.import_vendor_file(fixture)
+        self.assertIn("Imported vendor file", self.window.status.text())
+        self.assertEqual(set(self.window.spectra_channel_checks), set(range(64)))
+        for channel in range(64):
+            if channel not in (4, 5):
+                self.window.spectra_channel_checks[channel].setChecked(False)
+        _, labels = self.window.axes.get_legend_handles_labels()
+        self.assertEqual(set(labels), {"ch4", "ch5"})
+        self.assertGreater(len(self.window.axes.patches), 0)
+
+    def test_live_refresh_is_throttled_not_every_poll_tick(self):
+        # A fake worker that always reports "still running", decoupled from
+        # real background-thread timing, so the throttle count is exact and
+        # not a race against how fast the simulator actually completes.
+        class _FakeSnapshot:
+            rows = ()
+            event = None
+            outcome = None
+
+        class _FakeWorker:
+            is_alive = True
+
+            def snapshot(self):
+                return _FakeSnapshot()
+
+        (self.directory).mkdir(parents=True, exist_ok=True)
+        csv_path = self.directory / "events.csv"
+        csv_path.write_text("batch,event,channel,hg,lg\n")
+        self.window._active_directory = self.directory
+        self.window._live_csv_path = csv_path
+        self.window._live_refresh_tick = 0
+        self.window.worker = _FakeWorker()
+        try:
+            with patch("radioroc.gui.acquisition_window._read_live_events",
+                      return_value=()) as reread:
+                ticks = self.window._LIVE_REFRESH_EVERY_TICKS
+                for _ in range(3 * ticks - 1):
+                    self.window.poll_worker()
+                self.assertEqual(reread.call_count, 2)
+        finally:
+            self.window.worker = None
+
     def test_close_failure_remains_visible(self):
         from radioroc.application.acquisition_worker import AcquisitionWorker
         from radioroc.transport.acquisition_simulator import create_acquisition_simulator
