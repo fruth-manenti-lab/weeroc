@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QGridLayout, QGroupBox, QHBoxLayout, QPushButton, QVBoxLayout, QWidget,
 )
 
-from radioroc_client import N_CHANNELS
+from radioroc_client import N_CHANNELS, format_channels
 
 _GRID_COLUMNS = 8
 
@@ -44,29 +44,6 @@ QPushButton:checked {{
     background: {CHECKED_FILL}; border: 1px solid {CHECKED_BORDER}; color: white;
 }}
 """
-
-
-def format_channels(channels):
-    """Render a channel list compactly, collapsing consecutive runs into
-    ranges (e.g. ``[0, 1, 2, 3, 5]`` -> ``"0-3,5"``) -- the same notation
-    the free-text field this widget replaces used to accept, so saved-run
-    metadata and CLI ``--channels`` strings built from a selection stay in
-    a familiar, readable form.
-    """
-
-    if not channels:
-        return "none"
-    ordered = sorted(set(channels))
-    parts = []
-    start = prev = ordered[0]
-    for value in ordered[1:]:
-        if value == prev + 1:
-            prev = value
-            continue
-        parts.append(str(start) if start == prev else f"{start}-{prev}")
-        start = prev = value
-    parts.append(str(start) if start == prev else f"{start}-{prev}")
-    return ",".join(parts)
 
 
 class ChannelSelectGrid(QWidget):

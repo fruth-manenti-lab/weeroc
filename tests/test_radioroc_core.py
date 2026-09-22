@@ -31,6 +31,7 @@ from radioroc_client import (
     bits,
     encode_read_request,
     encode_write_request,
+    format_channels,
     parse_bits,
     parse_channels,
     scan_values,
@@ -71,6 +72,12 @@ class RadiorocCoreTests(unittest.TestCase):
         self.assertEqual(scan_values(0, 10, 5), [0, 5, 10])
         with self.assertRaises(ValueError):
             scan_values(0, 10, 0)
+
+    def test_format_channels(self) -> None:
+        self.assertEqual(format_channels([]), "none")
+        self.assertEqual(format_channels([0, 1, 2, 3, 5]), "0-3,5")
+        self.assertEqual(format_channels([5, 1, 9]), "1,5,9")
+        self.assertEqual(format_channels([4, 4, 5]), "4-5")
 
     def test_memory_transport(self) -> None:
         transport = RadiorocMemoryTransport({100: "00000101"})

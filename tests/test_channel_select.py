@@ -1,4 +1,11 @@
-"""Unit tests for the shared channel multi-select grid widget."""
+"""Unit tests for the shared channel multi-select grid widget.
+
+``format_channels`` itself (the pure range-collapsing logic) lives in
+``radioroc_client`` and is tested in ``tests/test_radioroc_core.py``
+alongside that module's other dependency-free functions, precisely so it
+can be tested without the ``[gui]`` extra installed -- this file only
+covers the actual Qt widget, which does require it.
+"""
 
 import importlib.util
 import os
@@ -8,24 +15,6 @@ import radioroc_client  # noqa: F401  (side effect: puts src/ on sys.path for ra
 
 GUI_AVAILABLE = importlib.util.find_spec("PySide6") is not None
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
-
-class FormatChannelsTests(unittest.TestCase):
-    def test_empty(self):
-        from radioroc.gui.channel_select import format_channels
-        self.assertEqual(format_channels([]), "none")
-
-    def test_collapses_consecutive_runs(self):
-        from radioroc.gui.channel_select import format_channels
-        self.assertEqual(format_channels([0, 1, 2, 3, 5]), "0-3,5")
-
-    def test_single_values_and_unsorted_input(self):
-        from radioroc.gui.channel_select import format_channels
-        self.assertEqual(format_channels([5, 1, 9]), "1,5,9")
-
-    def test_duplicates_are_ignored(self):
-        from radioroc.gui.channel_select import format_channels
-        self.assertEqual(format_channels([4, 4, 5]), "4-5")
 
 
 @unittest.skipUnless(GUI_AVAILABLE, "install [gui] for desktop acceptance checks")

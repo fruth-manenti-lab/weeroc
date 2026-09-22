@@ -665,6 +665,39 @@ def format_channels_for_path(channels: list[int] | None) -> str:
     return "ch" + "_".join(str(channel) for channel in shown) + suffix
 
 
+def format_channels(channels: list[int]) -> str:
+    """Render a channel list compactly, collapsing consecutive runs into
+    ranges.
+
+    **Inputs**
+    - `channels` (`list[int]`): Channel indices, in any order, possibly
+      with duplicates.
+
+    **Returns**
+    - `str`: Compact notation such as `"0-3,5"`, or `"none"` if empty.
+
+    Kept dependency-free (no Qt) so it can be tested and reused without the
+    `[gui]` extra installed; `radioroc.gui.channel_select.ChannelSelectGrid`
+    uses this for its one-line selection summary, and it matches the
+    free-text notation that widget replaces, so saved-run metadata and CLI
+    `--channels` strings built from a selection stay in a familiar form.
+    """
+
+    if not channels:
+        return "none"
+    ordered = sorted(set(channels))
+    parts: list[str] = []
+    start = prev = ordered[0]
+    for value in ordered[1:]:
+        if value == prev + 1:
+            prev = value
+            continue
+        parts.append(str(start) if start == prev else f"{start}-{prev}")
+        start = prev = value
+    parts.append(str(start) if start == prev else f"{start}-{prev}")
+    return ",".join(parts)
+
+
 def default_run_dir(
     scan_name: str,
     *,
