@@ -57,11 +57,59 @@ nonterminal_run`, a real-subprocess 10s-timeout test -- reproduced failing
 only under the heavy concurrent build/venv load this verification itself
 created, confirmed passing instantly in isolation; not a regression). Full
 CI sequence reproduced locally as described above, all green. Pushed to
-`origin/feat/desktop-hardware-threshold`
-(`86b0760..9abfbbd`); GitHub Actions result not directly checked (no `gh`
-CLI/auth available in this environment) -- if it still fails, it is not
-this specific gap, which is now confirmed fixed and re-verified locally
-end to end.
+`origin/feat/desktop-hardware-threshold` (`86b0760..9abfbbd`).
+
+**Correction, checked minutes later with the operator watching the Actions
+UI directly: that push still failed, all four matrix jobs, in ~1m21s --
+too fast to have reached the wheel-check step just fixed above.** The
+earlier "if it still fails, it is not this specific gap" framing was
+correct in substance but should not have been stated with that much
+confidence without a way to actually confirm the push landed green; this
+session had no `gh` CLI/auth to check, and said so, but then still implied
+the fix was probably sufficient. It was not the same bug. The operator
+shared the failing step directly: `tools/check_development.py` itself,
+36 seconds in -- the exact command this session had run successfully well
+over a dozen times. Root cause, found by asking for the real output instead
+of guessing again: `tests/test_channel_select.py`'s `FormatChannelsTests`
+(added this session, testing `format_channels()` with no
+`skipUnless(GUI_AVAILABLE)` guard, matching that function's own "pure, no
+Qt needed" docstring claim) imported it from `radioroc.gui.channel_select`
+-- a module that unconditionally imports PySide6 at the top for its own
+`ChannelSelectGrid` widget. CI's offline job never installs `[gui]`, so the
+import itself raised `ModuleNotFoundError` before any test body ran.
+Reproduced exactly by poisoning `sys.modules['PySide6'] = None` locally
+before touching anything. This is the identical class of bug RADIOROC 28
+already fixed once (a Qt-dependent module-level import breaking test
+collection without the `[gui]` extra) -- at the function-extraction level
+this time instead of the test-file level, and not caught by this session's
+own repeated `tools/check_development.py` runs because those always ran in
+`.conda-radioroc`, which already has PySide6 installed.
+
+Fixed by moving `format_channels` into `radioroc_client.py` (next to the
+existing, differently-shaped `format_channels_for_path`) -- the
+established dependency-free home for this kind of utility -- and moving
+its test to `tests/test_radioroc_core.py` alongside that module's other
+pure-function tests. This time verified precisely rather than by pattern-
+matching against the workflow file: built a **from-scratch venv**, ran
+`pip install '.[analysis,dev]'` (confirmed `import PySide6` genuinely
+fails in it), and ran `tools/check_development.py` in *that* environment --
+the actual condition that had been missed. Also swept every other test
+file for the same risk pattern (a non-`GUI_AVAILABLE`-guarded test class in
+a file that imports `radioroc.gui.*` at module level) and found none; the
+one file that looked suspicious by that grep
+(`test_connection_panel.py`'s `ConnectionWorkerSharedAcrossWindowsTests`)
+uses a different, already-correct guard (`setUpClass` raising `SkipTest`),
+matching what the operator's CI log actually showed for it (skipped, not
+errored) -- confirming the sweep methodology against a known-good case,
+not just trusting it.
+
+**The actual lesson, not the one recorded the first time:** "reproduce the
+CI workflow's commands" is not the same as "reproduce CI's environment."
+Every verification this session ran used `.conda-radioroc`, an environment
+that already has every optional extra installed -- it could never have
+caught a missing-extra-only failure no matter how many times it ran
+correctly. A genuine repro needs a venv built the same way CI builds one,
+checked to confirm the thing that's supposed to be absent actually is.
 
 **Not done:** the same "regular test suite never exercises this script"
 gap could hide a similar issue again in the future for any GUI-default
