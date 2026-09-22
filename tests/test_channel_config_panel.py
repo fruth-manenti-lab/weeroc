@@ -113,6 +113,18 @@ class ChannelConfigPanelTests(unittest.TestCase):
         panel.channel_config_set_tq_mask.setChecked(True)
         self.assertIsNotNone(panel.apply())
 
+    def test_attach_hints_wires_the_panels_controls(self):
+        from PySide6.QtCore import QEvent
+        from PySide6.QtWidgets import QMainWindow
+        from radioroc.gui.hint_bar import HintBar
+        panel = self.make_panel()
+        window = QMainWindow()
+        self.addCleanup(window.deleteLater)
+        hint = HintBar(window.statusBar(), "default")
+        panel.attach_hints(hint)
+        hint.eventFilter(panel.channel_config_apply_button, QEvent(QEvent.Type.Enter))
+        self.assertNotEqual(window.statusBar().currentMessage(), "default")
+
 
 class FakeWorker:
     def __init__(self, raise_on_apply=None):

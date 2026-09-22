@@ -146,3 +146,25 @@ class ThresholdCalibrationPanel(QWidget):
         self.status_label.setText(
             "Calibration: " + "; ".join(parts) + (
                 (" · " + "; ".join(result.applied)) if result.applied else ""))
+
+    def attach_hints(self, hint_bar):
+        """Wire hover-hint text for this panel's controls into ``hint_bar``.
+
+        Every per-channel spinbox in a given 64-cell grid gets the same hint
+        text (they differ only in which channel they affect), so one loop
+        per grid covers it instead of 64 distinct strings.
+        """
+        for spinbox in self.t1_spinboxes:
+            hint_bar.attach(spinbox, "Calibration DAC T1 trim code for this channel (0-63).")
+        for spinbox in self.t2_spinboxes:
+            hint_bar.attach(spinbox, "Calibration DAC T2 trim code for this channel (0-63).")
+        hint_bar.attach(self.t1_set_all_spinbox,
+                        "Value to give every T1 channel when the T1 'Apply' button "
+                        "next to it is clicked.")
+        hint_bar.attach(self.t1_set_all_button, "Set every T1 channel to the value on the left.")
+        hint_bar.attach(self.t2_set_all_spinbox,
+                        "Value to give every T2 channel when the T2 'Apply' button "
+                        "next to it is clicked.")
+        hint_bar.attach(self.t2_set_all_button, "Set every T2 channel to the value on the left.")
+        hint_bar.attach(self.apply_button,
+                        "Apply the T1/T2 calibration DAC grids to the connected hardware.")

@@ -159,3 +159,21 @@ class InputDacGridPanel(QWidget):
         self.status_label.setText(
             "Input DAC: " + "; ".join(parts) + (
                 (" · " + "; ".join(result.applied)) if result.applied else ""))
+
+    def attach_hints(self, hint_bar):
+        """Wire hover-hint text for this panel's controls into ``hint_bar``.
+
+        Every per-channel spinbox in the 64-cell grid gets the same hint
+        text (they differ only in which channel they affect), so one loop
+        covers the whole grid instead of 64 distinct strings.
+        """
+        for spinbox in self.channel_value_spinboxes:
+            hint_bar.attach(spinbox, "Input DAC DC-level code for this channel (0-255).")
+        hint_bar.attach(self.hiz_checkbox,
+                        "Switch to high-impedance input (needs an external resistor) "
+                        "instead of the ~150 Ohm default; applies to all channels.")
+        hint_bar.attach(self.all_on_button, "Enable the input DAC for every channel.")
+        hint_bar.attach(self.all_off_button, "Disable the input DAC for every channel.")
+        hint_bar.attach(self.apply_button,
+                        "Write the 64-channel input DAC grid and impedance setting to "
+                        "the connected hardware.")

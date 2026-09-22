@@ -292,3 +292,39 @@ class MainPanel(QWidget):
         self.status_label.setText(
             "Main: " + "; ".join(parts) + (
                 (" · " + "; ".join(result.applied)) if result.applied else ""))
+
+    def attach_hints(self, hint_bar):
+        """Wire hover-hint text for this panel's controls into ``hint_bar``."""
+        hint_bar.attach(self.channel_spin,
+                        "Channel whose analog front end the fields below show/edit.")
+        hint_bar.attach(self.compensation_spin,
+                        "Trigger preamplifier (paT) compensation code (0-3); leave at 0 "
+                        "unless you know you need otherwise.")
+        hint_bar.attach(self.preamp_gain_spin,
+                        "Trigger preamplifier (paT) gain code (1=max gain, 63=min gain, "
+                        "0=open loop).")
+        hint_bar.attach(self.high_gain_spin, "Energy measurement high-gain (paHG) code.")
+        hint_bar.attach(self.high_gain_shaping_spin,
+                        "High-gain shaping time code; actual time is this code times "
+                        "20 ns or 120 ns, depending on the shaping-LSB checkbox.")
+        hint_bar.attach(self.high_gain_shaping_slow_check,
+                        "Use 120 ns per code for high-gain shaping instead of 20 ns.")
+        hint_bar.attach(self.low_gain_spin, "Energy measurement low-gain (paLG) code.")
+        hint_bar.attach(self.low_gain_shaping_spin,
+                        "Low-gain shaping time code; actual time is this code times "
+                        "20 ns or 120 ns, depending on the shaping-LSB checkbox.")
+        hint_bar.attach(self.low_gain_shaping_slow_check,
+                        "Use 120 ns per code for low-gain shaping instead of 20 ns.")
+        hint_bar.attach(self.t1_threshold_spin, "Threshold for trigger T1 (ASIC-wide, "
+                        "not per channel).")
+        hint_bar.attach(self.t2_threshold_spin, "Threshold for trigger T2 (ASIC-wide, "
+                        "not per channel).")
+        hint_bar.attach(self.tq_threshold_spin, "Threshold for trigger TQ (ASIC-wide, "
+                        "not per channel).")
+        hint_bar.attach(self.trigger_selection_combo,
+                        "Which trigger source feeds the readout (ASIC-wide).")
+        hint_bar.attach(self.delay_spin, "Trigger delay code (ASIC-wide).")
+        hint_bar.attach(self.slope_spin, "Trigger delay slope code (ASIC-wide).")
+        hint_bar.attach(self.apply_button,
+                        "Apply the front-end and common-threshold settings above to "
+                        "the connected hardware.")

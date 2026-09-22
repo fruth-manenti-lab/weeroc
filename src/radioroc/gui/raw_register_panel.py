@@ -156,3 +156,18 @@ class RawRegisterPanel(QWidget):
         if result.observed is not None:
             parts.append("MISMATCH" if result.mismatch else "verified")
         self.status_label.setText("Write: " + " · ".join(parts))
+
+    def attach_hints(self, hint_bar):
+        """Wire hover-hint text for this panel's controls into ``hint_bar``.
+
+        ``table`` isn't hoverable per-cell via this mechanism, so it's
+        skipped -- only the read/write controls get hints.
+        """
+        hint_bar.attach(self.read_all_button,
+                        "Read every ASIC register over I2C and list them below.")
+        hint_bar.attach(self.write_address, "I2C register address (0-255) to write to.")
+        hint_bar.attach(self.write_subaddress, "I2C register subaddress (0-255) to write to.")
+        hint_bar.attach(self.write_data,
+                        "8-bit binary value to write to the selected address/subaddress.")
+        hint_bar.attach(self.write_button,
+                        "Write the address/subaddress/data above to the connected hardware.")

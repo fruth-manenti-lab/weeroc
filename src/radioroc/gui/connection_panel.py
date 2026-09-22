@@ -277,3 +277,21 @@ class ConnectionPanel(QWidget):
         """
         return (self.connection_worker is not None and
                 self.connection_worker.snapshot().state in self._CONNECTION_LOCKS_MODE)
+
+    def attach_hints(self, hint_bar):
+        """Wire hover-hint text for this panel's controls into ``hint_bar``.
+
+        ``ConnectionPanel`` has no status bar of its own -- an embedder (e.g.
+        ``MainWindow``) owns the ``HintBar`` and passes it in here, the same
+        way the three scan windows attach hints for their own embedded copy
+        of this panel.
+        """
+        hint_bar.attach(self.port_select, "USB serial port candidate to connect to.")
+        hint_bar.attach(self.baud, "Serial baud rate for the connection.")
+        hint_bar.attach(self.timeout_s, "Serial read/write timeout, in seconds.")
+        hint_bar.attach(self.refresh_button, "Re-scan for USB port candidates.")
+        hint_bar.attach(self.connect_button, "Open a connection to the selected port.")
+        hint_bar.attach(self.read_status_button, "Read the board's current firmware/"
+                        "connection status.")
+        hint_bar.attach(self.disconnect_button, "Close the current hardware connection.")
+        hint_bar.attach(self.review_fault_button, "Show details of the last connection fault.")

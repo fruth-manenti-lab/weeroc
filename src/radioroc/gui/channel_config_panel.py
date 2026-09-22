@@ -174,3 +174,33 @@ class ChannelConfigPanel(QWidget):
         self.channel_config_status.setText(
             "Channel config: " + "; ".join(parts) + (
                 (" · " + "; ".join(result.applied)) if result.applied else ""))
+
+    def attach_hints(self, hint_bar):
+        """Wire hover-hint text for this panel's controls into ``hint_bar``."""
+        hint_bar.attach(self.channel_config_channels,
+                        "Channels this configuration applies to (e.g. 4 or 0-15 or all).")
+        hint_bar.attach(self.channel_config_set_tq_mask,
+                        "Set the TQ mask for the channels above; leave unchecked to leave "
+                        "TQ masking alone.")
+        hint_bar.attach(self.channel_config_tq_mask_value,
+                        "Value to write when 'Set TQ mask' is checked.")
+        hint_bar.attach(self.channel_config_set_input_dac_enable,
+                        "Set the input DAC enable bit for the channels above; leave "
+                        "unchecked to leave it alone.")
+        hint_bar.attach(self.channel_config_input_dac_enable_value,
+                        "Value to write when 'Set input DAC enable' is checked.")
+        hint_bar.attach(self.channel_config_set_input_dac_value,
+                        "Set the input DAC's raw DC-level code for the channels above; "
+                        "leave unchecked to leave it alone.")
+        hint_bar.attach(self.channel_config_input_dac_value,
+                        "Input DAC code (0-255) to write when 'Set input DAC value' "
+                        "is checked.")
+        hint_bar.attach(self.channel_config_impedance,
+                        "Input impedance for all channels: Low (~150 Ohm) or High; "
+                        "leave Unchanged to skip it.")
+        hint_bar.attach(self.channel_config_restore,
+                        "Read back and restore the previous values after applying, "
+                        "instead of leaving this configuration in place. Unchecked, "
+                        "this configuration persists on the board.")
+        hint_bar.attach(self.channel_config_apply_button,
+                        "Apply the channel configuration above to the connected hardware.")

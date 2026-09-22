@@ -134,6 +134,20 @@ class RawRegisterPanelTests(unittest.TestCase):
         self.assertEqual(panel.write_subaddress.text(), "0")
         self.assertEqual(panel.write_data.text(), bits(200, 8))
 
+    def test_attach_hints_wires_the_read_and_write_controls(self):
+        from PySide6.QtCore import QEvent
+        from PySide6.QtWidgets import QMainWindow
+        from radioroc.gui.hint_bar import HintBar
+        panel = self.make_panel()
+        window = QMainWindow()
+        self.addCleanup(window.deleteLater)
+        hint = HintBar(window.statusBar(), "default")
+        panel.attach_hints(hint)
+        hint.eventFilter(panel.read_all_button, QEvent(QEvent.Type.Enter))
+        self.assertNotEqual(window.statusBar().currentMessage(), "default")
+        hint.eventFilter(panel.write_button, QEvent(QEvent.Type.Enter))
+        self.assertNotEqual(window.statusBar().currentMessage(), "default")
+
 
 class FakeWorker:
     def __init__(self, *, busy_polls=0, raise_on_read_all=None, raise_on_write=None):

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from .channel_config_panel import ChannelConfigPanel
 from .connection_panel import ConnectionPanel
+from .hint_bar import HintBar
 from .hold_scan_window import HoldScanWindow
 from .input_dac_grid_panel import InputDacGridPanel
 from .main_panel import MainPanel
@@ -161,6 +162,24 @@ class MainWindow(QMainWindow):
         # there is no reason to also make the user click Refresh once before
         # a USB board candidate shows up at all.
         self.connection_panel.refresh()
+
+        # -- Hover-hint status line: mirrors the vendor app's own help line
+        # (see radioroc.gui.hint_bar.HintBar and the three scan windows,
+        # which each already attach hints to their own status bar). These
+        # six panels and ConnectionPanel are plain QWidget subclasses with no
+        # status bar of their own, so they report into this window's.
+        self.hint = HintBar(
+            self.statusBar(),
+            "RADIOROC: manage the board connection and ASIC configuration here, "
+            "or switch to Calibration for the scan workflows. Hover a control to "
+            "see what it does.")
+        self.connection_panel.attach_hints(self.hint)
+        self.main_panel.attach_hints(self.hint)
+        self.channel_config_panel.attach_hints(self.hint)
+        self.input_dac_grid_panel.attach_hints(self.hint)
+        self.threshold_calibration_panel.attach_hints(self.hint)
+        self.probes_masks_panel.attach_hints(self.hint)
+        self.raw_register_panel.attach_hints(self.hint)
 
         # -- Calibration: the three scan workflows as sub-tabs ---------------
         calibration_page = QWidget()

@@ -114,6 +114,20 @@ class InputDacGridPanelTests(unittest.TestCase):
         self.assertTrue(panel.status_label.text())
         self.assertIn("bus busy", panel.status_label.text())
 
+    def test_attach_hints_wires_the_grid_and_buttons(self):
+        from PySide6.QtCore import QEvent
+        from PySide6.QtWidgets import QMainWindow
+        from radioroc.gui.hint_bar import HintBar
+        panel = self.make_panel()
+        window = QMainWindow()
+        self.addCleanup(window.deleteLater)
+        hint = HintBar(window.statusBar(), "default")
+        panel.attach_hints(hint)
+        hint.eventFilter(panel.channel_value_spinboxes[0], QEvent(QEvent.Type.Enter))
+        self.assertNotEqual(window.statusBar().currentMessage(), "default")
+        hint.eventFilter(panel.apply_button, QEvent(QEvent.Type.Enter))
+        self.assertNotEqual(window.statusBar().currentMessage(), "default")
+
 
 class FakeWorker:
     def __init__(self, raise_on_apply=None):

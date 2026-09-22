@@ -146,3 +146,25 @@ class ProbesMasksPanel(QWidget):
         self.status_label.setText(
             "Channel config: " + "; ".join(parts) + (
                 (" · " + "; ".join(result.applied)) if result.applied else ""))
+
+    def attach_hints(self, hint_bar):
+        """Wire hover-hint text for this panel's controls into ``hint_bar``.
+
+        Every per-channel checkbox in a given 64-cell grid gets the same
+        hint text (they differ only in which channel they affect), so one
+        loop per grid covers it instead of 64 distinct strings.
+        """
+        for checkbox in self.t1_checkboxes:
+            hint_bar.attach(checkbox, "Enable T1 triggering for this channel.")
+        for checkbox in self.t2_checkboxes:
+            hint_bar.attach(checkbox, "Enable T2 triggering for this channel.")
+        for checkbox in self.tq_checkboxes:
+            hint_bar.attach(checkbox, "Enable TQ (charge) triggering for this channel.")
+        hint_bar.attach(self.t1_enable_all_button, "Enable T1 for every channel.")
+        hint_bar.attach(self.t1_enable_none_button, "Disable T1 for every channel.")
+        hint_bar.attach(self.t2_enable_all_button, "Enable T2 for every channel.")
+        hint_bar.attach(self.t2_enable_none_button, "Disable T2 for every channel.")
+        hint_bar.attach(self.tq_enable_all_button, "Enable TQ for every channel.")
+        hint_bar.attach(self.tq_enable_none_button, "Disable TQ for every channel.")
+        hint_bar.attach(self.apply_button,
+                        "Apply the T1/T2/TQ enable masks to the connected hardware.")

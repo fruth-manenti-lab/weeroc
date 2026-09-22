@@ -317,6 +317,19 @@ class MainWindowTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertEqual(worker.snapshot().state, "stopped")
 
+    def test_hint_bar_reports_into_the_window_status_bar(self):
+        from PySide6.QtCore import QEvent
+        window = self._make_window()
+        self.assertIsNotNone(window.hint)
+        default_message = window.statusBar().currentMessage()
+        self.assertTrue(default_message)
+        window.hint.eventFilter(window.connection_panel.connect_button, QEvent(QEvent.Type.Enter))
+        self.assertNotEqual(window.statusBar().currentMessage(), default_message)
+        window.hint.eventFilter(window.connection_panel.connect_button, QEvent(QEvent.Type.Leave))
+        self.assertEqual(window.statusBar().currentMessage(), default_message)
+        window.hint.eventFilter(window.main_panel.apply_button, QEvent(QEvent.Type.Enter))
+        self.assertNotEqual(window.statusBar().currentMessage(), default_message)
+
 
 if __name__ == "__main__":
     unittest.main()

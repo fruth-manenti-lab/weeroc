@@ -150,6 +150,20 @@ class ConnectionPanelTests(unittest.TestCase):
         panel.poll()
         self.assertGreaterEqual(len(ticks), 2)
 
+    def test_attach_hints_wires_the_connection_controls(self):
+        from PySide6.QtCore import QEvent
+        from PySide6.QtWidgets import QMainWindow
+        from radioroc.gui.hint_bar import HintBar
+        panel = self.make_panel()
+        window = QMainWindow()
+        self.addCleanup(window.deleteLater)
+        hint = HintBar(window.statusBar(), "default")
+        panel.attach_hints(hint)
+        hint.eventFilter(panel.connect_button, QEvent(QEvent.Type.Enter))
+        self.assertNotEqual(window.statusBar().currentMessage(), "default")
+        hint.eventFilter(panel.port_select, QEvent(QEvent.Type.Enter))
+        self.assertNotEqual(window.statusBar().currentMessage(), "default")
+
 
 class ConnectionWorkerSharedAcrossWindowsTests(unittest.TestCase):
     """A single injected ConnectionWorker must read the same way from every
