@@ -1,5 +1,56 @@
 # Implementation status
 
+## RADIOROC 28 (continued) — Two real bugs the operator hit live, using the actual app
+
+Same conversation, after RADIOROC 28's other work. The operator actually
+launched `radioroc-desktop` and used it, twice, and found two real bugs
+neither offline unit tests nor this session's own end-to-end reasoning had
+caught.
+
+**Bug 1 — port dropdown empty until Refresh clicked once.** MainWindow
+starts the shared `ConnectionWorker` eagerly at construction (unlike a
+standalone scan window, which stays lazy on purpose), but nothing then
+triggered discovery — the operator had to click Refresh once before any USB
+candidate appeared at all. Fixed: `MainWindow.__init__` now calls
+`connection_panel.refresh()` right after starting the worker. Verified
+against the real board's discovery (not just a fake) before committing.
+
+**Bug 2 — a scan tab's "Device / mode" selector stuck on Simulation,
+greyed out, after connecting via the shared ASIC-config page.** This is
+the normal order of use in the shared shell (Threshold/Hold-scan/S-curve
+don't own a connection to connect from themselves), and it was completely
+blocked: `_mode_switch_locked()` and `_update_connection_controls()` in all
+three scan windows read the *shared* worker's own "connected" state as a
+reason to lock/grey out this window's mode selector — correct for a window
+that owns its connection (switching away from Hardware mid-session would
+orphan a session it's responsible for), wrong here, since the window never
+owns the shared connection's lifecycle at all. Fixed by keying both checks
+off this window's own `_hardware_running` flag instead of the shared
+worker's state, when `_connection_panel is None` (shared mode). The
+existing regression test for RADIOROC 27's connection-propagation fix
+switched mode to Hardware *before* connecting, which never exercised this
+order; added a new test connecting first, confirmed it fails without the
+fix (reproducing exactly what the operator saw) and passes with it.
+
+**Responding to the operator's direct question — "can your test try to run
+basic things like this?"** — added two more MainWindow-level tests that
+actually run a full scan (not just check a button's enabled state) through
+the real `ThresholdWindow`/`ScurveWindow` classes after connecting via the
+shared page, against a session backed by a faithful fake ASIC/FPGA
+transport. Tried the same for Hold scan; it hung against that fake
+transport, which this session judged to be a fake-fidelity gap rather than
+a live bug (Hold scan already has real-hardware GUI evidence from
+RADIOROC 24, and the fake transport in question was built for the
+threshold job's specific interaction sequence) — left as a known gap
+instead of forcing a misleading pass or chasing it further.
+
+**Evidence:** 290/290 offline tests (5 new), 3 clean full-suite runs.
+
+**Not done:** figuring out why the shared fake ASIC/FPGA transport hangs
+against a real Hold-scan run, or building a better one — flagged for a
+future session, not urgent since Hold scan itself is already validated on
+real hardware.
+
 ## RADIOROC 28 — CI fix; raw-register view (F06); a real async-race bug fix (offline)
 
 Same conversation as RADIOROC 27, continuing after the operator asked two
