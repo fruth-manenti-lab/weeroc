@@ -5,6 +5,7 @@ __pycache__/
 # Local Python/conda environments
 .conda*/
 .venv/
+.venv-*/
 venv/
 
 # Vendor installers, archives, drivers, and extracted binaries
@@ -23,3 +24,15 @@ radioroc_extracted/
 *_pydisasm.txt
 radioroc2_user_guide.txt
 radioroc_runs/
+
+# Local experiment results (retain locally, never commit)
+/test0/
+/test1/
+/test1_std/
+/test2/
+/test3/
+
+# Python packaging output
+/build/
+/dist/
+*.egg-info/

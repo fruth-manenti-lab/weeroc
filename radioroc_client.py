@@ -14,6 +14,7 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from importlib.resources import files
 import json
 import math
 from pathlib import Path
@@ -21,15 +22,22 @@ import statistics
 import subprocess
 import sys
 import time
-from typing import Optional
+# Prefer this checkout's package when running legacy scripts without installation.
+_source_package = Path(__file__).resolve().parent / "src"
+if (_source_package / "radioroc").is_dir():
+    sys.path.insert(0, str(_source_package))
 
-import serial
+from radioroc.protocol import bits, parse_bits, encode_read_request, encode_write_request
+from radioroc.transport import (
+    DEFAULT_PORT, DEFAULT_BAUD, DEFAULT_TIMEOUT_SECONDS,
+    RadiorocConnectionConfig, RadiorocSerial, RadiorocMemoryTransport,
+)
+from radioroc.transport.errors import TransportProtocolError
 
 
-DEFAULT_PORT: str = "/dev/cu.usbserial-RD3_320"
-DEFAULT_BAUD: int = 115200
-DEFAULT_TIMEOUT_SECONDS: float = 0.5
-DEFAULT_CONFIG: Path = Path("configs/radio_default_i2c.csv")
+DEFAULT_CONFIG: Path = Path(__file__).resolve().parent / "configs" / "radio_default_i2c.csv"
+if not DEFAULT_CONFIG.is_file():
+    DEFAULT_CONFIG = Path(str(files("radioroc.resources").joinpath("radio_default_i2c.csv")))
 DEFAULT_RUNS_DIR: Path = Path("radioroc_runs")
 N_CHANNELS: int = 64
 FPGA_IO_NAMES: tuple[str, ...] = ("io0", "io1", "io2", "io3", "io4")
@@ -50,28 +58,13 @@ FPGA_ADC_ACQUISITION_COUNT_WORD: int = 21
 FPGA_SYNCHRO_TRIGGER_WORD: int = 22
 FPGA_IO_MUX_LOW_WORD: int = 77
 FPGA_IO_MUX_HIGH_WORD: int = 78
+ASIC_SHAPER_GAIN_SUBADDRESS: int = 2
 
 INTERNAL_HOLD_ADC_CONTROL_WORD: str = "01110100"
 EXTERNAL_HOLD_TRACK_ADC_CONTROL_WORD: str = "01111000"
 EXTERNAL_HOLD_PEAK_ADC_CONTROL_WORD: str = "01111100"
 INTERNAL_HOLD_CONVERSION_WORD: str = "11111111"
 EXTERNAL_HOLD_VENDOR_CONVERSION_WORD: str = "00000100"
-
-
-@dataclass
-class RadiorocConnectionConfig:
-    """Connection settings for a RADIOROC 2 USB serial session.
-
-    **Attributes**
-    - `port` (`str`): macOS serial device path, for example
-      `"/dev/cu.usbserial-RD3_320"`.
-    - `baud` (`int`): Serial baud rate. The tested board uses `115200`.
-    - `timeout_s` (`float`): Read and write timeout in seconds.
-    """
-
-    port: str = DEFAULT_PORT
-    baud: int = DEFAULT_BAUD
-    timeout_s: float = DEFAULT_TIMEOUT_SECONDS
 
 
 @dataclass
@@ -208,6 +201,8 @@ class ScurveConfig:
         """
 
         validate_channels(self.channels)
+        if len(set(self.channels)) != len(self.channels):
+            raise ValueError("channels must be unique")
         validate_scan_range(self.dac_min, self.dac_max, self.dac_step, name="DAC")
         if not 0 <= self.clock_index <= 3:
             raise ValueError("clock_index must be in range 0..3")
@@ -255,14 +250,27 @@ class ThresholdScanConfig:
         - `None`
         """
 
-        validate_channels(self.channels)
+        from radioroc.protocol.frames import validate_integer
+        if not self.channels:
+            raise ValueError("at least one channel is required")
+        for channel in self.channels:
+            validate_integer(channel, 0, 63, "channel")
+        if len(set(self.channels)) != len(self.channels):
+            raise ValueError("channels must be unique")
+        validate_integer(self.dac_min, 0, 1023, "dac_min")
+        validate_integer(self.dac_max, 0, 1023, "dac_max")
+        validate_integer(self.dac_step, 1, 1024, "dac_step")
         validate_scan_range(self.dac_min, self.dac_max, self.dac_step, name="DAC")
-        if self.trigger_window_ms <= 0:
-            raise ValueError("trigger_window_ms must be positive")
-        if self.averages < 1:
-            raise ValueError("averages must be at least 1")
-        if self.trigger_preamp_gain is not None and not 1 <= self.trigger_preamp_gain <= 63:
-            raise ValueError("trigger_preamp_gain must be in range 1..63")
+        if (isinstance(self.trigger_window_ms, bool)
+                or not isinstance(self.trigger_window_ms, (int, float))
+                or not math.isfinite(self.trigger_window_ms) or self.trigger_window_ms <= 0):
+            raise ValueError("trigger_window_ms must be finite and positive")
+        validate_integer(self.averages, 1, 2**31 - 1, "averages")
+        for name in ("t1", "use_mask", "use_ctest"):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be boolean")
+        if self.trigger_preamp_gain is not None:
+            validate_integer(self.trigger_preamp_gain, 1, 63, "trigger_preamp_gain")
 
 
 @dataclass
@@ -295,6 +303,8 @@ class HoldScanConfig:
     - `use_mask` (`bool`): Mask all but the trigger channel.
     - `use_ctest` (`bool`): Enable Ctest on the trigger channel.
     - `trigger_preamp_gain` (`int | None`): Optional paT gain code `1..63`.
+    - `high_gain_code` (`int | None`): Optional high-gain shaper code `1..15`.
+    - `low_gain_code` (`int | None`): Optional low-gain shaper code `1..15`.
     - `out_dir` (`Path`): Run output directory.
     """
 
@@ -322,6 +332,8 @@ class HoldScanConfig:
     use_mask: bool = True
     use_ctest: bool = False
     trigger_preamp_gain: int | None = None
+    high_gain_code: int | None = None
+    low_gain_code: int | None = None
     out_dir: Path = DEFAULT_RUNS_DIR
 
     def validate(self) -> None:
@@ -337,6 +349,8 @@ class HoldScanConfig:
         if self.mode not in {"internal", "external"}:
             raise ValueError("hold mode must be 'internal' or 'external'")
         validate_channels(self.channels)
+        if len(set(self.channels)) != len(self.channels):
+            raise ValueError("channels must be unique")
         validate_channel(self.trigger_channel)
         validate_scan_range(self.hold_min, self.hold_max, self.hold_step, name="hold")
         if self.mode == "internal" and not (0 <= self.hold_min <= 255 and 0 <= self.hold_max <= 255):
@@ -365,6 +379,115 @@ class HoldScanConfig:
             raise ValueError("sync_io_mux_index must be in range 0..7")
         if self.trigger_preamp_gain is not None and not 1 <= self.trigger_preamp_gain <= 63:
             raise ValueError("trigger_preamp_gain must be in range 1..63")
+        for name, value in (("high_gain_code", self.high_gain_code), ("low_gain_code", self.low_gain_code)):
+            if value is not None and not 1 <= value <= 15:
+                raise ValueError(f"{name} must be in range 1..15")
+
+
+@dataclass
+class AcquisitionConfig:
+    """Configuration for a fixed-setting external-hold ADC event acquisition.
+
+    Unlike `HoldScanConfig`, there is no swept hold value: `configure_adc_
+    external_hold` is applied at one fixed operating point and repeated
+    ADC batches are collected at it.
+
+    **Attributes**
+    - `channels` (`list[int]`): ADC channels to save.
+    - `trigger_channel` (`int`): Channel used for the ADC trigger setup.
+    - `threshold_dac` (`int | None`): Optional T1/T2 threshold DAC setting.
+    - `hold_delay_ns` (`int`): External hold delay in ns, divisible by 5.
+    - `conversion_delay_ns` (`int`): ADC conversion delay, divisible by 40 ns.
+    - `acquisitions_per_batch` (`int`): Requested ADC acquisitions per batch.
+    - `batches` (`int`): Number of acquisition batches to run.
+    - `start_batch` (`int`): First batch number, for append-mode continuation.
+    - `timeout_s` (`float`): Per-batch ADC timeout.
+    - `trigger_preamp_gain` (`int | None`): Optional paT gain code `1..63`.
+    - `high_gain_code` (`int | None`): Optional high-gain shaper code `1..15`.
+    - `low_gain_code` (`int | None`): Optional low-gain shaper code `1..15`.
+    - `peak_sensing` (`bool`): Use vendor external-hold peak-sensing path.
+    - `t1` (`bool`): Use T1 threshold when true, T2 when false.
+    - `use_mask` (`bool`): Mask all but the trigger channel.
+    - `trigger_type` (`int`): Vendor ADC trigger type code.
+    - `trigger_source` (`int`): Vendor ADC trigger source code.
+    - `adc_window_ns` (`int`): ADC coincidence/window width, divisible by 5 ns.
+    - `adc_nb_trig` (`int`): ADC time-window trigger count.
+    - `rstn_manual` (`bool`): Vendor ADC reset-n manual bit.
+    - `synchro_trigger` (`bool`): Pulse FPGA synchro trigger per ADC batch.
+    - `out_dir` (`Path`): Run output directory.
+    """
+
+    channels: list[int]
+    trigger_channel: int
+    threshold_dac: int | None = None
+    hold_delay_ns: int = 530
+    conversion_delay_ns: int = 400
+    acquisitions_per_batch: int = 50
+    batches: int = 10
+    start_batch: int = 0
+    timeout_s: float = 5.0
+    trigger_preamp_gain: int | None = None
+    high_gain_code: int | None = None
+    low_gain_code: int | None = None
+    peak_sensing: bool = False
+    t1: bool = True
+    use_mask: bool = True
+    trigger_type: int = 0
+    trigger_source: int = 3
+    adc_window_ns: int = 50
+    adc_nb_trig: int = 1
+    rstn_manual: bool = False
+    synchro_trigger: bool = False
+    out_dir: Path = DEFAULT_RUNS_DIR
+
+    def validate(self) -> None:
+        """Validate this acquisition configuration before hardware writes.
+
+        Field-level ranges already enforced by the primitives this config
+        feeds (`configure_adc_external_hold`, `acquire_adc_batch`,
+        `set_threshold_dac`, `set_trigger_preamp_gain`,
+        `set_energy_shaper_gain`) are re-checked here so invalid input is
+        rejected before any hardware access; this method only adds the
+        cross-field/shape checks those primitives cannot see on their own.
+
+        **Inputs**
+        - None
+
+        **Returns**
+        - `None`
+        """
+
+        validate_channels(self.channels)
+        if len(set(self.channels)) != len(self.channels):
+            raise ValueError("channels must be unique")
+        validate_channel(self.trigger_channel)
+        if self.threshold_dac is not None and not 0 <= self.threshold_dac <= 1023:
+            raise ValueError("threshold_dac must be in range 0..1023")
+        if self.hold_delay_ns < 0 or self.hold_delay_ns % 5 != 0:
+            raise ValueError("hold_delay_ns must be non-negative and divisible by 5")
+        if self.conversion_delay_ns < 0 or self.conversion_delay_ns % 40 != 0:
+            raise ValueError("conversion_delay_ns must be non-negative and divisible by 40")
+        if not 1 <= self.acquisitions_per_batch <= 255:
+            raise ValueError("acquisitions_per_batch must be in range 1..255")
+        if self.batches < 1:
+            raise ValueError("batches must be at least 1")
+        if self.start_batch < 0:
+            raise ValueError("start_batch must be non-negative")
+        if self.timeout_s <= 0:
+            raise ValueError("timeout_s must be positive")
+        if self.trigger_preamp_gain is not None and not 1 <= self.trigger_preamp_gain <= 63:
+            raise ValueError("trigger_preamp_gain must be in range 1..63")
+        for name, value in (("high_gain_code", self.high_gain_code), ("low_gain_code", self.low_gain_code)):
+            if value is not None and not 1 <= value <= 15:
+                raise ValueError(f"{name} must be in range 1..15")
+        if not 0 <= self.trigger_type <= 3:
+            raise ValueError("trigger_type must be in range 0..3")
+        if not 0 <= self.trigger_source <= 7:
+            raise ValueError("trigger_source must be in range 0..7")
+        if self.adc_window_ns < 0 or self.adc_window_ns % 5 != 0:
+            raise ValueError("adc_window_ns must be non-negative and divisible by 5")
+        if not 0 <= self.adc_nb_trig <= 63:
+            raise ValueError("adc_nb_trig must be in range 0..63")
 
 
 @dataclass
@@ -446,27 +569,9 @@ class ScurveResult:
     - `metadata_path` (`Path | None`): Output metadata JSON path.
     - `metadata` (`RadiorocRunMetadata | None`): Run metadata.
     - `points` (`int`): Number of DAC points written.
-    - `warnings` (`list[str]`): Non-fatal warnings.
-    """
-
-    csv_path: Path
-    metadata_path: Path | None = None
-    metadata: RadiorocRunMetadata | None = None
-    points: int = 0
-    warnings: list[str] = field(default_factory=list)
-
-
-@dataclass
-class ThresholdScanResult:
-    """Result metadata for a threshold scan.
-
-    **Attributes**
-    - `csv_path` (`Path`): Output CSV path.
-    - `metadata_path` (`Path | None`): Output metadata JSON path.
-    - `metadata` (`RadiorocRunMetadata | None`): Run metadata.
-    - `points` (`int`): Number of DAC points written.
     - `channels` (`list[int]`): Channels included in the scan.
     - `warnings` (`list[str]`): Non-fatal warnings.
+    - `verification` (`dict | None`): Optional independent restoration report.
     """
 
     csv_path: Path
@@ -475,6 +580,45 @@ class ThresholdScanResult:
     points: int = 0
     channels: list[int] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    status: str = "completed"
+    cleanup_status: str = "not_required"
+    cleanup_errors: list[str] = field(default_factory=list)
+    persistence_errors: list[str] = field(default_factory=list)
+    error: BaseException | None = None
+    execution_mode: str = "hardware"
+    verification: dict | None = None
+
+
+@dataclass
+class ThresholdScanResult:
+    """Result metadata for a threshold scan.
+
+    **Attributes**
+    - `csv_path` (`Path`): Output CSV path.
+    - `attempts_csv_path` (`Path | None`): Per-window attempt CSV path.
+    - `metadata_path` (`Path | None`): Output metadata JSON path.
+    - `metadata` (`RadiorocRunMetadata | None`): Run metadata.
+    - `points` (`int`): Number of DAC points written.
+    - `channels` (`list[int]`): Channels included in the scan.
+    - `warnings` (`list[str]`): Non-fatal warnings.
+    - `verification` (`dict | None`): Optional independent restoration report.
+    """
+
+    csv_path: Path
+    attempts_csv_path: Path | None = None
+    metadata_path: Path | None = None
+    metadata: RadiorocRunMetadata | None = None
+    points: int = 0
+    channels: list[int] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    status: str = "completed"
+    cleanup_status: str = "not_required"
+    cleanup_errors: list[str] = field(default_factory=list)
+    persistence_errors: list[str] = field(default_factory=list)
+    error: BaseException | None = None
+    attempts: int = 0
+    execution_mode: str = "hardware"
+    verification: dict | None = None
 
 
 @dataclass
@@ -489,6 +633,7 @@ class HoldScanResult:
     - `channels` (`list[int]`): Channels summarized in the scan.
     - `mode` (`str`): Hold mode used for the scan.
     - `warnings` (`list[str]`): Non-fatal warnings.
+    - `verification` (`dict | None`): Optional independent restoration report.
     """
 
     csv_path: Path
@@ -498,6 +643,42 @@ class HoldScanResult:
     channels: list[int] = field(default_factory=list)
     mode: str = "internal"
     warnings: list[str] = field(default_factory=list)
+    status: str = "completed"
+    cleanup_status: str = "not_required"
+    cleanup_errors: list[str] = field(default_factory=list)
+    persistence_errors: list[str] = field(default_factory=list)
+    error: BaseException | None = None
+    execution_mode: str = "hardware"
+    verification: dict | None = None
+
+
+@dataclass
+class AcquisitionResult:
+    """Result metadata for a fixed-setting ADC event acquisition.
+
+    **Attributes**
+    - `csv_path` (`Path`): Output CSV path.
+    - `metadata_path` (`Path | None`): Output metadata JSON path.
+    - `metadata` (`RadiorocRunMetadata | None`): Run metadata.
+    - `points` (`int`): Number of completed acquisition batches (not events).
+    - `channels` (`list[int]`): Channels saved by the acquisition.
+    - `warnings` (`list[str]`): Non-fatal warnings.
+    - `verification` (`dict | None`): Optional independent restoration report.
+    """
+
+    csv_path: Path
+    metadata_path: Path | None = None
+    metadata: RadiorocRunMetadata | None = None
+    points: int = 0
+    channels: list[int] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    status: str = "completed"
+    cleanup_status: str = "not_required"
+    cleanup_errors: list[str] = field(default_factory=list)
+    persistence_errors: list[str] = field(default_factory=list)
+    error: BaseException | None = None
+    execution_mode: str = "hardware"
+    verification: dict | None = None
 
 
 @dataclass
@@ -617,6 +798,39 @@ def format_channels_for_path(channels: list[int] | None) -> str:
     shown: list[int] = channels[:4]
     suffix: str = "_etc" if len(channels) > len(shown) else ""
     return "ch" + "_".join(str(channel) for channel in shown) + suffix
+
+
+def format_channels(channels: list[int]) -> str:
+    """Render a channel list compactly, collapsing consecutive runs into
+    ranges.
+
+    **Inputs**
+    - `channels` (`list[int]`): Channel indices, in any order, possibly
+      with duplicates.
+
+    **Returns**
+    - `str`: Compact notation such as `"0-3,5"`, or `"none"` if empty.
+
+    Kept dependency-free (no Qt) so it can be tested and reused without the
+    `[gui]` extra installed; `radioroc.gui.channel_select.ChannelSelectGrid`
+    uses this for its one-line selection summary, and it matches the
+    free-text notation that widget replaces, so saved-run metadata and CLI
+    `--channels` strings built from a selection stay in a familiar form.
+    """
+
+    if not channels:
+        return "none"
+    ordered = sorted(set(channels))
+    parts: list[str] = []
+    start = prev = ordered[0]
+    for value in ordered[1:]:
+        if value == prev + 1:
+            prev = value
+            continue
+        parts.append(str(start) if start == prev else f"{start}-{prev}")
+        start = prev = value
+    parts.append(str(start) if start == prev else f"{start}-{prev}")
+    return ",".join(parts)
 
 
 def default_run_dir(
@@ -765,70 +979,6 @@ def scan_values(min_value: int, max_value: int, step: int, *, name: str = "scan"
     return list(range(min_value, max_value + 1, step))
 
 
-def bits(value: int, width: int = 8) -> str:
-    """Format an integer as a zero-padded binary string.
-
-    **Inputs**
-    - `value` (`int`): Integer value to format.
-    - `width` (`int`): Minimum number of output bits.
-
-    **Returns**
-    - `str`: Binary representation with no `0b` prefix.
-    """
-
-    return format(value, f"0{width}b")
-
-
-def parse_bits(value: str) -> int:
-    """Parse a binary string into an integer.
-
-    **Inputs**
-    - `value` (`str`): Binary string with optional surrounding whitespace.
-
-    **Returns**
-    - `int`: Parsed integer value.
-    """
-
-    return int(str(value).strip(), 2)
-
-
-def encode_read_request(address: int, length: int = 1) -> bytes:
-    """Encode a RADIOROC FPGA read request frame.
-
-    **Inputs**
-    - `address` (`int`): FPGA word address in the range `0..127`.
-    - `length` (`int`): Number of bytes to read. Valid range is `1..65536`.
-
-    **Returns**
-    - `bytes`: Framed request suitable for writing to the serial port.
-    """
-
-    if not 0 <= address <= 127:
-        raise ValueError("address must be in range 0..127")
-    if not 1 <= length <= 65536:
-        raise ValueError("length must be in range 1..65536")
-    encoded_length: int = length - 1
-    return bytes([0xAA, encoded_length & 0xFF, address | 0x80, (encoded_length >> 8) & 0xFF, 0x55])
-
-
-def encode_write_request(address: int, payload: bytes) -> bytes:
-    """Encode a RADIOROC FPGA write request frame.
-
-    **Inputs**
-    - `address` (`int`): FPGA word address in the range `0..127`.
-    - `payload` (`bytes`): One to 256 payload bytes.
-
-    **Returns**
-    - `bytes`: Framed request suitable for writing to the serial port.
-    """
-
-    if not 0 <= address <= 127:
-        raise ValueError("address must be in range 0..127")
-    if not 1 <= len(payload) <= 256:
-        raise ValueError("payload length must be in range 1..256")
-    return bytes([0xAA, len(payload) - 1, address]) + payload + bytes([0x55])
-
-
 def parse_channels(value: str, *, n_channels: int = N_CHANNELS) -> list[int]:
     """Parse a channel selection string.
 
@@ -861,286 +1011,6 @@ def parse_channels(value: str, *, n_channels: int = N_CHANNELS) -> list[int]:
     if not all(0 <= channel < n_channels for channel in result):
         raise ValueError(f"channels must be in range 0..{n_channels - 1}")
     return result
-
-
-class RadiorocSerial:
-    """Low-level RADIOROC USB serial transport.
-
-    This class owns framed FPGA word reads/writes. It does not know about ASIC
-    slow control, scan workflows, plotting, or command-line arguments.
-
-    **Attributes**
-    - `port` (`str`): Serial device path.
-    - `baud` (`int`): Serial baud rate.
-    - `timeout` (`float`): Read/write timeout in seconds.
-    - `ser` (`serial.Serial | None`): Open pyserial object while inside the
-      context manager.
-    """
-
-    def __init__(self, port: str = DEFAULT_PORT, baud: int = DEFAULT_BAUD, timeout: float = DEFAULT_TIMEOUT_SECONDS):
-        """Create a serial transport object.
-
-        **Inputs**
-        - `port` (`str`): Serial device path.
-        - `baud` (`int`): Serial baud rate.
-        - `timeout` (`float`): Read/write timeout in seconds.
-
-        **Returns**
-        - `None`
-        """
-
-        self.port: str = port
-        self.baud: int = baud
-        self.timeout: float = timeout
-        self.ser: Optional[serial.Serial] = None
-
-    @classmethod
-    def from_config(cls, config: RadiorocConnectionConfig) -> "RadiorocSerial":
-        """Create a serial transport from connection settings.
-
-        **Inputs**
-        - `config` (`RadiorocConnectionConfig`): Serial connection settings.
-
-        **Returns**
-        - `RadiorocSerial`: Unopened serial transport.
-        """
-
-        return cls(port=config.port, baud=config.baud, timeout=config.timeout_s)
-
-    def __enter__(self) -> "RadiorocSerial":
-        """Open the serial port and clear stale buffers.
-
-        **Inputs**
-        - None
-
-        **Returns**
-        - `RadiorocSerial`: Open transport.
-
-        **Hardware side effects**
-        - Opens the USB serial port and clears pending input/output buffers.
-        """
-
-        self.ser = serial.Serial(self.port, baudrate=self.baud, timeout=self.timeout, write_timeout=self.timeout)
-        self.ser.reset_input_buffer()
-        self.ser.reset_output_buffer()
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        """Close the serial port.
-
-        **Inputs**
-        - `*exc` (`object`): Context-manager exception details.
-
-        **Returns**
-        - `None`
-        """
-
-        if self.ser:
-            self.ser.close()
-
-    def transfer(self, frame: bytes, read_len: int = 0) -> bytes:
-        """Write one request frame and optionally read a response frame.
-
-        **Inputs**
-        - `frame` (`bytes`): Encoded read or write request.
-        - `read_len` (`int`): Expected response length in bytes. Use `0` for
-          write-only requests.
-
-        **Returns**
-        - `bytes`: Response bytes, or empty bytes for write-only requests.
-
-        **Hardware side effects**
-        - Writes bytes to the RADIOROC USB serial interface.
-        - Clears the serial input buffer before read transactions.
-        """
-
-        if self.ser is None:
-            raise RuntimeError("serial port is not open")
-        if read_len > 0:
-            self.ser.reset_input_buffer()
-        self.ser.write(frame)
-        self.ser.flush()
-        if read_len <= 0:
-            return b""
-
-        data = bytearray()
-        deadline: float = time.monotonic() + max(self.timeout, 0.1)
-        while time.monotonic() < deadline:
-            chunk: bytes = self.ser.read(max(1, read_len - len(data)))
-            if chunk:
-                data.extend(chunk)
-                while data and data[0] != 0xAA:
-                    data.pop(0)
-                if len(data) >= read_len:
-                    candidate: bytes = bytes(data[:read_len])
-                    if candidate[-1] == 0x55:
-                        return candidate
-                    data.pop(0)
-            else:
-                time.sleep(0.001)
-        return bytes(data)
-
-    def read_word(self, address: int) -> str:
-        """Read one FPGA word as an eight-bit binary string.
-
-        **Inputs**
-        - `address` (`int`): FPGA word address in the range `0..127`.
-
-        **Returns**
-        - `str`: Eight-bit binary word.
-
-        **Hardware side effects**
-        - Sends a read request to the FPGA over USB serial.
-        """
-
-        last_response: bytes = b""
-        for _ in range(3):
-            response: bytes = self.transfer(encode_read_request(address, 1), 5)
-            if len(response) == 5 and response[0] == 0xAA and response[-1] == 0x55:
-                return bits(response[3], 8)
-            last_response = response
-            time.sleep(0.01)
-        raise RuntimeError(f"bad read_word({address}) response: {last_response.hex(' ')}")
-
-    def read_words(self, address: int, length: int) -> bytes:
-        """Read contiguous FPGA bytes.
-
-        **Inputs**
-        - `address` (`int`): FPGA word address in the range `0..127`.
-        - `length` (`int`): Number of bytes to read.
-
-        **Returns**
-        - `bytes`: Raw payload bytes returned by the board.
-
-        **Hardware side effects**
-        - Sends a read request to the FPGA over USB serial.
-        """
-
-        last_response: bytes = b""
-        for _ in range(3):
-            response: bytes = self.transfer(encode_read_request(address, length), length + 4)
-            if len(response) == length + 4 and response[0] == 0xAA and response[-1] == 0x55:
-                return response[3:-1]
-            last_response = response
-            time.sleep(0.01)
-        raise RuntimeError(f"bad read_words({address}, {length}) response: {last_response.hex(' ')}")
-
-    def write_word(self, address: int, word_bits: str) -> None:
-        """Write one FPGA word from an eight-bit binary string.
-
-        **Inputs**
-        - `address` (`int`): FPGA word address in the range `0..127`.
-        - `word_bits` (`str`): Binary word string.
-
-        **Returns**
-        - `None`
-
-        **Hardware side effects**
-        - Writes one FPGA control/data word over USB serial.
-        """
-
-        payload: bytes = parse_bits(word_bits).to_bytes(1, "little")
-        self.transfer(encode_write_request(address, payload))
-
-    def write_words(self, address: int, payload: bytes) -> None:
-        """Write one or more payload bytes to an FPGA address.
-
-        **Inputs**
-        - `address` (`int`): FPGA word address in the range `0..127`.
-        - `payload` (`bytes`): Payload bytes. Long payloads are split into
-          256-byte frames.
-
-        **Returns**
-        - `None`
-
-        **Hardware side effects**
-        - Writes one or more FPGA payload frames over USB serial.
-        """
-
-        offset: int = 0
-        while offset < len(payload):
-            chunk: bytes = payload[offset : offset + 256]
-            self.transfer(encode_write_request(address, chunk))
-            offset += len(chunk)
-
-
-class RadiorocMemoryTransport:
-    """In-memory FPGA word transport for non-hardware tests.
-
-    This class implements the small transport surface used by `RadiorocDevice`.
-    It is not a serial emulator for timing-sensitive scan behavior, but it is
-    sufficient for unit tests that need deterministic FPGA word reads/writes.
-
-    **Attributes**
-    - `words` (`dict[int, str]`): FPGA word storage by address.
-    - `payloads` (`dict[int, bytes]`): Multi-byte payload storage by address.
-    """
-
-    def __init__(self, words: dict[int, str] | None = None, payloads: dict[int, bytes] | None = None):
-        """Create a memory-backed transport.
-
-        **Inputs**
-        - `words` (`dict[int, str] | None`): Initial FPGA word values.
-        - `payloads` (`dict[int, bytes] | None`): Initial multi-byte payloads.
-
-        **Returns**
-        - `None`
-        """
-
-        self.words: dict[int, str] = dict(words or {})
-        self.payloads: dict[int, bytes] = dict(payloads or {})
-
-    def read_word(self, address: int) -> str:
-        """Read one memory-backed FPGA word.
-
-        **Inputs**
-        - `address` (`int`): FPGA word address.
-
-        **Returns**
-        - `str`: Eight-bit binary word.
-        """
-
-        return self.words.get(address, "00000000")
-
-    def write_word(self, address: int, word_bits: str) -> None:
-        """Write one memory-backed FPGA word.
-
-        **Inputs**
-        - `address` (`int`): FPGA word address.
-        - `word_bits` (`str`): Eight-bit binary word.
-
-        **Returns**
-        - `None`
-        """
-
-        self.words[address] = word_bits
-
-    def read_words(self, address: int, length: int) -> bytes:
-        """Read bytes from memory-backed payload storage.
-
-        **Inputs**
-        - `address` (`int`): Payload address.
-        - `length` (`int`): Number of bytes requested.
-
-        **Returns**
-        - `bytes`: Stored bytes padded with zeros as needed.
-        """
-
-        payload: bytes = self.payloads.get(address, b"")
-        return payload[:length].ljust(length, b"\x00")
-
-    def write_words(self, address: int, payload: bytes) -> None:
-        """Write bytes to memory-backed payload storage.
-
-        **Inputs**
-        - `address` (`int`): Payload address.
-        - `payload` (`bytes`): Bytes to store.
-
-        **Returns**
-        - `None`
-        """
-
-        self.payloads[address] = payload
 
 
 class RadiorocDevice:
@@ -1178,6 +1048,11 @@ class RadiorocDevice:
         self.chip_id: int = RADIOROC_CHIP_ID
         self.address_bits: int = ASIC_ADDRESS_BITS
         self.subaddress_bits: int = ASIC_SUBADDRESS_BITS
+        self._job_checkpoint = None
+
+    def _checkpoint(self) -> None:
+        if self._job_checkpoint is not None:
+            self._job_checkpoint()
 
     def read_word(self, address: int) -> str:
         """Read one FPGA word.
@@ -1189,6 +1064,7 @@ class RadiorocDevice:
         - `str`: Eight-bit binary word.
         """
 
+        self._checkpoint()
         return self.transport.read_word(address)
 
     def write_word(self, address: int, word_bits: str) -> None:
@@ -1205,6 +1081,7 @@ class RadiorocDevice:
         - Writes one FPGA control/data word unless `dry_run` is true.
         """
 
+        self._checkpoint()
         if self.dry_run:
             print(f"DRY write_word address={address} data={word_bits}")
             return
@@ -1292,8 +1169,8 @@ class RadiorocDevice:
         """Read multiple ASIC I2C rows through the vendor FIFO path.
 
         **Inputs**
-        - `rows` (`list[I2CRow]`): Register rows to read. The `data` field is
-          used only as a fallback/default.
+        - `rows` (`list[I2CRow]`): Register addresses to read. The `data` field
+          is ignored; missing readback is never replaced by a default.
 
         **Returns**
         - `bytes`: One data byte per requested row.
@@ -1328,21 +1205,25 @@ class RadiorocDevice:
           bus-active bit afterward unless `dry_run` is true.
         """
 
+        self._checkpoint()
         if self.dry_run:
             kind: str = "read" if read else "write"
             print(f"DRY i2c_{kind}_fifo {len(payload)} bytes")
             return b"" if read else None
 
         word0: str = self.transport.read_word(0)
-        self.transport.write_word(FPGA_I2C_CONTROL_WORD, "00000000")
-        self.transport.write_word(0, word0[0] + "1" + word0[2:8])
+        primary_error = None
         try:
+            self.transport.write_word(FPGA_I2C_CONTROL_WORD, "00000000")
+            self.transport.write_word(0, word0[0] + "1" + word0[2:8])
             for offset in range(0, len(payload), 256):
+                self._checkpoint()
                 chunk: bytes = payload[offset : offset + 256]
                 self.transport.write_words(FPGA_I2C_FIFO_WRITE_WORD, chunk)
                 self.transport.write_word(FPGA_I2C_CONTROL_WORD, "00000000")
                 self.transport.write_word(FPGA_I2C_CONTROL_WORD, "00000010")
                 for _ in range(1000):
+                    self._checkpoint()
                     if self.transport.read_word(FPGA_STATUS_WORD)[7] == "1":
                         break
                 else:
@@ -1351,8 +1232,16 @@ class RadiorocDevice:
             if read:
                 return self.transport.read_words(FPGA_I2C_FIFO_READ_WORD, len(payload) // 4)
             return None
+        except BaseException as exc:
+            primary_error = exc
+            raise
         finally:
-            self.transport.write_word(0, word0[0] + "0" + word0[2:8])
+            try:
+                self.transport.write_word(0, word0[0] + "0" + word0[2:8])
+            except BaseException as cleanup_error:
+                if primary_error is None:
+                    raise
+                primary_error.add_note(f"I2C bus cleanup also failed: {cleanup_error}")
 
     def find_i2c_row(self, add: int, subadd: int) -> I2CRow | None:
         """Find a loaded default I2C row.
@@ -1396,8 +1285,8 @@ class RadiorocDevice:
         - `subadd` (`int`): ASIC register subaddress.
 
         **Returns**
-        - `str`: Eight-bit register value. If readback fails, the loaded
-          default row value is returned when available.
+        - `str`: Verified eight-bit register value. Transport failures propagate.
+          Only dry-run mode returns a configured fallback without hardware.
 
         **Hardware side effects**
         - Performs one ASIC slow-control read unless `dry_run` is true.
@@ -1407,12 +1296,9 @@ class RadiorocDevice:
         fallback: str = row.data if row is not None else "00000000"
         if self.dry_run:
             return fallback
-        try:
-            data: bytes = self.read_fifo([I2CRow(add, subadd, fallback)])
-        except Exception:
-            return fallback
-        if not data:
-            return fallback
+        data: bytes = self.read_fifo([I2CRow(add, subadd, fallback)])
+        if len(data) != 1:
+            raise TransportProtocolError(f"expected one ASIC register byte, received {len(data)}")
         return bits(data[0], 8)
 
     def apply_default_config(self) -> None:
@@ -1548,9 +1434,63 @@ class RadiorocDevice:
                 continue
             current: int = parse_bits(row.data)
             compensation: int = current & 0xC0
-            rows.append(I2CRow(channel, 1, bits(compensation | gain, 8)))
+            new_data: str = bits(compensation | gain, 8)
+            row.data = new_data
+            rows.append(I2CRow(channel, 1, new_data))
         if not rows:
             raise RuntimeError("no trigger preamp gain rows found for selected channels")
+        self.write_fifo(rows)
+
+    def set_energy_shaper_gain(
+        self,
+        *,
+        channels: list[int],
+        high_gain_code: int | None = None,
+        low_gain_code: int | None = None,
+    ) -> None:
+        """Set selected channels' ADC energy-path shaper gain codes.
+
+        **Inputs**
+        - `channels` (`list[int]`): Channels to modify.
+        - `high_gain_code` (`int | None`): High-gain shaper code `1..15`.
+        - `low_gain_code` (`int | None`): Low-gain shaper code `1..15`.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes selected channel energy gain rows through the ASIC I2C FIFO.
+
+        **Mapping note**
+        - The user guide defines 4-bit high-gain and low-gain shaper codes.
+          The default table stores `10001000` at per-channel subaddress 2,
+          consistent with two default code-8 nibbles. We use the upper nibble
+          for high gain and the lower nibble for low gain.
+        """
+
+        validate_channels(channels)
+        if high_gain_code is None and low_gain_code is None:
+            return
+        if high_gain_code is not None and not 1 <= high_gain_code <= 15:
+            raise ValueError("high_gain_code must be in range 1..15")
+        if low_gain_code is not None and not 1 <= low_gain_code <= 15:
+            raise ValueError("low_gain_code must be in range 1..15")
+
+        rows: list[I2CRow] = []
+        for channel in channels:
+            row: I2CRow | None = self.find_i2c_row(channel, ASIC_SHAPER_GAIN_SUBADDRESS)
+            if row is None:
+                continue
+            current: int = parse_bits(row.data)
+            current_hg: int = (current >> 4) & 0xF
+            current_lg: int = current & 0xF
+            new_hg: int = high_gain_code if high_gain_code is not None else current_hg
+            new_lg: int = low_gain_code if low_gain_code is not None else current_lg
+            new_data = bits((new_hg << 4) | new_lg, 8)
+            row.data = new_data
+            rows.append(I2CRow(channel, ASIC_SHAPER_GAIN_SUBADDRESS, new_data))
+        if not rows:
+            raise RuntimeError("no energy shaper gain rows found for selected channels")
         self.write_fifo(rows)
 
     def set_mask_for_channel(self, channel: int, *, t1: bool, enabled: bool) -> None:
@@ -1597,6 +1537,653 @@ class RadiorocDevice:
         data: list[str] = list(row.data)
         data[3] = "1" if enabled else "0"
         self.write_register(channel, 7, "".join(data))
+
+    def set_tq_mask_for_channel(self, channel: int, enabled: bool) -> None:
+        """Enable or disable one channel's TQ trigger mask bit.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `enabled` (`bool`): Mask bit value.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel mask register if present in the loaded defaults.
+
+        Bit position recovered from the vendor GUI's compiled widget
+        properties (`checkBox_maskTQ_NN`: add=channel, subadd=6, position=2,
+        LSB-numbered per `i2c.set_value`'s documented convention -> string
+        index 5 in this codebase's MSB-first row string), cross-checked
+        against `set_mask_for_channel`'s already hardware-validated T1
+        (position 4 -> index 3) and T2 (position 3 -> index 4) bits from the
+        same register. Not yet independently verified against real hardware.
+        """
+
+        validate_channel(channel)
+        row: I2CRow | None = self.find_i2c_row(channel, 6)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[5] = "1" if enabled else "0"
+        self.write_register(channel, 6, "".join(data))
+
+    def set_input_dac_enable_for_channel(self, channel: int, enabled: bool) -> None:
+        """Enable or disable one channel's input DAC.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `enabled` (`bool`): Enable bit value.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel mask register if present in the loaded defaults.
+
+        Bit position recovered from the vendor GUI's compiled widget
+        properties (`checkBox_indacNN`: add=channel, subadd=6, position=6 ->
+        string index 1 in this codebase's row string). Not yet independently
+        verified against real hardware.
+        """
+
+        validate_channel(channel)
+        row: I2CRow | None = self.find_i2c_row(channel, 6)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[1] = "1" if enabled else "0"
+        self.write_register(channel, 6, "".join(data))
+
+    def set_input_dac_impedance(self, low_impedance: bool) -> None:
+        """Select high- or low-impedance (~150 Ohm) input DAC termination.
+
+        **Inputs**
+        - `low_impedance` (`bool`): Select the ~150 Ohm input when true, high
+          impedance when false.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes the same bit across every loaded channel-6 register (0..63)
+          present in the loaded defaults.
+
+        This is a single physical switch shared by all channels, not a
+        per-channel setting (vendor guide 3.1.2). Bit position recovered from
+        the vendor GUI's compiled widget properties
+        (`checkBox_indac_impedance`: subadd=6, position=7, `all_channels_add`
+        true -> string index 0, written identically to every channel's row 6).
+        Not yet independently verified against real hardware.
+        """
+
+        value = "1" if low_impedance else "0"
+        for channel in range(N_CHANNELS):
+            row: I2CRow | None = self.find_i2c_row(channel, 6)
+            if row is None:
+                continue
+            data: list[str] = list(row.data)
+            data[0] = value
+            self.write_register(channel, 6, "".join(data))
+
+    def set_input_dac_value(self, channel: int, value: int) -> None:
+        """Set one channel's input DAC DC value.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `value` (`int`): Raw 8-bit input DAC code, 0..255 (vendor guide
+          3.1.2: approximately 50-600 mV, ~2 mV per step).
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel input-DAC register if present in the loaded
+          defaults.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`lineEdit_indacNN`: add=channel, subadd=0, position=0, nbbits=8 ->
+        the entire row byte). Not yet independently verified against real
+        hardware.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_channel(channel)
+        validate_integer(value, 0, 255, "value")
+        row: I2CRow | None = self.find_i2c_row(channel, 0)
+        if row is None:
+            return
+        self.write_register(channel, 0, bits(value, 8))
+
+    def set_calibration_dac_for_channel(self, channel: int, *, t1: bool, value: int) -> None:
+        """Set one channel's T1 or T2 threshold-calibration trim DAC.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `t1` (`bool`): Set the T1 trim DAC when true, T2 when false.
+        - `value` (`int`): Raw 6-bit trim code, 0..63.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel's T1 or T2 calibration-DAC register if present
+          in the loaded defaults.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`lineEdit_calibDacT1NN`/`lineEdit_calibDacT2NN`: add=channel,
+        subadd=4 (T1) or 5 (T2), position=0, nbbits=6 -> the row's low 6
+        bits; the top 2 bits are unused (`NC`) and left as read). Not yet
+        independently verified against real hardware.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_channel(channel)
+        validate_integer(value, 0, 63, "value")
+        subadd = 4 if t1 else 5
+        row: I2CRow | None = self.find_i2c_row(channel, subadd)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[2:] = bits(value, 6)
+        self.write_register(channel, subadd, "".join(data))
+
+    def set_trigger_preamp_gain_for_channel(self, channel: int, value: int) -> None:
+        """Set one channel's trigger-preamplifier (paT) gain code.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `value` (`int`): Raw 6-bit gain code, 0..63 (vendor guide: the lower
+          the value the higher the gain; 1 = max gain, 63 = min gain, 0 opens
+          the feedback loop and unbiases the preamplifier).
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel's trigger-preamplifier register if present in
+          the loaded defaults.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "Trigger preamplifier gain...
+        add: [0:63] - subadd: 1 - bit: [5:0]"). Not yet independently verified
+        against real hardware; see `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_channel(channel)
+        validate_integer(value, 0, 63, "value")
+        row: I2CRow | None = self.find_i2c_row(channel, 1)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[2:8] = bits(value, 6)
+        self.write_register(channel, 1, "".join(data))
+
+    def set_trigger_preamp_compensation_for_channel(self, channel: int, value: int) -> None:
+        """Set one channel's trigger-preamplifier feedback-compensation code.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `value` (`int`): Raw 2-bit compensation code, 0..3 (vendor guide:
+          keep to 0 unless deliberately slowing down the preamplifier).
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel's trigger-preamplifier register if present in
+          the loaded defaults, preserving that register's gain bits.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "Feedback compensation for the
+        trigger preamplifier... add: [0:63] - subadd: 1 - bit: [7:6]"). The
+        packaged default (compensation = 0) matches the vendor guide's stated
+        default recommendation, cross-checked before trusting the bit
+        position. Not yet independently verified against real hardware; see
+        `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_channel(channel)
+        validate_integer(value, 0, 3, "value")
+        row: I2CRow | None = self.find_i2c_row(channel, 1)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[0:2] = bits(value, 2)
+        self.write_register(channel, 1, "".join(data))
+
+    def set_high_gain_for_channel(self, channel: int, value: int) -> None:
+        """Set one channel's high-gain (HG) energy-preamplifier gain code.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `value` (`int`): Raw 4-bit gain code, 0..15. V/V gain is given by
+          Cin/Cf with Cin = 5 pF and Cf = 62.5 fF x (16 - code); higher code
+          means higher gain.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel's HG/LG gain register if present in the loaded
+          defaults, preserving that register's LG gain bits.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "High gain energy
+        preamplifier gain... add: [0:63] - subadd: 2 - bit: [3:0]"). Not yet
+        independently verified against real hardware; see
+        `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_channel(channel)
+        validate_integer(value, 0, 15, "value")
+        row: I2CRow | None = self.find_i2c_row(channel, 2)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[4:8] = bits(value, 4)
+        self.write_register(channel, 2, "".join(data))
+
+    def set_low_gain_for_channel(self, channel: int, value: int) -> None:
+        """Set one channel's low-gain (LG) energy-preamplifier gain code.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `value` (`int`): Raw 4-bit gain code, 0..15. V/V gain is given by
+          Cin/Cf with Cin = 500 fF and Cf = 62.5 fF x (16 - code); higher code
+          means higher gain.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel's HG/LG gain register if present in the loaded
+          defaults, preserving that register's HG gain bits.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "Low gain energy preamplifier
+        gain... add: [0:63] - subadd: 2 - bit: [7:4]"). Not yet independently
+        verified against real hardware; see `IMPLEMENTATION_STATUS.md`
+        RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_channel(channel)
+        validate_integer(value, 0, 15, "value")
+        row: I2CRow | None = self.find_i2c_row(channel, 2)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[0:4] = bits(value, 4)
+        self.write_register(channel, 2, "".join(data))
+
+    def set_high_gain_shaping_for_channel(self, channel: int, value: int) -> None:
+        """Set one channel's high-gain (HG) CRRC shaper time code.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `value` (`int`): Raw 4-bit shaping code, 0..15. Actual shaping time
+          is `code x 20 ns` or `code x 120 ns` depending on
+          `set_high_gain_shaping_slow_for_channel`'s LSB selection.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel's HG/LG shaping register if present in the
+          loaded defaults, preserving that register's LG shaping bits.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "Shaping time for the high
+        gain CRRC shaper... add: [0:63] - subadd: 3 - bit: [3:0]"). Not yet
+        independently verified against real hardware; see
+        `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_channel(channel)
+        validate_integer(value, 0, 15, "value")
+        row: I2CRow | None = self.find_i2c_row(channel, 3)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[4:8] = bits(value, 4)
+        self.write_register(channel, 3, "".join(data))
+
+    def set_low_gain_shaping_for_channel(self, channel: int, value: int) -> None:
+        """Set one channel's low-gain (LG) CRRC shaper time code.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `value` (`int`): Raw 4-bit shaping code, 0..15. Actual shaping time
+          is `code x 20 ns` or `code x 120 ns` depending on
+          `set_low_gain_shaping_slow_for_channel`'s LSB selection.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel's HG/LG shaping register if present in the
+          loaded defaults, preserving that register's HG shaping bits.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "Shaping time for the low
+        gain CRRC shaper... add: [0:63] - subadd: 3 - bit: [7:4]"). Not yet
+        independently verified against real hardware; see
+        `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_channel(channel)
+        validate_integer(value, 0, 15, "value")
+        row: I2CRow | None = self.find_i2c_row(channel, 3)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[0:4] = bits(value, 4)
+        self.write_register(channel, 3, "".join(data))
+
+    def set_high_gain_shaping_slow_for_channel(self, channel: int, slow: bool) -> None:
+        """Select the high-gain (HG) shaper's time-constant LSB scale.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `slow` (`bool`): `True` selects 120 ns per shaping code step,
+          `False` selects 20 ns per step.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel's Ctest/LSB-select register (subaddress 7) if
+          present in the loaded defaults, preserving the Ctest, injection
+          capacitor and LG-shaping-LSB bits already packed into that byte.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "LSB selection for the high
+        gain shaper... add: [0:63] - subadd: 7 - bit: 6"). Polarity inferred
+        from the paired checkbox's shaping-time formula
+        (`(20+100*checked)*code`, so checked/bit=1 means 120 ns/code) and
+        confirmed consistent with this codebase's existing bit-4 (Ctest,
+        `set_ctest_for_channel`) and bit-5 (injection capacitor) positions on
+        the same row. Not yet independently verified against real hardware;
+        see `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        validate_channel(channel)
+        row: I2CRow | None = self.find_i2c_row(channel, 7)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[1] = "1" if slow else "0"
+        self.write_register(channel, 7, "".join(data))
+
+    def set_low_gain_shaping_slow_for_channel(self, channel: int, slow: bool) -> None:
+        """Select the low-gain (LG) shaper's time-constant LSB scale.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `slow` (`bool`): `True` selects 120 ns per shaping code step,
+          `False` selects 20 ns per step.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel's Ctest/LSB-select register (subaddress 7) if
+          present in the loaded defaults, preserving the Ctest, injection
+          capacitor and HG-shaping-LSB bits already packed into that byte.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "LSB selection for the low
+        gain shaper... add: [0:63] - subadd: 7 - bit: 7"). Same polarity
+        reasoning as `set_high_gain_shaping_slow_for_channel`. Not yet
+        independently verified against real hardware; see
+        `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        validate_channel(channel)
+        row: I2CRow | None = self.find_i2c_row(channel, 7)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[0] = "1" if slow else "0"
+        self.write_register(channel, 7, "".join(data))
+
+    def set_t1_threshold_dac(self, value: int) -> None:
+        """Set the common (ASIC-wide) T1 trigger-threshold DAC code.
+
+        **Inputs**
+        - `value` (`int`): Raw 10-bit DAC code, 0..1023. Unlike the
+          per-channel calibration trims (`set_calibration_dac_for_channel`),
+          this is the single main T1 threshold shared by every channel.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes address 65 subaddresses 1 and 2 if present in the loaded
+          defaults, preserving subaddress 2's T2-DAC low bits.
+
+        Register recovered from the vendor GUI's compiled widget properties:
+        `Ui_MainWindow.retranslateUi`'s "Threshold1" control pairs with the
+        raw-register-view labels at address 65 (`dac1[7:0]` at subadd 1,
+        `dac1[9:8]` sharing subadd 2 with `dac2[5:0]`). Not yet independently
+        verified against real hardware; see `IMPLEMENTATION_STATUS.md`
+        RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_integer(value, 0, 1023, "value")
+        low_row: I2CRow | None = self.find_i2c_row(65, 1)
+        high_row: I2CRow | None = self.find_i2c_row(65, 2)
+        if low_row is not None:
+            self.write_register(65, 1, bits(value & 0xFF, 8))
+        if high_row is not None:
+            data: list[str] = list(high_row.data)
+            data[0:2] = bits((value >> 8) & 0x3, 2)
+            self.write_register(65, 2, "".join(data))
+
+    def set_t2_threshold_dac(self, value: int) -> None:
+        """Set the common (ASIC-wide) T2 trigger-threshold DAC code.
+
+        **Inputs**
+        - `value` (`int`): Raw 10-bit DAC code, 0..1023. Unlike the
+          per-channel calibration trims (`set_calibration_dac_for_channel`),
+          this is the single main T2 threshold shared by every channel.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes address 65 subaddresses 2 and 3 if present in the loaded
+          defaults, preserving subaddress 2's T1-DAC high bits and
+          subaddress 3's TQ-DAC low bits.
+
+        Register recovered from the vendor GUI's compiled widget properties:
+        `Ui_MainWindow.retranslateUi`'s "Threshold2" control pairs with the
+        raw-register-view labels at address 65 (`dac2[5:0]` sharing subadd 2
+        with `dac1[9:8]`, `dac2[9:6]` sharing subadd 3 with `dacQ[3:0]`). Not
+        yet independently verified against real hardware; see
+        `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_integer(value, 0, 1023, "value")
+        low_row: I2CRow | None = self.find_i2c_row(65, 2)
+        high_row: I2CRow | None = self.find_i2c_row(65, 3)
+        if low_row is not None:
+            data: list[str] = list(low_row.data)
+            data[2:8] = bits(value & 0x3F, 6)
+            self.write_register(65, 2, "".join(data))
+        if high_row is not None:
+            data = list(high_row.data)
+            data[0:4] = bits((value >> 6) & 0xF, 4)
+            self.write_register(65, 3, "".join(data))
+
+    def set_tq_threshold_dac(self, value: int) -> None:
+        """Set the common (ASIC-wide) TQ trigger-threshold DAC code.
+
+        **Inputs**
+        - `value` (`int`): Raw 10-bit DAC code, 0..1023. This is the single
+          main TQ threshold shared by every channel.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes address 65 subaddresses 3 and 4 if present in the loaded
+          defaults, preserving subaddress 3's T2-DAC high bits and
+          subaddress 4's unused bits.
+
+        Register recovered from the vendor GUI's compiled widget properties:
+        `Ui_MainWindow.retranslateUi`'s "ThresholdQ" control pairs with the
+        raw-register-view labels at address 65 (`dacQ[3:0]` sharing subadd 3
+        with `dac2[9:6]`, `dacQ[9:4]` at subadd 4 alongside two unused bits).
+        Not yet independently verified against real hardware; see
+        `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_integer(value, 0, 1023, "value")
+        low_row: I2CRow | None = self.find_i2c_row(65, 3)
+        high_row: I2CRow | None = self.find_i2c_row(65, 4)
+        if low_row is not None:
+            data: list[str] = list(low_row.data)
+            data[4:8] = bits(value & 0xF, 4)
+            self.write_register(65, 3, "".join(data))
+        if high_row is not None:
+            data = list(high_row.data)
+            data[2:8] = bits((value >> 4) & 0x3F, 6)
+            self.write_register(65, 4, "".join(data))
+
+    TRIGGER_SELECTION_CODES: dict[str, int] = {
+        "external": 0b0000,
+        "local_t1": 0b0001,
+        "local_t2": 0b0010,
+        "local_tq": 0b0011,
+        "global_t1": 0b0100,
+        "global_t2": 0b1000,
+        "global_tq": 0b1100,
+    }
+
+    def set_trigger_selection(self, mode: str) -> None:
+        """Select which trigger arms the delay box and peak detector.
+
+        **Inputs**
+        - `mode` (`str`): One of `"external"`, `"local_t1"`, `"local_t2"`,
+          `"local_tq"`, `"global_t1"`, `"global_t2"`, `"global_tq"`. "Local"
+          triggers only toggle the triggering channel's own peak detector;
+          "global" and "external" triggers are ASIC-wide. The delay box
+          itself is always global (a single delay for the whole ASIC).
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes address 65 subaddress 12 if present in the loaded defaults,
+          preserving that register's hysteresis, delay-enable and
+          external-hold-select bits.
+
+        Register recovered from the vendor GUI's compiled widget properties:
+        `Ui_MainWindow.retranslateUi`'s "Trigger selection" combo box lists
+        exactly these seven options with these four-bit codes, which land on
+        `selTrig[3:0]` per the raw-register-view label at address 65,
+        subaddress 12 (`hysteresis1, hysteresis2, EN_delay, selHoldExt,
+        selTrig[3:0]`). Cross-checked against the packaged default config,
+        whose subaddress-12 value (`11100100`) decodes to `selTrig[3:0]` =
+        `0100` = exactly the "global_t1" code - independent confirmation of
+        both the bit position and the enumerated codes. Not yet independently
+        verified against real hardware; see `IMPLEMENTATION_STATUS.md`
+        RADIOROC 30.
+        """
+
+        if mode not in self.TRIGGER_SELECTION_CODES:
+            raise ValueError(f"mode must be one of {sorted(self.TRIGGER_SELECTION_CODES)}")
+        row: I2CRow | None = self.find_i2c_row(65, 12)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[4:8] = bits(self.TRIGGER_SELECTION_CODES[mode], 4)
+        self.write_register(65, 12, "".join(data))
+
+    def set_delay_code(self, value: int) -> None:
+        """Set the common (ASIC-wide) peak-detector hold delay code.
+
+        **Inputs**
+        - `value` (`int`): Raw 8-bit delay code, 0..255. Total delay is
+          `delay code x 0.85 ns x slope` (see `set_delay_slope`). After a
+          valid trigger, any signal after this delay is ignored.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes address 65 subaddress 8 if present in the loaded defaults.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "Delay trimming for the peak
+        detector 'hold' signal... add: 65 - subadd: 8 - bit: [7:0]"),
+        matching the raw-register-view label `delay[7:0]` at the same
+        address/subaddress. Not yet independently verified against real
+        hardware; see `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_integer(value, 0, 255, "value")
+        row: I2CRow | None = self.find_i2c_row(65, 8)
+        if row is None:
+            return
+        self.write_register(65, 8, bits(value, 8))
+
+    def set_delay_slope(self, value: int) -> None:
+        """Set the common (ASIC-wide) delay-slope trim code.
+
+        **Inputs**
+        - `value` (`int`): Raw 4-bit slope-trim code, 0..15. Total delay is
+          `delay code x 0.85 ns x slope` (see `set_delay_code`).
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes address 65 subaddress 9 if present in the loaded defaults,
+          preserving that register's internal discriminator-delay bias bits
+          (`ibi_discri_delay[3:0]`, not a user-facing control).
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "Delay slope trimming... add:
+        65 - subadd: 9 - bit: [7:4]"), matching the raw-register-view label
+        `slopeTrim[3:0]` at the same address/subaddress (the low nibble,
+        `ibi_discri_delay[3:0]`, is an internal bias current left untouched).
+        Not yet independently verified against real hardware; see
+        `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_integer(value, 0, 15, "value")
+        row: I2CRow | None = self.find_i2c_row(65, 9)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[0:4] = bits(value, 4)
+        self.write_register(65, 9, "".join(data))
 
     def prepare_trigger_masks(self, *, t1: bool, use_mask: bool, use_ctest: bool) -> None:
         """Prepare trigger path masks and Ctest bits for scan loops.
@@ -1652,139 +2239,45 @@ class RadiorocDevice:
             if remaining > 0.003:
                 time.sleep(remaining - 0.001)
 
-    def run_scurve(self, config: ScurveConfig, *, metadata: RadiorocRunMetadata | None = None) -> ScurveResult:
-        """Run an S-curve scan and return output paths.
+    def run_scurve(
+        self,
+        config: ScurveConfig,
+        *,
+        metadata: RadiorocRunMetadata | None = None,
+        cancellation=None,
+        on_event=None,
+    ) -> ScurveResult:
+        """Compatibility entry point for the shared S-curve job.
 
-        **Inputs**
-        - `config` (`ScurveConfig`): Scan settings.
-        - `metadata` (`RadiorocRunMetadata | None`): Optional metadata to
-          write beside the CSV.
-
-        **Returns**
-        - `ScurveResult`: CSV path, metadata path, and point count.
-
-        **Hardware side effects**
-        - Writes FPGA and ASIC scan-control registers.
+        Failures raise ScurveJobError carrying a durable partial ``result``.
+        The application runner returns that result directly for UI consumers.
         """
-
-        config.validate()
-        if config.trigger_preamp_gain is not None:
-            self.set_trigger_preamp_gain(config.trigger_preamp_gain, channels=config.channels)
-        out_dir: Path = config.out_dir
-        csv_path: Path = write_csv_rows([], out_dir, "scurve.csv")
-        self.configure_scurve_firmware(clock_index=config.clock_index, trigger_level=config.trigger_level)
-        self.prepare_trigger_masks(t1=config.t1, use_mask=config.use_mask, use_ctest=config.use_ctest)
-        saved_w1: str = self.read_word(1) if not self.dry_run else "00000000"
-        rows: list[dict[str, object]] = []
-        try:
-            for dac in scan_values(config.dac_min, config.dac_max, config.dac_step, name="DAC"):
-                self.set_threshold_dac(dac, t1=config.t1)
-                time.sleep(0.001)
-                row: dict[str, object] = {"DAC": dac}
-                for channel in config.channels:
-                    self.write_word(6, bits(channel))
-                    if config.use_mask:
-                        self.set_mask_for_channel(channel, t1=config.t1, enabled=True)
-                    if config.use_ctest:
-                        self.set_ctest_for_channel(channel, enabled=True)
-                    self.write_word(1, saved_w1[:6] + "00")
-                    self.write_word(1, saved_w1[:6] + "10")
-                    self.write_word(1, saved_w1[:6] + "11")
-                    time.sleep(0.2 if self.dry_run else (220 / (10**config.clock_index)) / 1000)
-                    if self.dry_run:
-                        value: float = math.nan
-                    else:
-                        pulse_data, fifo9 = self.transport.read_words(8, 2)
-                        value = round(min(fifo9, 200) * 100.0 / pulse_data, 1) if pulse_data >= 200 else math.nan
-                    row[f"ch{channel}"] = value
-                    if config.use_mask:
-                        self.set_mask_for_channel(channel, t1=config.t1, enabled=False)
-                    if config.use_ctest:
-                        self.set_ctest_for_channel(channel, enabled=False)
-                    self.write_word(1, saved_w1[:6] + "10")
-                rows.append(row)
-                write_csv_rows(rows, out_dir, "scurve.csv")
-                print(f"scurve dac={dac} values={[row[f'ch{ch}'] for ch in config.channels[:8]]}", flush=True)
-        finally:
-            if config.use_mask or config.use_ctest:
-                self.prepare_trigger_masks(t1=config.t1, use_mask=config.use_mask, use_ctest=config.use_ctest)
-            self.write_word(1, saved_w1[:6] + "00")
-        metadata_path: Path | None = write_metadata_json(metadata, out_dir) if metadata else None
-        return ScurveResult(csv_path=csv_path, metadata_path=metadata_path, metadata=metadata, points=len(rows))
+        from radioroc.application.scurve import ScurveJob, ScurveJobConfig, ScurveJobError
+        result = ScurveJob().run(self, ScurveJobConfig(config), metadata=metadata,
+                                 cancellation=cancellation, on_event=on_event)
+        if result.status not in ("completed", "cancelled") or result.cleanup_errors or result.persistence_errors:
+            raise ScurveJobError(result) from result.error
+        return result
 
     def run_threshold_scan(
         self,
         config: ThresholdScanConfig,
         *,
         metadata: RadiorocRunMetadata | None = None,
+        cancellation=None,
+        on_event=None,
     ) -> ThresholdScanResult:
-        """Run a threshold-rate scan and return output paths.
+        """Compatibility entry point for the shared threshold job.
 
-        **Inputs**
-        - `config` (`ThresholdScanConfig`): Scan settings.
-        - `metadata` (`RadiorocRunMetadata | None`): Optional metadata to
-          write beside the CSV.
-
-        **Returns**
-        - `ThresholdScanResult`: CSV path, metadata path, channels, and point
-          count.
-
-        **Hardware side effects**
-        - Writes threshold DAC, mask/Ctest bits, and FPGA counter controls.
+        Failures raise ThresholdJobError carrying a durable partial ``result``.
+        The application runner returns that result directly for UI consumers.
         """
-
-        config.validate()
-        if config.trigger_preamp_gain is not None:
-            self.set_trigger_preamp_gain(config.trigger_preamp_gain, channels=config.channels)
-        out_dir: Path = config.out_dir
-        csv_path: Path = write_csv_rows([], out_dir, "thresholdscan.csv")
-        self.prepare_trigger_masks(t1=config.t1, use_mask=config.use_mask, use_ctest=config.use_ctest)
-        saved_w1: str = self.read_word(1) if not self.dry_run else "00000000"
-        rows: list[dict[str, object]] = []
-        start_time: float = time.perf_counter()
-        try:
-            for dac in scan_values(config.dac_min, config.dac_max, config.dac_step, name="DAC"):
-                self.set_threshold_dac(dac, t1=config.t1)
-                row: dict[str, object] = {"DAC": dac}
-                for channel in config.channels:
-                    self.write_word(6, bits(channel))
-                    if config.use_mask:
-                        self.set_mask_for_channel(channel, t1=config.t1, enabled=True)
-                    if config.use_ctest:
-                        self.set_ctest_for_channel(channel, enabled=True)
-                    rates: list[float] = []
-                    for _ in range(config.averages):
-                        self.write_word(1, "01" + saved_w1[2:8])
-                        self.write_word(1, "00" + saved_w1[2:8])
-                        self.write_word(1, "10" + saved_w1[2:8])
-                        if self.dry_run:
-                            trigger_count = 0
-                        else:
-                            self.accurate_delay_ms(config.trigger_window_ms)
-                            self.write_word(1, "00" + saved_w1[2:8])
-                            trigger_count = int.from_bytes(self.transport.read_words(96, 4), "little")
-                        rates.append(trigger_count / (config.trigger_window_ms / 1000.0))
-                    row[f"ch{channel}"] = round(statistics.mean(rates), 6)
-                    if config.use_mask:
-                        self.set_mask_for_channel(channel, t1=config.t1, enabled=False)
-                    if config.use_ctest:
-                        self.set_ctest_for_channel(channel, enabled=False)
-                rows.append(row)
-                write_csv_rows(rows, out_dir, "thresholdscan.csv")
-                print(f"threshold dac={dac} hz={[row[f'ch{ch}'] for ch in config.channels[:8]]}", flush=True)
-        finally:
-            if config.use_mask or config.use_ctest:
-                self.prepare_trigger_masks(t1=config.t1, use_mask=config.use_mask, use_ctest=config.use_ctest)
-            self.write_word(1, saved_w1)
-            print(f"thresholdscan measurement time: {time.perf_counter() - start_time:.3f} seconds", flush=True)
-        metadata_path = write_metadata_json(metadata, out_dir) if metadata else None
-        return ThresholdScanResult(
-            csv_path=csv_path,
-            metadata_path=metadata_path,
-            metadata=metadata,
-            points=len(rows),
-            channels=list(config.channels),
-        )
+        from radioroc.application.threshold import ThresholdJob, ThresholdJobConfig, ThresholdJobError
+        result = ThresholdJob().run(self, ThresholdJobConfig(config), metadata=metadata,
+                                    cancellation=cancellation, on_event=on_event)
+        if result.status not in ("completed", "cancelled") or result.cleanup_errors or result.persistence_errors:
+            raise ThresholdJobError(result) from result.error
+        return result
 
     def configure_adc_external_hold(
         self,
@@ -1973,94 +2466,25 @@ class RadiorocDevice:
             return values[0], 0.0
         return statistics.mean(values), statistics.stdev(values)
 
-    def run_hold_scan(self, config: HoldScanConfig, *, metadata: RadiorocRunMetadata | None = None) -> HoldScanResult:
-        """Run an internal or external hold scan and return output paths.
+    def run_hold_scan(
+        self,
+        config: HoldScanConfig,
+        *,
+        metadata: RadiorocRunMetadata | None = None,
+        cancellation=None,
+        on_event=None,
+    ) -> HoldScanResult:
+        """Compatibility entry point for the shared hold-scan job.
 
-        **Inputs**
-        - `config` (`HoldScanConfig`): Hold scan settings.
-        - `metadata` (`RadiorocRunMetadata | None`): Optional metadata to
-          write beside the CSV.
-
-        **Returns**
-        - `HoldScanResult`: CSV path, metadata path, channels, and point count.
-
-        **Hardware side effects**
-        - Writes ADC hold-control registers and acquires ADC FIFO samples.
+        Failures raise HoldScanJobError carrying a durable partial ``result``.
+        The application runner returns that result directly for UI consumers.
         """
-
-        config.validate()
-        if config.trigger_preamp_gain is not None:
-            self.set_trigger_preamp_gain(config.trigger_preamp_gain, channels=[config.trigger_channel])
-        out_dir: Path = config.out_dir
-        csv_path: Path = write_csv_rows([], out_dir, "holdscan.csv")
-        if config.threshold_dac is not None:
-            self.set_threshold_dac(config.threshold_dac, t1=config.t1)
-        self.prepare_trigger_masks(t1=config.t1, use_mask=config.use_mask, use_ctest=config.use_ctest)
-        if config.use_mask:
-            self.set_mask_for_channel(config.trigger_channel, t1=config.t1, enabled=True)
-        if config.use_ctest:
-            self.set_ctest_for_channel(config.trigger_channel, enabled=True)
-        saved_w2: str = self.read_word(2) if not self.dry_run else "00000000"
-        saved_i2c65_12: str = self.read_register_bits(65, 12)
-        rows: list[dict[str, object]] = []
-        start_time: float = time.perf_counter()
-        x_name: str = "hold_code" if config.mode == "internal" else "hold_delay_ns"
-        try:
-            for hold_value in scan_values(config.hold_min, config.hold_max, config.hold_step, name="hold"):
-                if config.mode == "internal":
-                    self.configure_adc_internal_hold(
-                        trigger_channel=config.trigger_channel,
-                        hold_code=hold_value,
-                        nb_acq=config.acquisitions,
-                    )
-                else:
-                    self.configure_adc_external_hold(
-                        trigger_channel=config.trigger_channel,
-                        hold_delay_ns=hold_value,
-                        conversion_delay_ns=config.conversion_delay_ns,
-                        nb_acq=config.acquisitions,
-                        trigger_type=config.trigger_type,
-                        trigger_source=config.trigger_source,
-                        rstn_manual=config.rstn_manual,
-                        ext_trig=config.external_trigger,
-                        peak_sensing=config.peak_sensing,
-                        adc_window_ns=config.adc_window_ns,
-                        adc_nb_trig=config.adc_nb_trig,
-                    )
-                high_gain, low_gain = self.acquire_adc_batch(
-                    nb_acq=config.acquisitions,
-                    timeout_s=config.timeout_s,
-                    synchro_trigger=config.synchro_trigger,
-                )
-                row: dict[str, object] = {x_name: hold_value}
-                summary: list[tuple[int, float, float, int]] = []
-                for channel in config.channels:
-                    hg_mean, hg_stdev = self.mean_stdev(high_gain[channel])
-                    lg_mean, lg_stdev = self.mean_stdev(low_gain[channel])
-                    row[f"ch{channel}_hg_mean"] = hg_mean
-                    row[f"ch{channel}_hg_stdev"] = hg_stdev
-                    row[f"ch{channel}_lg_mean"] = lg_mean
-                    row[f"ch{channel}_lg_stdev"] = lg_stdev
-                    row[f"ch{channel}_count"] = len(high_gain[channel])
-                    summary.append((channel, hg_mean, lg_mean, len(high_gain[channel])))
-                rows.append(row)
-                write_csv_rows(rows, out_dir, "holdscan.csv")
-                print(f"hold {x_name}={hold_value} values={summary[:4]}", flush=True)
-        finally:
-            if config.use_mask or config.use_ctest:
-                self.prepare_trigger_masks(t1=config.t1, use_mask=config.use_mask, use_ctest=config.use_ctest)
-            self.write_register(65, 12, saved_i2c65_12)
-            self.write_word(2, saved_w2)
-            print(f"holdscan measurement time: {time.perf_counter() - start_time:.3f} seconds", flush=True)
-        metadata_path = write_metadata_json(metadata, out_dir) if metadata else None
-        return HoldScanResult(
-            csv_path=csv_path,
-            metadata_path=metadata_path,
-            metadata=metadata,
-            points=len(rows),
-            channels=list(config.channels),
-            mode=config.mode,
-        )
+        from radioroc.application.hold_scan import HoldScanJob, HoldScanJobConfig, HoldScanJobError
+        result = HoldScanJob().run(self, HoldScanJobConfig(config), metadata=metadata,
+                                   cancellation=cancellation, on_event=on_event)
+        if result.status not in ("completed", "cancelled") or result.cleanup_errors or result.persistence_errors:
+            raise HoldScanJobError(result) from result.error
+        return result
 
     def pulse_synchro_trigger(self, *, count: int, period_ms: float) -> None:
         """Pulse the FPGA synchro-trigger output.

@@ -1,0 +1,54 @@
+name: Python foundation
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+        python: ['3.11', '3.13']
+    runs-on: ${{ matrix.os }}
+    env:
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install '.[analysis,dev]'
+      - run: python tools/check_development.py
+      - run: python -m build
+      - name: Verify wheel without GUI or analysis dependencies
+        shell: bash
+        run: |
+          python -m venv .venv-wheel
+          .venv-wheel/bin/python -m pip install dist/*.whl
+          .venv-wheel/bin/python tools/check_installed_package.py
+      - name: Verify headless analysis
+        shell: bash
+        run: |
+          .venv-wheel/bin/python -m pip install 'radioroc-tools[analysis]'
+          .venv-wheel/bin/python tools/check_installed_package.py --plot
+      - name: Install Qt runtime libraries (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 libdbus-1-3 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0
+      - name: Verify optional simulation desktop offscreen
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          .venv-wheel/bin/python -m pip install 'radioroc-tools[gui]'
+          .venv-wheel/bin/python tools/check_installed_package.py --gui --plot
+          .venv-wheel/bin/python -m unittest discover -s tests -p 'test_threshold_gui.py' -v

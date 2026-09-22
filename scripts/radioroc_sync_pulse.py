@@ -8,14 +8,24 @@ import sys
 
 from pathlib import Path
 
-from radioroc_cli_common import (
-    add_connection_args,
-    apply_preset_defaults,
-    connection_config_from_args,
-    load_preset_from_argv,
-    run_metadata,
-    settings_from_args,
-)
+if __package__:
+    from .radioroc_cli_common import (
+        add_connection_args,
+        apply_preset_defaults,
+        connection_config_from_args,
+        load_preset_from_argv,
+        run_metadata,
+        settings_from_args,
+    )
+else:
+    from radioroc_cli_common import (
+        add_connection_args,
+        apply_preset_defaults,
+        connection_config_from_args,
+        load_preset_from_argv,
+        run_metadata,
+        settings_from_args,
+    )
 from radioroc_client import FPGA_FIRMWARE_STATUS_WORD, FPGA_IO_NAMES, RadiorocDevice, RadiorocSerial, SyncPulseConfig
 
 
@@ -33,10 +43,10 @@ def build_parser(preset: dict[str, object] | None = None, preset_path: Path | No
     apply_preset_defaults(parser, preset or {}, preset_path)
     add_connection_args(parser)
     parser.add_argument("--execute", action="store_true", help="Write hardware. Without this, dry-run only.")
-    parser.add_argument("--sync-io", choices=FPGA_IO_NAMES, default="io1", help="FPGA IO used for sync diagnostics")
+    parser.add_argument("--sync-io", choices=FPGA_IO_NAMES, help="FPGA IO used for sync diagnostics")
     parser.add_argument("--sync-io-mux-index", type=int, help="Set sync IO mux index before pulsing")
-    parser.add_argument("--pulses", type=int, default=1000, help="Number of pulses")
-    parser.add_argument("--period-ms", type=float, default=10.0, help="Pulse period")
+    parser.add_argument("--pulses", type=int, help="Number of pulses")
+    parser.add_argument("--period-ms", type=float, help="Pulse period")
     return parser
 
 
@@ -52,6 +62,12 @@ def main() -> int:
 
     preset_path, preset = load_preset_from_argv()
     args = build_parser(preset, preset_path).parse_args()
+    if args.sync_io is None:
+        args.sync_io = "io1"
+    if args.pulses is None:
+        args.pulses = 1000
+    if args.period_ms is None:
+        args.period_ms = 10.0
     connection = connection_config_from_args(args)
     config = SyncPulseConfig(
         sync_io=args.sync_io,

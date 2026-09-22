@@ -7,12 +7,20 @@ import argparse
 from pathlib import Path
 import sys
 
-from radioroc_cli_common import (
-    add_connection_args,
-    apply_preset_defaults,
-    connection_config_from_args,
-    load_preset_from_argv,
-)
+if __package__:
+    from .radioroc_cli_common import (
+        add_connection_args,
+        apply_preset_defaults,
+        connection_config_from_args,
+        load_preset_from_argv,
+    )
+else:
+    from radioroc_cli_common import (
+        add_connection_args,
+        apply_preset_defaults,
+        connection_config_from_args,
+        load_preset_from_argv,
+    )
 from radioroc_client import DEFAULT_CONFIG, RadiorocDevice, RadiorocSerial, bits
 
 
@@ -30,10 +38,10 @@ def build_parser(preset: dict[str, object] | None = None, preset_path: Path | No
     apply_preset_defaults(parser, preset or {}, preset_path)
     add_connection_args(parser)
     parser.add_argument("--execute", action="store_true", help="Write hardware. Without this, dry-run only.")
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help=f"I2C config CSV (default: {DEFAULT_CONFIG})")
+    parser.add_argument("--config", type=Path, help=f"I2C config CSV (default: {DEFAULT_CONFIG})")
     parser.add_argument("--skip-fpga-init", action="store_true", help="Do not write the standard FPGA init words.")
     parser.add_argument("--verify", action="store_true", help="Read back the config after applying.")
-    parser.add_argument("--verify-limit", type=int, default=16, help="Rows to verify; use 0 for the full table.")
+    parser.add_argument("--verify-limit", type=int, help="Rows to verify; use 0 for the full table.")
     return parser
 
 
@@ -49,6 +57,10 @@ def main() -> int:
 
     preset_path, preset = load_preset_from_argv()
     args = build_parser(preset, preset_path).parse_args()
+    if args.config is None:
+        args.config = DEFAULT_CONFIG
+    if args.verify_limit is None:
+        args.verify_limit = 16
     connection = connection_config_from_args(args)
     try:
         with RadiorocSerial.from_config(connection) as transport:

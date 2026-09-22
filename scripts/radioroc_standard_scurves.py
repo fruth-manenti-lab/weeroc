@@ -15,40 +15,15 @@ import statistics
 import time
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 
-import serial
-
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from radioroc_client import DEFAULT_CONFIG, RadiorocSerial, bits, parse_bits, encode_read_request, encode_write_request
 
 DEFAULT_PORT = "/dev/cu.usbserial-RD3_320"
-DEFAULT_CONFIG = Path("configs/radio_default_i2c.csv")
 DEFAULT_OUT = Path("radioroc_runs")
 N_CHANNELS = 64
 FPGA_IO_NAMES = ("io0", "io1", "io2", "io3", "io4")
-
-
-def bits(value: int, width: int = 8) -> str:
-    return format(value, f"0{width}b")
-
-
-def parse_bits(value: str) -> int:
-    return int(str(value).strip(), 2)
-
-
-def encode_read_request(address: int, length: int = 1) -> bytes:
-    if not 0 <= address <= 127:
-        raise ValueError("address must be in range 0..127")
-    if not 1 <= length <= 65536:
-        raise ValueError("length must be in range 1..65536")
-    encoded_length = length - 1
-    return bytes([0xAA, encoded_length & 0xFF, address | 0x80, (encoded_length >> 8) & 0xFF, 0x55])
-
-
-def encode_write_request(address: int, payload: bytes) -> bytes:
-    if not 0 <= address <= 127:
-        raise ValueError("address must be in range 0..127")
-    if not 1 <= len(payload) <= 256:
-        raise ValueError("payload length must be in range 1..256")
-    return bytes([0xAA, len(payload) - 1, address]) + payload + bytes([0x55])
 
 
 @dataclass
@@ -56,81 +31,6 @@ class I2CRow:
     add: int
     subadd: int
     data: str
-
-
-class RadiorocSerial:
-    def __init__(self, port: str, baud: int, timeout: float = 0.5):
-        self.port = port
-        self.baud = baud
-        self.timeout = timeout
-        self.ser: serial.Serial | None = None
-
-    def __enter__(self) -> "RadiorocSerial":
-        self.ser = serial.Serial(self.port, baudrate=self.baud, timeout=self.timeout, write_timeout=self.timeout)
-        self.ser.reset_input_buffer()
-        self.ser.reset_output_buffer()
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        if self.ser:
-            self.ser.close()
-
-    def _xfer(self, frame: bytes, read_len: int = 0) -> bytes:
-        if self.ser is None:
-            raise RuntimeError("serial port is not open")
-        if read_len > 0:
-            self.ser.reset_input_buffer()
-        self.ser.write(frame)
-        self.ser.flush()
-        if read_len <= 0:
-            return b""
-        data = bytearray()
-        deadline = time.monotonic() + max(self.timeout, 0.1)
-        while time.monotonic() < deadline:
-            chunk = self.ser.read(max(1, read_len - len(data)))
-            if chunk:
-                data.extend(chunk)
-                while data and data[0] != 0xAA:
-                    data.pop(0)
-                if len(data) >= read_len:
-                    candidate = bytes(data[:read_len])
-                    if candidate[-1] == 0x55:
-                        return candidate
-                    data.pop(0)
-            else:
-                time.sleep(0.001)
-        return bytes(data)
-
-    def read_word(self, address: int) -> str:
-        last_response = b""
-        for _ in range(3):
-            response = self._xfer(encode_read_request(address, 1), 5)
-            if len(response) == 5 and response[0] == 0xAA and response[-1] == 0x55:
-                return bits(response[3], 8)
-            last_response = response
-            time.sleep(0.01)
-        raise RuntimeError(f"bad read_word({address}) response: {last_response.hex(' ')}")
-
-    def read_words(self, address: int, length: int) -> bytes:
-        last_response = b""
-        for _ in range(3):
-            response = self._xfer(encode_read_request(address, length), length + 4)
-            if len(response) == length + 4 and response[0] == 0xAA and response[-1] == 0x55:
-                return response[3:-1]
-            last_response = response
-            time.sleep(0.01)
-        raise RuntimeError(f"bad read_words({address}, {length}) response: {last_response.hex(' ')}")
-
-    def write_word(self, address: int, word_bits: str) -> None:
-        payload = parse_bits(word_bits).to_bytes(1, "little")
-        self._xfer(encode_write_request(address, payload))
-
-    def write_words(self, address: int, payload: bytes) -> None:
-        offset = 0
-        while offset < len(payload):
-            chunk = payload[offset : offset + 256]
-            self._xfer(encode_write_request(address, chunk))
-            offset += len(chunk)
 
 
 class RadiorocOps:

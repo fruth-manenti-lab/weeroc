@@ -1,0 +1,20 @@
+{
+  "apply_defaults": false,
+  "channels": "4",
+  "trigger_channel": 4,
+  "threshold_dac": 100,
+  "hold_delay_ns": 530,
+  "conversion_delay_ns": 400,
+  "acquisitions_per_batch": 50,
+  "batches": 10,
+  "timeout_s": 5.0,
+  "pat_gain": 1,
+  "peak_sensing": false,
+  "t2": false,
+  "no_mask": false,
+  "adc_trigger_type": 0,
+  "adc_trigger_source": 3,
+  "adc_window_ns": 50,
+  "adc_nb_trig": 1,
+  "rstn_manual": true
+}
