@@ -116,6 +116,22 @@ class AutocalibrationJobTests(unittest.TestCase):
         self.assertEqual(result.status, "completed")
         self.assertTrue(result.reference_restored)
 
+    def test_saved_run_reader_composes_the_four_sub_scans(self):
+        from radioroc.data.autocalibration_reader import read_autocalibration_run
+        result = self.run_job()
+        self.assertEqual(result.status, "completed")
+
+        saved = read_autocalibration_run(self.directory)
+        self.assertEqual(saved.status, "completed")
+        self.assertEqual(saved.warnings, ())
+        self.assertEqual(set(saved.sub_runs), {"step1_zero", "step1_full", "step2", "final"})
+        self.assertEqual(list(saved.sub_runs), ["step1_zero", "step1_full", "step2", "final"])
+        self.assertEqual(len(saved.sub_runs["step1_zero"].rows), 3)  # DAC 0, 10, 20
+        self.assertEqual(len(saved.sub_runs["step2"].rows), 3)
+        # Also accepts the manifest file path directly, not just the directory.
+        same = read_autocalibration_run(self.directory / "autocalibration_metadata.json")
+        self.assertEqual(same.status, saved.status)
+
     def test_dry_run_never_constructs_output_or_touches_transport(self):
         dry_device = RadiorocDevice(self.transport, dry_run=True)
         result = AutocalibrationJob().run(dry_device, self.config)
