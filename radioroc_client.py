@@ -1522,6 +1522,501 @@ class RadiorocDevice:
         data[2:] = bits(value, 6)
         self.write_register(channel, subadd, "".join(data))
 
+    def set_trigger_preamp_gain_for_channel(self, channel: int, value: int) -> None:
+        """Set one channel's trigger-preamplifier (paT) gain code.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `value` (`int`): Raw 6-bit gain code, 0..63 (vendor guide: the lower
+          the value the higher the gain; 1 = max gain, 63 = min gain, 0 opens
+          the feedback loop and unbiases the preamplifier).
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel's trigger-preamplifier register if present in
+          the loaded defaults.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "Trigger preamplifier gain...
+        add: [0:63] - subadd: 1 - bit: [5:0]"). Not yet independently verified
+        against real hardware; see `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_channel(channel)
+        validate_integer(value, 0, 63, "value")
+        row: I2CRow | None = self.find_i2c_row(channel, 1)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[2:8] = bits(value, 6)
+        self.write_register(channel, 1, "".join(data))
+
+    def set_trigger_preamp_compensation_for_channel(self, channel: int, value: int) -> None:
+        """Set one channel's trigger-preamplifier feedback-compensation code.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `value` (`int`): Raw 2-bit compensation code, 0..3 (vendor guide:
+          keep to 0 unless deliberately slowing down the preamplifier).
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel's trigger-preamplifier register if present in
+          the loaded defaults, preserving that register's gain bits.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "Feedback compensation for the
+        trigger preamplifier... add: [0:63] - subadd: 1 - bit: [7:6]"). The
+        packaged default (compensation = 0) matches the vendor guide's stated
+        default recommendation, cross-checked before trusting the bit
+        position. Not yet independently verified against real hardware; see
+        `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_channel(channel)
+        validate_integer(value, 0, 3, "value")
+        row: I2CRow | None = self.find_i2c_row(channel, 1)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[0:2] = bits(value, 2)
+        self.write_register(channel, 1, "".join(data))
+
+    def set_high_gain_for_channel(self, channel: int, value: int) -> None:
+        """Set one channel's high-gain (HG) energy-preamplifier gain code.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `value` (`int`): Raw 4-bit gain code, 0..15. V/V gain is given by
+          Cin/Cf with Cin = 5 pF and Cf = 62.5 fF x (16 - code); higher code
+          means higher gain.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel's HG/LG gain register if present in the loaded
+          defaults, preserving that register's LG gain bits.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "High gain energy
+        preamplifier gain... add: [0:63] - subadd: 2 - bit: [3:0]"). Not yet
+        independently verified against real hardware; see
+        `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_channel(channel)
+        validate_integer(value, 0, 15, "value")
+        row: I2CRow | None = self.find_i2c_row(channel, 2)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[4:8] = bits(value, 4)
+        self.write_register(channel, 2, "".join(data))
+
+    def set_low_gain_for_channel(self, channel: int, value: int) -> None:
+        """Set one channel's low-gain (LG) energy-preamplifier gain code.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `value` (`int`): Raw 4-bit gain code, 0..15. V/V gain is given by
+          Cin/Cf with Cin = 500 fF and Cf = 62.5 fF x (16 - code); higher code
+          means higher gain.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel's HG/LG gain register if present in the loaded
+          defaults, preserving that register's HG gain bits.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "Low gain energy preamplifier
+        gain... add: [0:63] - subadd: 2 - bit: [7:4]"). Not yet independently
+        verified against real hardware; see `IMPLEMENTATION_STATUS.md`
+        RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_channel(channel)
+        validate_integer(value, 0, 15, "value")
+        row: I2CRow | None = self.find_i2c_row(channel, 2)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[0:4] = bits(value, 4)
+        self.write_register(channel, 2, "".join(data))
+
+    def set_high_gain_shaping_for_channel(self, channel: int, value: int) -> None:
+        """Set one channel's high-gain (HG) CRRC shaper time code.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `value` (`int`): Raw 4-bit shaping code, 0..15. Actual shaping time
+          is `code x 20 ns` or `code x 120 ns` depending on
+          `set_high_gain_shaping_slow_for_channel`'s LSB selection.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel's HG/LG shaping register if present in the
+          loaded defaults, preserving that register's LG shaping bits.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "Shaping time for the high
+        gain CRRC shaper... add: [0:63] - subadd: 3 - bit: [3:0]"). Not yet
+        independently verified against real hardware; see
+        `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_channel(channel)
+        validate_integer(value, 0, 15, "value")
+        row: I2CRow | None = self.find_i2c_row(channel, 3)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[4:8] = bits(value, 4)
+        self.write_register(channel, 3, "".join(data))
+
+    def set_low_gain_shaping_for_channel(self, channel: int, value: int) -> None:
+        """Set one channel's low-gain (LG) CRRC shaper time code.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `value` (`int`): Raw 4-bit shaping code, 0..15. Actual shaping time
+          is `code x 20 ns` or `code x 120 ns` depending on
+          `set_low_gain_shaping_slow_for_channel`'s LSB selection.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel's HG/LG shaping register if present in the
+          loaded defaults, preserving that register's HG shaping bits.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "Shaping time for the low
+        gain CRRC shaper... add: [0:63] - subadd: 3 - bit: [7:4]"). Not yet
+        independently verified against real hardware; see
+        `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_channel(channel)
+        validate_integer(value, 0, 15, "value")
+        row: I2CRow | None = self.find_i2c_row(channel, 3)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[0:4] = bits(value, 4)
+        self.write_register(channel, 3, "".join(data))
+
+    def set_high_gain_shaping_slow_for_channel(self, channel: int, slow: bool) -> None:
+        """Select the high-gain (HG) shaper's time-constant LSB scale.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `slow` (`bool`): `True` selects 120 ns per shaping code step,
+          `False` selects 20 ns per step.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel's Ctest/LSB-select register (subaddress 7) if
+          present in the loaded defaults, preserving the Ctest, injection
+          capacitor and LG-shaping-LSB bits already packed into that byte.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "LSB selection for the high
+        gain shaper... add: [0:63] - subadd: 7 - bit: 6"). Polarity inferred
+        from the paired checkbox's shaping-time formula
+        (`(20+100*checked)*code`, so checked/bit=1 means 120 ns/code) and
+        confirmed consistent with this codebase's existing bit-4 (Ctest,
+        `set_ctest_for_channel`) and bit-5 (injection capacitor) positions on
+        the same row. Not yet independently verified against real hardware;
+        see `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        validate_channel(channel)
+        row: I2CRow | None = self.find_i2c_row(channel, 7)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[1] = "1" if slow else "0"
+        self.write_register(channel, 7, "".join(data))
+
+    def set_low_gain_shaping_slow_for_channel(self, channel: int, slow: bool) -> None:
+        """Select the low-gain (LG) shaper's time-constant LSB scale.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `slow` (`bool`): `True` selects 120 ns per shaping code step,
+          `False` selects 20 ns per step.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel's Ctest/LSB-select register (subaddress 7) if
+          present in the loaded defaults, preserving the Ctest, injection
+          capacitor and HG-shaping-LSB bits already packed into that byte.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "LSB selection for the low
+        gain shaper... add: [0:63] - subadd: 7 - bit: 7"). Same polarity
+        reasoning as `set_high_gain_shaping_slow_for_channel`. Not yet
+        independently verified against real hardware; see
+        `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        validate_channel(channel)
+        row: I2CRow | None = self.find_i2c_row(channel, 7)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[0] = "1" if slow else "0"
+        self.write_register(channel, 7, "".join(data))
+
+    def set_t1_threshold_dac(self, value: int) -> None:
+        """Set the common (ASIC-wide) T1 trigger-threshold DAC code.
+
+        **Inputs**
+        - `value` (`int`): Raw 10-bit DAC code, 0..1023. Unlike the
+          per-channel calibration trims (`set_calibration_dac_for_channel`),
+          this is the single main T1 threshold shared by every channel.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes address 65 subaddresses 1 and 2 if present in the loaded
+          defaults, preserving subaddress 2's T2-DAC low bits.
+
+        Register recovered from the vendor GUI's compiled widget properties:
+        `Ui_MainWindow.retranslateUi`'s "Threshold1" control pairs with the
+        raw-register-view labels at address 65 (`dac1[7:0]` at subadd 1,
+        `dac1[9:8]` sharing subadd 2 with `dac2[5:0]`). Not yet independently
+        verified against real hardware; see `IMPLEMENTATION_STATUS.md`
+        RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_integer(value, 0, 1023, "value")
+        low_row: I2CRow | None = self.find_i2c_row(65, 1)
+        high_row: I2CRow | None = self.find_i2c_row(65, 2)
+        if low_row is not None:
+            self.write_register(65, 1, bits(value & 0xFF, 8))
+        if high_row is not None:
+            data: list[str] = list(high_row.data)
+            data[0:2] = bits((value >> 8) & 0x3, 2)
+            self.write_register(65, 2, "".join(data))
+
+    def set_t2_threshold_dac(self, value: int) -> None:
+        """Set the common (ASIC-wide) T2 trigger-threshold DAC code.
+
+        **Inputs**
+        - `value` (`int`): Raw 10-bit DAC code, 0..1023. Unlike the
+          per-channel calibration trims (`set_calibration_dac_for_channel`),
+          this is the single main T2 threshold shared by every channel.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes address 65 subaddresses 2 and 3 if present in the loaded
+          defaults, preserving subaddress 2's T1-DAC high bits and
+          subaddress 3's TQ-DAC low bits.
+
+        Register recovered from the vendor GUI's compiled widget properties:
+        `Ui_MainWindow.retranslateUi`'s "Threshold2" control pairs with the
+        raw-register-view labels at address 65 (`dac2[5:0]` sharing subadd 2
+        with `dac1[9:8]`, `dac2[9:6]` sharing subadd 3 with `dacQ[3:0]`). Not
+        yet independently verified against real hardware; see
+        `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_integer(value, 0, 1023, "value")
+        low_row: I2CRow | None = self.find_i2c_row(65, 2)
+        high_row: I2CRow | None = self.find_i2c_row(65, 3)
+        if low_row is not None:
+            data: list[str] = list(low_row.data)
+            data[2:8] = bits(value & 0x3F, 6)
+            self.write_register(65, 2, "".join(data))
+        if high_row is not None:
+            data = list(high_row.data)
+            data[0:4] = bits((value >> 6) & 0xF, 4)
+            self.write_register(65, 3, "".join(data))
+
+    def set_tq_threshold_dac(self, value: int) -> None:
+        """Set the common (ASIC-wide) TQ trigger-threshold DAC code.
+
+        **Inputs**
+        - `value` (`int`): Raw 10-bit DAC code, 0..1023. This is the single
+          main TQ threshold shared by every channel.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes address 65 subaddresses 3 and 4 if present in the loaded
+          defaults, preserving subaddress 3's T2-DAC high bits and
+          subaddress 4's unused bits.
+
+        Register recovered from the vendor GUI's compiled widget properties:
+        `Ui_MainWindow.retranslateUi`'s "ThresholdQ" control pairs with the
+        raw-register-view labels at address 65 (`dacQ[3:0]` sharing subadd 3
+        with `dac2[9:6]`, `dacQ[9:4]` at subadd 4 alongside two unused bits).
+        Not yet independently verified against real hardware; see
+        `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_integer(value, 0, 1023, "value")
+        low_row: I2CRow | None = self.find_i2c_row(65, 3)
+        high_row: I2CRow | None = self.find_i2c_row(65, 4)
+        if low_row is not None:
+            data: list[str] = list(low_row.data)
+            data[4:8] = bits(value & 0xF, 4)
+            self.write_register(65, 3, "".join(data))
+        if high_row is not None:
+            data = list(high_row.data)
+            data[2:8] = bits((value >> 4) & 0x3F, 6)
+            self.write_register(65, 4, "".join(data))
+
+    TRIGGER_SELECTION_CODES: dict[str, int] = {
+        "external": 0b0000,
+        "local_t1": 0b0001,
+        "local_t2": 0b0010,
+        "local_tq": 0b0011,
+        "global_t1": 0b0100,
+        "global_t2": 0b1000,
+        "global_tq": 0b1100,
+    }
+
+    def set_trigger_selection(self, mode: str) -> None:
+        """Select which trigger arms the delay box and peak detector.
+
+        **Inputs**
+        - `mode` (`str`): One of `"external"`, `"local_t1"`, `"local_t2"`,
+          `"local_tq"`, `"global_t1"`, `"global_t2"`, `"global_tq"`. "Local"
+          triggers only toggle the triggering channel's own peak detector;
+          "global" and "external" triggers are ASIC-wide. The delay box
+          itself is always global (a single delay for the whole ASIC).
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes address 65 subaddress 12 if present in the loaded defaults,
+          preserving that register's hysteresis, delay-enable and
+          external-hold-select bits.
+
+        Register recovered from the vendor GUI's compiled widget properties:
+        `Ui_MainWindow.retranslateUi`'s "Trigger selection" combo box lists
+        exactly these seven options with these four-bit codes, which land on
+        `selTrig[3:0]` per the raw-register-view label at address 65,
+        subaddress 12 (`hysteresis1, hysteresis2, EN_delay, selHoldExt,
+        selTrig[3:0]`). Cross-checked against the packaged default config,
+        whose subaddress-12 value (`11100100`) decodes to `selTrig[3:0]` =
+        `0100` = exactly the "global_t1" code - independent confirmation of
+        both the bit position and the enumerated codes. Not yet independently
+        verified against real hardware; see `IMPLEMENTATION_STATUS.md`
+        RADIOROC 30.
+        """
+
+        if mode not in self.TRIGGER_SELECTION_CODES:
+            raise ValueError(f"mode must be one of {sorted(self.TRIGGER_SELECTION_CODES)}")
+        row: I2CRow | None = self.find_i2c_row(65, 12)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[4:8] = bits(self.TRIGGER_SELECTION_CODES[mode], 4)
+        self.write_register(65, 12, "".join(data))
+
+    def set_delay_code(self, value: int) -> None:
+        """Set the common (ASIC-wide) peak-detector hold delay code.
+
+        **Inputs**
+        - `value` (`int`): Raw 8-bit delay code, 0..255. Total delay is
+          `delay code x 0.85 ns x slope` (see `set_delay_slope`). After a
+          valid trigger, any signal after this delay is ignored.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes address 65 subaddress 8 if present in the loaded defaults.
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "Delay trimming for the peak
+        detector 'hold' signal... add: 65 - subadd: 8 - bit: [7:0]"),
+        matching the raw-register-view label `delay[7:0]` at the same
+        address/subaddress. Not yet independently verified against real
+        hardware; see `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_integer(value, 0, 255, "value")
+        row: I2CRow | None = self.find_i2c_row(65, 8)
+        if row is None:
+            return
+        self.write_register(65, 8, bits(value, 8))
+
+    def set_delay_slope(self, value: int) -> None:
+        """Set the common (ASIC-wide) delay-slope trim code.
+
+        **Inputs**
+        - `value` (`int`): Raw 4-bit slope-trim code, 0..15. Total delay is
+          `delay code x 0.85 ns x slope` (see `set_delay_code`).
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes address 65 subaddress 9 if present in the loaded defaults,
+          preserving that register's internal discriminator-delay bias bits
+          (`ibi_discri_delay[3:0]`, not a user-facing control).
+
+        Register recovered from the vendor GUI's compiled widget properties
+        (`Ui_MainWindow.retranslateUi` tooltip: "Delay slope trimming... add:
+        65 - subadd: 9 - bit: [7:4]"), matching the raw-register-view label
+        `slopeTrim[3:0]` at the same address/subaddress (the low nibble,
+        `ibi_discri_delay[3:0]`, is an internal bias current left untouched).
+        Not yet independently verified against real hardware; see
+        `IMPLEMENTATION_STATUS.md` RADIOROC 30.
+        """
+
+        from radioroc.protocol.frames import validate_integer
+
+        validate_integer(value, 0, 15, "value")
+        row: I2CRow | None = self.find_i2c_row(65, 9)
+        if row is None:
+            return
+        data: list[str] = list(row.data)
+        data[0:4] = bits(value, 4)
+        self.write_register(65, 9, "".join(data))
+
     def prepare_trigger_masks(self, *, t1: bool, use_mask: bool, use_ctest: bool) -> None:
         """Prepare trigger path masks and Ctest bits for scan loops.
 

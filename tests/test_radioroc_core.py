@@ -147,6 +147,104 @@ class RadiorocCoreTests(unittest.TestCase):
         self.assertEqual(after[2:], bits(63, 6))
         self.assertEqual(after[:2], before[:2])
 
+    def test_main_tab_per_channel_front_end_bit_positions(self) -> None:
+        # Bit positions recovered from radioroc2UI.pyc's retranslateUi
+        # tooltips (add: [0:63] - subadd: N - bit: [a:b]); see
+        # IMPLEMENTATION_STATUS.md RADIOROC 30.
+        device = RadiorocDevice(RadiorocMemoryTransport(), dry_run=True)  # type: ignore[arg-type]
+        device.load_default_config()
+
+        # Packaged default (channel 0): compensation = 0, gain = 8 (subadd 1).
+        self.assertEqual(device.find_i2c_row(0, 1).data, "00001000")
+
+        device.set_trigger_preamp_gain_for_channel(4, 30)
+        self.assertEqual(device.find_i2c_row(4, 1).data[2:8], bits(30, 6))
+        with self.assertRaises(ValueError):
+            device.set_trigger_preamp_gain_for_channel(4, 64)
+
+        before = device.find_i2c_row(4, 1).data
+        device.set_trigger_preamp_compensation_for_channel(4, 2)
+        after = device.find_i2c_row(4, 1).data
+        self.assertEqual(after[0:2], bits(2, 2))
+        self.assertEqual(after[2:8], before[2:8])
+        with self.assertRaises(ValueError):
+            device.set_trigger_preamp_compensation_for_channel(4, 4)
+
+        device.set_high_gain_for_channel(4, 12)
+        self.assertEqual(device.find_i2c_row(4, 2).data[4:8], bits(12, 4))
+        before = device.find_i2c_row(4, 2).data
+        device.set_low_gain_for_channel(4, 9)
+        after = device.find_i2c_row(4, 2).data
+        self.assertEqual(after[0:4], bits(9, 4))
+        self.assertEqual(after[4:8], before[4:8])
+
+        device.set_high_gain_shaping_for_channel(4, 7)
+        self.assertEqual(device.find_i2c_row(4, 3).data[4:8], bits(7, 4))
+        before = device.find_i2c_row(4, 3).data
+        device.set_low_gain_shaping_for_channel(4, 3)
+        after = device.find_i2c_row(4, 3).data
+        self.assertEqual(after[0:4], bits(3, 4))
+        self.assertEqual(after[4:8], before[4:8])
+
+        # Shaping LSB selects and Ctest/injection-cap bits share subadd 7;
+        # setting one leaves the others alone.
+        device.set_ctest_for_channel(4, True)
+        before = device.find_i2c_row(4, 7).data
+        device.set_high_gain_shaping_slow_for_channel(4, True)
+        after = device.find_i2c_row(4, 7).data
+        self.assertEqual(after[1], "1")
+        self.assertEqual(after[3], before[3])  # Ctest bit untouched
+        device.set_low_gain_shaping_slow_for_channel(4, True)
+        after = device.find_i2c_row(4, 7).data
+        self.assertEqual(after[0], "1")
+        self.assertEqual(after[1], "1")
+
+    def test_main_tab_common_threshold_and_trigger_selection(self) -> None:
+        # Bit positions recovered the same way; see IMPLEMENTATION_STATUS.md
+        # RADIOROC 30. The default subadd-12 value independently confirms the
+        # selTrig[3:0] position: it decodes to 0b0100, the exact "global_t1"
+        # code enumerated from the "Trigger selection" combo box tooltip.
+        device = RadiorocDevice(RadiorocMemoryTransport(), dry_run=True)  # type: ignore[arg-type]
+        device.load_default_config()
+
+        self.assertEqual(device.find_i2c_row(65, 12).data[4:8], bits(0b0100, 4))
+
+        device.set_t1_threshold_dac(0x2AB)
+        self.assertEqual(device.find_i2c_row(65, 1).data, bits(0x2AB & 0xFF, 8))
+        self.assertEqual(device.find_i2c_row(65, 2).data[0:2], bits((0x2AB >> 8) & 0x3, 2))
+        with self.assertRaises(ValueError):
+            device.set_t1_threshold_dac(1024)
+
+        device.set_t2_threshold_dac(0x155)
+        self.assertEqual(device.find_i2c_row(65, 2).data[2:8], bits(0x155 & 0x3F, 6))
+        self.assertEqual(device.find_i2c_row(65, 3).data[0:4], bits((0x155 >> 6) & 0xF, 4))
+        # Setting T2 preserved T1's bits already written into subadd 2.
+        self.assertEqual(device.find_i2c_row(65, 2).data[0:2], bits((0x2AB >> 8) & 0x3, 2))
+
+        device.set_tq_threshold_dac(0x3D0)
+        self.assertEqual(device.find_i2c_row(65, 3).data[4:8], bits(0x3D0 & 0xF, 4))
+        self.assertEqual(device.find_i2c_row(65, 4).data[2:8], bits((0x3D0 >> 4) & 0x3F, 6))
+        # Setting TQ preserved T2's bits already written into subadd 3.
+        self.assertEqual(device.find_i2c_row(65, 3).data[0:4], bits((0x155 >> 6) & 0xF, 4))
+
+        device.set_trigger_selection("local_tq")
+        after = device.find_i2c_row(65, 12).data
+        self.assertEqual(after[4:8], bits(0b0011, 4))
+        self.assertEqual(after[0:4], "1110")  # hysteresis/EN_delay/selHoldExt untouched
+        with self.assertRaises(ValueError):
+            device.set_trigger_selection("not_a_mode")
+
+        device.set_delay_code(200)
+        self.assertEqual(device.find_i2c_row(65, 8).data, bits(200, 8))
+        with self.assertRaises(ValueError):
+            device.set_delay_code(256)
+
+        before = device.find_i2c_row(65, 9).data
+        device.set_delay_slope(9)
+        after = device.find_i2c_row(65, 9).data
+        self.assertEqual(after[0:4], bits(9, 4))
+        self.assertEqual(after[4:8], before[4:8])  # internal bias bits untouched
+
 
 class RadiorocAnalysisTests(unittest.TestCase):
     def test_threshold_csv_and_summary(self) -> None:
