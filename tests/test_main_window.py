@@ -187,6 +187,90 @@ class MainWindowTests(unittest.TestCase):
                             f"{type(scan_window).__name__} should accept switching to Hardware "
                             "mode once already connected via the shared ASIC-config page")
 
+    def test_threshold_scan_actually_runs_after_connecting_and_switching_to_hardware(self):
+        # The operator asked, fairly, whether tests exercise "basic things
+        # like this" -- connect, then actually run a scan, not just check
+        # that a button's enabled state looks right. This drives the real
+        # MainWindow/ThresholdWindow classes through the exact sequence a
+        # user follows (connect on the shared ASIC-config page, switch a
+        # Calibration tab to Hardware, run it) against a session backed by a
+        # faithful fake ASIC/FPGA transport (not just a bare read_word
+        # stub), and checks the run actually completes.
+        from tests.test_connection_worker import OwnedThresholdTransport, ThresholdSession
+
+        class _RealSessionWorker(ConnectionWorker):
+            def __init__(self):
+                super().__init__(discovery=lambda: (),
+                                 session_factory=lambda config: ThresholdSession(OwnedThresholdTransport()))
+
+        window = self._make_window(_RealSessionWorker)
+        worker = window.connection_panel.connection_worker
+        worker.connect(RadiorocConnectionConfig("fake-port", 115200, 0.5))
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and worker.snapshot().state != "connected":
+            _app().processEvents()
+            time.sleep(0.01)
+        self.assertEqual(worker.snapshot().state, "connected")
+        window.connection_panel.poll()
+
+        tw = window.threshold_window
+        tw.poll_connection_worker()
+        tw.mode.setCurrentIndex(1)  # Hardware connection
+        self.assertEqual(tw.mode.currentIndex(), 1)
+        tw.channels.setText("4")
+        tw.dac_min.setValue(0)
+        tw.dac_max.setValue(0)
+        tw.dac_step.setValue(1)
+        tw.window_ms.setValue(1)
+        _app().processEvents()
+        self.assertTrue(tw.run_button.isEnabled())
+
+        tw.start_run()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and tw._hardware_running:
+            _app().processEvents()
+            time.sleep(0.01)
+        self.assertFalse(tw._hardware_running, "hardware run never finished")
+        self.assertIn("completed", tw.status.text().lower())
+
+    def test_scurve_actually_runs_after_connecting_and_switching_to_hardware(self):
+        # Same shape as the threshold-scan version above, for S-curve.
+        from tests.test_connection_worker import OwnedThresholdTransport, ThresholdSession
+
+        class _RealSessionWorker(ConnectionWorker):
+            def __init__(self):
+                super().__init__(discovery=lambda: (),
+                                 session_factory=lambda config: ThresholdSession(OwnedThresholdTransport()))
+
+        window = self._make_window(_RealSessionWorker)
+        worker = window.connection_panel.connection_worker
+        worker.connect(RadiorocConnectionConfig("fake-port", 115200, 0.5))
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and worker.snapshot().state != "connected":
+            _app().processEvents()
+            time.sleep(0.01)
+        self.assertEqual(worker.snapshot().state, "connected")
+        window.connection_panel.poll()
+
+        sw = window.scurve_window
+        sw.poll_connection_worker()
+        sw.mode.setCurrentIndex(1)  # Hardware connection
+        self.assertEqual(sw.mode.currentIndex(), 1)
+        sw.channels.setText("4")
+        sw.dac_min.setValue(0)
+        sw.dac_max.setValue(0)
+        sw.dac_step.setValue(1)
+        _app().processEvents()
+        self.assertTrue(sw.run_button.isEnabled())
+
+        sw.start_run()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and sw._hardware_running:
+            _app().processEvents()
+            time.sleep(0.01)
+        self.assertFalse(sw._hardware_running, "hardware run never finished")
+        self.assertIn("completed", sw.status.text().lower())
+
     def test_port_candidates_are_discovered_automatically_without_a_manual_refresh(self):
         # The operator found this the hard way: opening the app left the
         # port dropdown empty until Refresh was clicked once, even though
