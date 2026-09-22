@@ -385,6 +385,112 @@ class HoldScanConfig:
 
 
 @dataclass
+class AcquisitionConfig:
+    """Configuration for a fixed-setting external-hold ADC event acquisition.
+
+    Unlike `HoldScanConfig`, there is no swept hold value: `configure_adc_
+    external_hold` is applied at one fixed operating point and repeated
+    ADC batches are collected at it.
+
+    **Attributes**
+    - `channels` (`list[int]`): ADC channels to save.
+    - `trigger_channel` (`int`): Channel used for the ADC trigger setup.
+    - `threshold_dac` (`int | None`): Optional T1/T2 threshold DAC setting.
+    - `hold_delay_ns` (`int`): External hold delay in ns, divisible by 5.
+    - `conversion_delay_ns` (`int`): ADC conversion delay, divisible by 40 ns.
+    - `acquisitions_per_batch` (`int`): Requested ADC acquisitions per batch.
+    - `batches` (`int`): Number of acquisition batches to run.
+    - `start_batch` (`int`): First batch number, for append-mode continuation.
+    - `timeout_s` (`float`): Per-batch ADC timeout.
+    - `trigger_preamp_gain` (`int | None`): Optional paT gain code `1..63`.
+    - `high_gain_code` (`int | None`): Optional high-gain shaper code `1..15`.
+    - `low_gain_code` (`int | None`): Optional low-gain shaper code `1..15`.
+    - `peak_sensing` (`bool`): Use vendor external-hold peak-sensing path.
+    - `t1` (`bool`): Use T1 threshold when true, T2 when false.
+    - `use_mask` (`bool`): Mask all but the trigger channel.
+    - `trigger_type` (`int`): Vendor ADC trigger type code.
+    - `trigger_source` (`int`): Vendor ADC trigger source code.
+    - `adc_window_ns` (`int`): ADC coincidence/window width, divisible by 5 ns.
+    - `adc_nb_trig` (`int`): ADC time-window trigger count.
+    - `rstn_manual` (`bool`): Vendor ADC reset-n manual bit.
+    - `synchro_trigger` (`bool`): Pulse FPGA synchro trigger per ADC batch.
+    - `out_dir` (`Path`): Run output directory.
+    """
+
+    channels: list[int]
+    trigger_channel: int
+    threshold_dac: int | None = None
+    hold_delay_ns: int = 530
+    conversion_delay_ns: int = 400
+    acquisitions_per_batch: int = 50
+    batches: int = 10
+    start_batch: int = 0
+    timeout_s: float = 5.0
+    trigger_preamp_gain: int | None = None
+    high_gain_code: int | None = None
+    low_gain_code: int | None = None
+    peak_sensing: bool = False
+    t1: bool = True
+    use_mask: bool = True
+    trigger_type: int = 0
+    trigger_source: int = 3
+    adc_window_ns: int = 50
+    adc_nb_trig: int = 1
+    rstn_manual: bool = False
+    synchro_trigger: bool = False
+    out_dir: Path = DEFAULT_RUNS_DIR
+
+    def validate(self) -> None:
+        """Validate this acquisition configuration before hardware writes.
+
+        Field-level ranges already enforced by the primitives this config
+        feeds (`configure_adc_external_hold`, `acquire_adc_batch`,
+        `set_threshold_dac`, `set_trigger_preamp_gain`,
+        `set_energy_shaper_gain`) are re-checked here so invalid input is
+        rejected before any hardware access; this method only adds the
+        cross-field/shape checks those primitives cannot see on their own.
+
+        **Inputs**
+        - None
+
+        **Returns**
+        - `None`
+        """
+
+        validate_channels(self.channels)
+        if len(set(self.channels)) != len(self.channels):
+            raise ValueError("channels must be unique")
+        validate_channel(self.trigger_channel)
+        if self.threshold_dac is not None and not 0 <= self.threshold_dac <= 1023:
+            raise ValueError("threshold_dac must be in range 0..1023")
+        if self.hold_delay_ns < 0 or self.hold_delay_ns % 5 != 0:
+            raise ValueError("hold_delay_ns must be non-negative and divisible by 5")
+        if self.conversion_delay_ns < 0 or self.conversion_delay_ns % 40 != 0:
+            raise ValueError("conversion_delay_ns must be non-negative and divisible by 40")
+        if not 1 <= self.acquisitions_per_batch <= 255:
+            raise ValueError("acquisitions_per_batch must be in range 1..255")
+        if self.batches < 1:
+            raise ValueError("batches must be at least 1")
+        if self.start_batch < 0:
+            raise ValueError("start_batch must be non-negative")
+        if self.timeout_s <= 0:
+            raise ValueError("timeout_s must be positive")
+        if self.trigger_preamp_gain is not None and not 1 <= self.trigger_preamp_gain <= 63:
+            raise ValueError("trigger_preamp_gain must be in range 1..63")
+        for name, value in (("high_gain_code", self.high_gain_code), ("low_gain_code", self.low_gain_code)):
+            if value is not None and not 1 <= value <= 15:
+                raise ValueError(f"{name} must be in range 1..15")
+        if not 0 <= self.trigger_type <= 3:
+            raise ValueError("trigger_type must be in range 0..3")
+        if not 0 <= self.trigger_source <= 7:
+            raise ValueError("trigger_source must be in range 0..7")
+        if self.adc_window_ns < 0 or self.adc_window_ns % 5 != 0:
+            raise ValueError("adc_window_ns must be non-negative and divisible by 5")
+        if not 0 <= self.adc_nb_trig <= 63:
+            raise ValueError("adc_nb_trig must be in range 0..63")
+
+
+@dataclass
 class SyncPulseConfig:
     """Configuration for a standalone FPGA synchro pulse test.
 
@@ -536,6 +642,35 @@ class HoldScanResult:
     points: int = 0
     channels: list[int] = field(default_factory=list)
     mode: str = "internal"
+    warnings: list[str] = field(default_factory=list)
+    status: str = "completed"
+    cleanup_status: str = "not_required"
+    cleanup_errors: list[str] = field(default_factory=list)
+    persistence_errors: list[str] = field(default_factory=list)
+    error: BaseException | None = None
+    execution_mode: str = "hardware"
+    verification: dict | None = None
+
+
+@dataclass
+class AcquisitionResult:
+    """Result metadata for a fixed-setting ADC event acquisition.
+
+    **Attributes**
+    - `csv_path` (`Path`): Output CSV path.
+    - `metadata_path` (`Path | None`): Output metadata JSON path.
+    - `metadata` (`RadiorocRunMetadata | None`): Run metadata.
+    - `points` (`int`): Number of completed acquisition batches (not events).
+    - `channels` (`list[int]`): Channels saved by the acquisition.
+    - `warnings` (`list[str]`): Non-fatal warnings.
+    - `verification` (`dict | None`): Optional independent restoration report.
+    """
+
+    csv_path: Path
+    metadata_path: Path | None = None
+    metadata: RadiorocRunMetadata | None = None
+    points: int = 0
+    channels: list[int] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     status: str = "completed"
     cleanup_status: str = "not_required"
