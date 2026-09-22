@@ -5,16 +5,23 @@ Enable TQ) plus their per-grid "Enable all"/"Enable none" buttons. Does not
 cover that tab's "Analog probe" / "Digital probe" routing radio-button
 groups: there is no backend support for probe routing in this codebase yet,
 so building it would mean guessing at unconfirmed register behavior.
+
+Each grid cell is a checkable button styled with
+``radioroc.gui.channel_select.CHANNEL_BUTTON_STYLE`` -- solid blue when
+enabled -- matching the vendor app's own mask grid (its checkable
+``WCheckBox`` buttons paint the same fill/border color; see
+``channel_select``'s module docstring for the full recovery record) instead
+of a plain tickmark checkbox.
 """
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QCheckBox, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton,
-    QVBoxLayout, QWidget,
+    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
 )
 
 from radioroc_client import N_CHANNELS
 from radioroc.application.channel_config import ChannelConfigOperation
+from radioroc.gui.channel_select import CHANNEL_BUTTON_STYLE
 
 _GRID_COLUMNS = 8
 
@@ -26,7 +33,9 @@ def _build_mask_grid(title, prefix, panel):
     outer.addLayout(grid)
     checkboxes = []
     for channel in range(N_CHANNELS):
-        checkbox = QCheckBox(str(channel))
+        checkbox = QPushButton(str(channel))
+        checkbox.setCheckable(True)
+        checkbox.setStyleSheet(CHANNEL_BUTTON_STYLE)
         checkbox.setChecked(True)  # UI-only default; no read-back wiring in scope here.
         grid.addWidget(checkbox, channel // _GRID_COLUMNS, channel % _GRID_COLUMNS)
         checkboxes.append(checkbox)
