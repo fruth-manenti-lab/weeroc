@@ -31,6 +31,7 @@ class ScurveGuiTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name) / "run"
         self.window = ScurveWindow()
+        self.window.mode.setCurrentIndex(0)  # this suite only exercises simulation
         self.window.output.setText(str(self.directory))
         self.window.dac_max.setValue(20)
         self.window.dac_step.setValue(5)

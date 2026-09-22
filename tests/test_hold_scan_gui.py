@@ -31,6 +31,7 @@ class HoldScanGuiTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name) / "run"
         self.window = HoldScanWindow()
+        self.window.mode.setCurrentIndex(0)  # this suite only exercises simulation
         self.window.output.setText(str(self.directory))
         self.window.hold_mode.setCurrentIndex(0)  # internal: small, fast 0..255 range
         self.window._hold_mode_changed()

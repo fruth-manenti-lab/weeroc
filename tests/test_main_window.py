@@ -99,6 +99,13 @@ class MainWindowTests(unittest.TestCase):
             self.assertIsNone(scan_window._connection_panel)
             self.assertIsNone(scan_window._channel_config_panel)
 
+    def test_scan_windows_default_to_hardware_mode(self):
+        window = self._make_window()
+        for scan_window in (window.threshold_window, window.hold_scan_window,
+                            window.scurve_window):
+            self.assertEqual(scan_window.mode.currentIndex(), 1)
+            self.assertEqual(scan_window.mode.currentText(), "Hardware connection")
+
     def test_sidebar_switches_pages(self):
         window = self._make_window()
         self.assertEqual(window.pages.currentIndex(), 0)

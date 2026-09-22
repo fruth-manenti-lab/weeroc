@@ -30,6 +30,7 @@ from radioroc.application.scurve_worker import ScurveWorker
 from radioroc.data.scurve_reader import read_scurve_run
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
 from radioroc.gui.connection_panel import ConnectionPanel
+from radioroc.gui.hint_bar import HintBar
 from radioroc.transport.scurve_simulator import ScurveSimulationConfig
 
 
@@ -69,7 +70,7 @@ class ScurveWindow(QMainWindow):
         self._connection_panel = None
         self._channel_config_panel = None
         self._connection_worker = None
-        self._accepted_mode = 0
+        self._accepted_mode = 1
         self._closing = False
         self._last_rows = ()
         self._active_directory = None
@@ -99,6 +100,7 @@ class ScurveWindow(QMainWindow):
         self.mode.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.mode.setMinimumContentsLength(12)
         self.mode.addItems(["Simulation", "Hardware connection"])
+        self.mode.setCurrentIndex(1)
         form.addRow("Device / mode", self.mode)
 
         if connection_worker is None:
@@ -171,7 +173,7 @@ class ScurveWindow(QMainWindow):
         self.config_path = QLineEdit()
         self.config_path.setPlaceholderText("Packaged defaults")
         form.addRow("ASIC CSV (optional)", self.config_path)
-        self.output = QLineEdit(_new_directory())
+        self.output = QLineEdit(_new_directory("hardware" if self.mode.currentIndex() == 1 else "simulation"))
         self.output.setMinimumWidth(220)
         form.addRow("New run directory", self.output)
         self.new_output = QPushButton("Choose output parent…")
@@ -240,6 +242,59 @@ class ScurveWindow(QMainWindow):
             self.timer.timeout.connect(self._refresh_connection_label)
             self.timer.start()
             self._refresh_connection_label()
+        self.hint = HintBar(
+            self.statusBar(),
+            "S-curve: sweeps the discriminator threshold DAC and records the trigger "
+            "EFFICIENCY (turn-on percentage) at each point for a repeated test pulse, "
+            "to calibrate the 50%-efficiency threshold. Hover a control to see what it does.")
+        self.hint.attach(self.mode, "Simulation previews a synthetic curve with no "
+                          "board attached; Hardware connection runs on the real ASIC/FPGA.")
+        self.hint.attach(self.channels, "Channels to scan and plot (comma separated).")
+        self.hint.attach(self.dac_min, "First threshold DAC code in the sweep.")
+        self.hint.attach(self.dac_max, "Last threshold DAC code in the sweep.")
+        self.hint.attach(self.dac_step, "Step size between sweep points.")
+        self.hint.attach(self.clock_index, "Vendor S-curve clock index (0..3) selecting "
+                          "which internal clock phase times the pulse counting.")
+        self.hint.attach(self.discriminator, "Which ASIC discriminator output (T1/T2) to "
+                          "measure the turn-on efficiency of.")
+        self.hint.attach(self.trigger_level, "Count time spent above threshold (level) "
+                          "instead of counting rising-edge crossings.")
+        self.hint.attach(self.mask, "Mask every channel except the ones being scanned, "
+                          "so only their signals are read out.")
+        self.hint.attach(self.ctest, "Enable Ctest: routes the ASIC's internal test-charge "
+                          "injector into the selected channel(s), producing the repeated "
+                          "calibration pulse the S-curve needs without an external generator.")
+        self.hint.attach(self.initialize, "Re-initialize the FPGA before running. This is a "
+                          "persistent board change, not just a scan setting -- leave it off "
+                          "unless you specifically need to reset FPGA state.")
+        self.hint.attach(self.defaults, "Apply the ASIC's packaged default register values "
+                          "before running. This is a persistent board change -- leave it off "
+                          "to keep whatever configuration is already on the ASIC.")
+        self.hint.attach(self.trigger_preamp_gain, "Override the trigger-path preamp gain "
+                          "code before running; leave at 'Keep current' to leave it alone.")
+        self.hint.attach(self.config_path, "Optional ASIC register CSV to load instead of "
+                          "the packaged defaults.")
+        self.hint.attach(self.output, "Directory the run's data and metadata will be saved to.")
+        self.hint.attach(self.new_output, "Choose a different parent directory for the run "
+                          "output above.")
+        self.hint.attach(self.preview_button, "Preview the sweep/simulation settings without "
+                          "recording a run to disk.")
+        self.hint.attach(self.run_button, "Start the S-curve scan and record its result to "
+                          "the run directory above.")
+        self.hint.attach(self.cancel_button, "Cancel the run currently in progress.")
+        self.hint.attach(self.reopen_button, "Open a previously saved S-curve run to view "
+                          "its plot and data again.")
+        if self._connection_panel is not None:
+            self.hint.attach(self.port_select, "USB serial port candidate to connect to.")
+            self.hint.attach(self.refresh_button, "Re-scan for USB port candidates.")
+            self.hint.attach(self.connect_button, "Open a connection to the selected port.")
+            self.hint.attach(self.read_status_button, "Read the board's current firmware/"
+                              "connection status.")
+            self.hint.attach(self.disconnect_button, "Close the current hardware connection.")
+            self.hint.attach(self.review_fault_button, "Show details of the last connection "
+                              "fault.")
+            self.hint.attach(self.channel_config_apply_button, "Apply the channel "
+                              "configuration fields above to the connected hardware.")
         self._mode_changed()
         self._plot((), "Simulation — no data yet")
 

@@ -1,5 +1,55 @@
 # Implementation status
 
+## RADIOROC 29 — Hardware-first default mode; hover-hint status line; hold-scan log diagnosis (offline)
+
+**Hold-scan log diagnosis (no code change).** The operator ran a real hold
+scan (`radioroc_runs/hardware/20260922-105042-43d9bc20/`) at
+`threshold_dac=150` and asked why the result looked weird: `ch4_count` was
+~21–22 against a requested 10 acquisitions, and stdev was huge (up to ~420)
+specifically in the 475–625 ns transition/peak region while small elsewhere.
+Diagnosis: 150 sits inside the noisy region this session's earlier threshold
+scan mapped (trigger rate peaked around there); this run's external-hold ADC
+config used `trigger_source=3` (individual per-channel discriminator), so the
+ADC also arms on the channel's own noise-driven T1 crossings, not only the
+FPGA synchro pulse — roughly doubling the count and mixing randomly-timed
+noise-triggered samples into the batch, which explains both anomalies
+together. Recommended re-running at `threshold_dac=250` (the validated
+preset value) as a cheap confirmation; not yet re-run.
+
+**Hardware is now the default mode**, not Simulation, in all three scan
+windows (`ThresholdWindow`, `HoldScanWindow`, `ScurveWindow`) — operator
+request, since the desktop app is now used against real hardware routinely.
+Changed `_accepted_mode` and the mode combo box's initial index from 0 to 1
+in each window, and made the initial "New run directory" default match
+(`hardware/...` instead of `simulation/...`) so it isn't misleading at
+launch. The three GUI test suites (`test_threshold_gui.py`,
+`test_hold_scan_gui.py`, `test_scurve_gui.py`) are simulation-only by design
+(they assert `serial.Serial` is never touched) and now explicitly select
+Simulation mode in `setUp` instead of relying on the old default. Added
+`test_scan_windows_default_to_hardware_mode` to `test_main_window.py` to
+guard the new default explicitly.
+
+**Hover-hint status line**, mirroring the vendor app's help line at the
+bottom of the window. New `radioroc.gui.hint_bar.HintBar`: a small
+`QObject` that wires Enter/Leave events on arbitrary widgets to a
+`QStatusBar` (or anything with `showMessage()`/`clearMessage()`), showing a
+one-line description of whatever control the mouse is over and falling back
+to a window-level default otherwise. All three scan windows use their own
+`QMainWindow.statusBar()` and attach a description to every field, checkbox,
+dropdown and button — including a plain-language explanation of what
+Ctest and the FPGA synchro-trigger pulse actually do, since the operator
+asked. `MainWindow` and the ASIC-config panels (channel config, input DAC
+grid, probes/masks, threshold calibration, raw registers) do not yet have
+hints wired in — flagged as the next bounded task, see below.
+
+**Evidence:** 296/296 offline tests (6 new: `test_hint_bar.py` unit tests
+for the helper itself, plus the new default-mode regression test), full
+suite re-run clean; `tools/check_development.py` passes.
+
+**Not done:** hints on `MainWindow`'s own controls (tab bar, the shared
+`ConnectionPanel`) and the five ASIC-config panels; re-running the hold
+scan at `threshold_dac=250` to confirm the noise-self-trigger diagnosis.
+
 ## RADIOROC 28 (continued) — Two real bugs the operator hit live, using the actual app
 
 Same conversation, after RADIOROC 28's other work. The operator actually

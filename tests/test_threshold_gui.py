@@ -27,6 +27,7 @@ class ThresholdGuiTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name) / "run"
         self.window = ThresholdWindow()
+        self.window.mode.setCurrentIndex(0)  # this suite only exercises simulation
         self.window.output.setText(str(self.directory))
         self.window.dac_max.setValue(50)
         self.window.window_ms.setValue(1)

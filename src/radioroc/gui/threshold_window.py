@@ -21,6 +21,7 @@ from radioroc.application.threshold_worker import ThresholdWorker
 from radioroc.data.threshold_reader import read_threshold_run
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
 from radioroc.gui.connection_panel import ConnectionPanel
+from radioroc.gui.hint_bar import HintBar
 from radioroc.transport.threshold_simulator import ThresholdSimulationConfig
 
 
@@ -60,7 +61,7 @@ class ThresholdWindow(QMainWindow):
         self._connection_panel = None
         self._channel_config_panel = None
         self._connection_worker = None
-        self._accepted_mode = 0
+        self._accepted_mode = 1
         self._closing = False
         self._last_rows = ()
         self._active_directory = None
@@ -90,6 +91,7 @@ class ThresholdWindow(QMainWindow):
         self.mode.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.mode.setMinimumContentsLength(12)
         self.mode.addItems(["Simulation", "Hardware connection"])
+        self.mode.setCurrentIndex(1)
         form.addRow("Device / mode", self.mode)
 
         if connection_worker is None:
@@ -155,7 +157,7 @@ class ThresholdWindow(QMainWindow):
         self.config_path = QLineEdit()
         self.config_path.setPlaceholderText("Packaged defaults")
         form.addRow("ASIC CSV (optional)", self.config_path)
-        self.output = QLineEdit(_new_directory())
+        self.output = QLineEdit(_new_directory("hardware" if self.mode.currentIndex() == 1 else "simulation"))
         self.output.setMinimumWidth(220)
         form.addRow("New run directory", self.output)
         self.new_output = QPushButton("Choose output parent…")
@@ -223,6 +225,58 @@ class ThresholdWindow(QMainWindow):
             self.timer.timeout.connect(self._refresh_connection_label)
             self.timer.start()
             self._refresh_connection_label()
+        self.hint = HintBar(
+            self.statusBar(),
+            "Threshold scan: sweeps the discriminator threshold DAC and records the "
+            "trigger rate at each point, to find the noise floor and set a clean "
+            "working threshold. Hover a control to see what it does.")
+        self.hint.attach(self.mode, "Simulation previews a synthetic curve with no "
+                          "board attached; Hardware connection runs on the real ASIC/FPGA.")
+        self.hint.attach(self.channels, "Channels to scan and plot (comma separated).")
+        self.hint.attach(self.dac_min, "First threshold DAC code in the sweep.")
+        self.hint.attach(self.dac_max, "Last threshold DAC code in the sweep.")
+        self.hint.attach(self.dac_step, "Step size between sweep points.")
+        self.hint.attach(self.window_ms, "How long to count trigger edges at each DAC "
+                          "point, in milliseconds.")
+        self.hint.attach(self.averages, "Number of counting windows to average per point.")
+        self.hint.attach(self.discriminator, "Which ASIC discriminator output (T1/T2) to "
+                          "measure the trigger rate of.")
+        self.hint.attach(self.gain, "Override the trigger-path preamp gain code before "
+                          "scanning; leave at 'Keep current' to leave it alone.")
+        self.hint.attach(self.mask, "Mask every channel except the ones being scanned, "
+                          "so only their signals are read out.")
+        self.hint.attach(self.ctest, "Enable Ctest: routes the ASIC's internal test-charge "
+                          "injector into the selected channel(s), producing a repeatable "
+                          "calibration pulse without needing an external pulse generator.")
+        self.hint.attach(self.initialize, "Re-initialize the FPGA before running. This is a "
+                          "persistent board change, not just a scan setting -- leave it off "
+                          "unless you specifically need to reset FPGA state.")
+        self.hint.attach(self.defaults, "Apply the ASIC's packaged default register values "
+                          "before running. This is a persistent board change -- leave it off "
+                          "to keep whatever configuration is already on the ASIC.")
+        self.hint.attach(self.config_path, "Optional ASIC register CSV to load instead of "
+                          "the packaged defaults.")
+        self.hint.attach(self.output, "Directory the run's data and metadata will be saved to.")
+        self.hint.attach(self.new_output, "Choose a different parent directory for the run "
+                          "output above.")
+        self.hint.attach(self.preview_button, "Preview the sweep/simulation settings without "
+                          "recording a run to disk.")
+        self.hint.attach(self.run_button, "Start the threshold scan and record its result to "
+                          "the run directory above.")
+        self.hint.attach(self.cancel_button, "Cancel the run currently in progress.")
+        self.hint.attach(self.reopen_button, "Open a previously saved threshold-scan run to "
+                          "view its plot and data again.")
+        if self._connection_panel is not None:
+            self.hint.attach(self.port_select, "USB serial port candidate to connect to.")
+            self.hint.attach(self.refresh_button, "Re-scan for USB port candidates.")
+            self.hint.attach(self.connect_button, "Open a connection to the selected port.")
+            self.hint.attach(self.read_status_button, "Read the board's current firmware/"
+                              "connection status.")
+            self.hint.attach(self.disconnect_button, "Close the current hardware connection.")
+            self.hint.attach(self.review_fault_button, "Show details of the last connection "
+                              "fault.")
+            self.hint.attach(self.channel_config_apply_button, "Apply the channel "
+                              "configuration fields above to the connected hardware.")
         self._mode_changed()
         self._plot((), "Simulation — no data yet")
 

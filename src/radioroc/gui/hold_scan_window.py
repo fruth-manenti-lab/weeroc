@@ -27,6 +27,7 @@ from radioroc.application.hold_scan_worker import HoldScanWorker
 from radioroc.data.hold_reader import read_hold_run
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
 from radioroc.gui.connection_panel import ConnectionPanel
+from radioroc.gui.hint_bar import HintBar
 from radioroc.transport.hold_scan_simulator import HoldSimulationConfig
 
 
@@ -66,7 +67,7 @@ class HoldScanWindow(QMainWindow):
         self._connection_panel = None
         self._channel_config_panel = None
         self._connection_worker = None
-        self._accepted_mode = 0
+        self._accepted_mode = 1
         self._closing = False
         self._last_rows = ()
         self._active_directory = None
@@ -96,6 +97,7 @@ class HoldScanWindow(QMainWindow):
         self.mode.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.mode.setMinimumContentsLength(12)
         self.mode.addItems(["Simulation", "Hardware connection"])
+        self.mode.setCurrentIndex(1)
         form.addRow("Device / mode", self.mode)
 
         if connection_worker is None:
@@ -223,7 +225,7 @@ class HoldScanWindow(QMainWindow):
         self.config_path = QLineEdit()
         self.config_path.setPlaceholderText("Packaged defaults")
         form.addRow("ASIC CSV (optional)", self.config_path)
-        self.output = QLineEdit(_new_directory())
+        self.output = QLineEdit(_new_directory("hardware" if self.mode.currentIndex() == 1 else "simulation"))
         self.output.setMinimumWidth(220)
         form.addRow("New run directory", self.output)
         self.new_output = QPushButton("Choose output parent…")
@@ -294,6 +296,102 @@ class HoldScanWindow(QMainWindow):
             self.timer.timeout.connect(self._refresh_connection_label)
             self.timer.start()
             self._refresh_connection_label()
+        self.hint = HintBar(
+            self.statusBar(),
+            "Hold scan: sweeps the hold delay to trace the peak-detector's held "
+            "value over time, for a real pulse injected via Ctest or an external "
+            "generator. Hover a control to see what it does.")
+        self.hint.attach(self.mode, "Simulation previews a synthetic curve with no "
+                          "board attached; Hardware connection runs on the real ASIC/FPGA.")
+        self.hint.attach(self.channels, "Channels to record and plot (comma separated).")
+        self.hint.attach(self.trigger_channel, "Channel whose discriminator/Ctest pulse "
+                          "times the acquisition.")
+        self.hint.attach(self.hold_mode, "Internal sweeps the ASIC's own delay-cell code "
+                          "(coarse, on-chip). External sweeps the FPGA-generated hold delay "
+                          "in nanoseconds (finer, matches a real injected pulse's timing).")
+        self.hint.attach(self.hold_min, "First hold delay/code in the sweep.")
+        self.hint.attach(self.hold_max, "Last hold delay/code in the sweep.")
+        self.hint.attach(self.hold_step, "Step size between sweep points.")
+        self.hint.attach(self.acquisitions, "ADC acquisitions requested per hold-delay "
+                          "point; the hardware may report back a different actual count.")
+        self.hint.attach(self.timeout_s_scan, "Maximum time to wait for each batch of "
+                          "acquisitions before giving up.")
+        self.hint.attach(self.discriminator, "Which ASIC discriminator output (T1/T2) "
+                          "provides the trigger timing reference.")
+        self.hint.attach(self.set_threshold_dac, "Write the threshold DAC below to the "
+                          "trigger channel before running, instead of using its current value.")
+        self.hint.attach(self.threshold_dac, "Threshold DAC code to apply when the checkbox "
+                          "to its left is enabled. Keep it above the noise floor (see the "
+                          "threshold-scan tab) or the ASIC's own discriminator will "
+                          "self-trigger on noise and contaminate the hold-scan samples.")
+        self.hint.attach(self.mask, "Mask every channel except the ones being scanned, "
+                          "so only their signals are read out.")
+        self.hint.attach(self.ctest, "Enable Ctest: routes the ASIC's internal test-charge "
+                          "injector into the selected channel(s), producing a repeatable "
+                          "calibration pulse without needing an external pulse generator.")
+        self.hint.attach(self.synchro_trigger, "Pulse FPGA synchro trigger per ADC batch: "
+                          "before each batch of acquisitions, the FPGA emits a sync pulse on "
+                          "the Sync IO line below, used to fire an external pulse generator "
+                          "(or the on-board Ctest path) and the ADC read-out in lockstep so "
+                          "the hold scan can track a real pulse's timing precisely.")
+        self.hint.attach(self.initialize, "Re-initialize the FPGA before running. This is a "
+                          "persistent board change, not just a scan setting -- leave it off "
+                          "unless you specifically need to reset FPGA state.")
+        self.hint.attach(self.defaults, "Apply the ASIC's packaged default register values "
+                          "before running. This is a persistent board change -- leave it off "
+                          "to keep whatever configuration is already on the ASIC.")
+        self.hint.attach(self.sync_io, "FPGA IO line that carries the synchro trigger pulse "
+                          "to an external pulse generator.")
+        self.hint.attach(self.set_sync_io_mux, "Set the Sync IO mux index below before "
+                          "running, instead of using whatever it is currently set to.")
+        self.hint.attach(self.sync_io_mux_index, "Mux index selecting which internal signal "
+                          "the Sync IO line carries when the checkbox to its left is enabled.")
+        self.hint.attach(self.conversion_delay_ns, "Delay after the trigger before the ADC "
+                          "starts converting, in external hold mode.")
+        self.hint.attach(self.trigger_type, "Vendor ADC trigger-type code for external hold "
+                          "mode acquisitions.")
+        self.hint.attach(self.trigger_source, "Vendor ADC trigger-source code: which signal "
+                          "arms the ADC acquisition (e.g. a specific channel's discriminator, "
+                          "or the FPGA synchro pulse) in external hold mode.")
+        self.hint.attach(self.adc_window_ns, "Length of the ADC's acquisition window, in "
+                          "nanoseconds, in external hold mode.")
+        self.hint.attach(self.adc_nb_trig, "Number of ADC triggers to accept per acquisition "
+                          "window, in external hold mode.")
+        self.hint.attach(self.rstn_manual, "Drive the ADC reset line manually instead of "
+                          "letting the FPGA sequence it automatically.")
+        self.hint.attach(self.external_trigger, "Use an external signal (instead of the "
+                          "ASIC's own discriminator) to arm the ASIC's acquisition trigger.")
+        self.hint.attach(self.peak_sensing, "Use the vendor's peak-sensing read-out path "
+                          "instead of the default sampling path.")
+        self.hint.attach(self.trigger_preamp_gain, "Override the trigger-path preamp gain "
+                          "code before running; leave at 'Keep current' to leave it alone.")
+        self.hint.attach(self.high_gain_code, "Override the high-gain shaper code before "
+                          "running; leave at 'Keep current' to leave it alone.")
+        self.hint.attach(self.low_gain_code, "Override the low-gain shaper code before "
+                          "running; leave at 'Keep current' to leave it alone.")
+        self.hint.attach(self.config_path, "Optional ASIC register CSV to load instead of "
+                          "the packaged defaults.")
+        self.hint.attach(self.output, "Directory the run's data and metadata will be saved to.")
+        self.hint.attach(self.new_output, "Choose a different parent directory for the run "
+                          "output above.")
+        self.hint.attach(self.preview_button, "Preview the sweep/simulation settings without "
+                          "recording a run to disk.")
+        self.hint.attach(self.run_button, "Start the hold scan and record its result to the "
+                          "run directory above.")
+        self.hint.attach(self.cancel_button, "Cancel the run currently in progress.")
+        self.hint.attach(self.reopen_button, "Open a previously saved hold-scan run to view "
+                          "its plot and data again.")
+        if self._connection_panel is not None:
+            self.hint.attach(self.port_select, "USB serial port candidate to connect to.")
+            self.hint.attach(self.refresh_button, "Re-scan for USB port candidates.")
+            self.hint.attach(self.connect_button, "Open a connection to the selected port.")
+            self.hint.attach(self.read_status_button, "Read the board's current firmware/"
+                              "connection status.")
+            self.hint.attach(self.disconnect_button, "Close the current hardware connection.")
+            self.hint.attach(self.review_fault_button, "Show details of the last connection "
+                              "fault.")
+            self.hint.attach(self.channel_config_apply_button, "Apply the channel "
+                              "configuration fields above to the connected hardware.")
         self._mode_changed()
         self._hold_mode_changed()
         self._plot((), "hold_delay_ns", "Simulation — no data yet")
