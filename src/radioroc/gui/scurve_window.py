@@ -300,6 +300,13 @@ class ScurveWindow(QMainWindow):
     def _mode_switch_locked(self):
         if self.worker is not None:
             return True
+        if self._connection_panel is None:
+            # Shared connection: this window doesn't own its lifecycle, so
+            # the shared worker's own state (e.g. "connected", because some
+            # other page connected it) is none of this window's business --
+            # only this window's own in-flight hardware run should lock its
+            # mode selector.
+            return self._hardware_running
         if self.connection_worker is None:
             return False
         return self.connection_worker.snapshot().state in self._CONNECTION_LOCKS_MODE
@@ -421,11 +428,21 @@ class ScurveWindow(QMainWindow):
         snapshot = worker.snapshot() if worker is not None else None
         state = snapshot.state if snapshot is not None else "idle"
         fault = getattr(snapshot, "fault", None) if snapshot is not None else None
-        busy = state in self._CONNECTION_BUSY
-        session = state in {"connected", "close_failed", "faulted"}
-        simulation_available = self.worker is None and not busy and not session
         commands_available = not self._closing
-        self.mode.setEnabled(commands_available and self.worker is None and not busy and not session)
+        if self._connection_panel is None:
+            # Shared connection: this window doesn't own its lifecycle, so
+            # its own state (e.g. permanently "connected" because another
+            # page connected it) says nothing about whether this window can
+            # start a simulation or switch its own mode -- only this
+            # window's own in-flight work does.
+            simulation_available = self.worker is None
+            mode_available = commands_available and self.worker is None and not self._hardware_running
+        else:
+            busy = state in self._CONNECTION_BUSY
+            session = state in {"connected", "close_failed", "faulted"}
+            simulation_available = self.worker is None and not busy and not session
+            mode_available = commands_available and self.worker is None and not busy and not session
+        self.mode.setEnabled(mode_available)
         hardware_run_available = (self.worker is None and not self._hardware_running and
                                   state == "connected" and not fault
                                   and not self._closing)

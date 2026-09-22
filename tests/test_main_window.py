@@ -153,6 +153,40 @@ class MainWindowTests(unittest.TestCase):
                             f"{type(scan_window).__name__} run button should reflect the "
                             "now-connected shared worker")
 
+    def test_scan_window_mode_switches_to_hardware_after_connecting_first(self):
+        # The operator hit this directly: connect via the shared ASIC-config
+        # page first (the normal order -- Threshold/Hold-scan/S-curve don't
+        # own a connection of their own to connect from), then try to
+        # switch a scan tab to "Hardware connection". _mode_switch_locked
+        # and _update_connection_controls both used to read the *shared*
+        # worker's own "connected" state as a reason to lock/grey out this
+        # window's mode selector -- correct for a window that owns its
+        # connection (switching away from Hardware mid-session would orphan
+        # it), wrong here, since this window never owns that connection's
+        # lifecycle at all. The sibling test above never caught it because
+        # it switches mode before connecting, the opposite of how this
+        # actually gets used.
+        window = self._make_window()
+        worker = window.connection_panel.connection_worker
+        worker.connect(RadiorocConnectionConfig("fake-port", 115200, 0.5))
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and worker.snapshot().state != "connected":
+            _app().processEvents()
+            time.sleep(0.01)
+        self.assertEqual(worker.snapshot().state, "connected")
+        window.connection_panel.poll()
+
+        scan_windows = (window.threshold_window, window.hold_scan_window, window.scurve_window)
+        for scan_window in scan_windows:
+            scan_window.poll_connection_worker()
+            self.assertTrue(scan_window.mode.isEnabled(),
+                            f"{type(scan_window).__name__} mode selector should not be greyed "
+                            "out just because the shared connection is already connected")
+            scan_window.mode.setCurrentIndex(1)  # Hardware connection
+            self.assertEqual(scan_window.mode.currentIndex(), 1,
+                            f"{type(scan_window).__name__} should accept switching to Hardware "
+                            "mode once already connected via the shared ASIC-config page")
+
     def test_port_candidates_are_discovered_automatically_without_a_manual_refresh(self):
         # The operator found this the hard way: opening the app left the
         # port dropdown empty until Refresh was clicked once, even though
