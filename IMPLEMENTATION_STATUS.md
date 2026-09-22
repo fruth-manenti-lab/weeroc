@@ -31,11 +31,69 @@ Closed the app cleanly afterward (`kill` on the launched PID, confirmed no
 attempted -- `Connect` was never clicked.
 
 **Both of the "explicitly still missing" visual-check items from
-RADIOROC 33/32/31's handoffs are now done.** Remaining backlog (T1/T2/TQ
-enable bits, F11-F13, `check_installed_package.py --gui` not in routine
-checks, `ProbesMasksPanel` hardware read-back, `AutocalibrationJob` never
-run against real hardware) is unchanged -- this session only closed out the
-visual-check item, nothing else.
+RADIOROC 33/32/31's handoffs are now done.**
+
+**Operator independently ran a real-hardware `AutocalibrationJob` test
+during this session, without prior coordination** (`radioroc_runs/hardware/
+20260922-163345-8d281588/`, ~16:33-16:41, six channels: 4, 5, 12, 13, 20,
+21). Reviewed the run's own metadata and CSV output after the fact rather
+than taking success on faith:
+- `status: "completed"`, `error: null`, `warnings: []` on every sub-run
+  (`step1_zero`, `step1_full`, `step2`, `final`); `final` alone completed
+  86/86 points.
+- **Force/restore sequencing validated**: `cleanup: {"status": "restored",
+  "errors": []}` and `device_state: "restoration_commands_succeeded"` on
+  the final sub-run -- the mandatory restoration-readback verification
+  passed with zero errors.
+- **Dynamic DAC-range computation between steps validated**: step1 coarse-
+  probed the full configured range (0-1000, step 50); step2 narrowed to a
+  computed transition window (0-424, step 10); the final scan used a tight
+  per-channel window derived from that (165-335, step 2). This staged
+  narrowing is exactly the mechanism this session's own handoff had flagged
+  as the main unverified hardware risk.
+- **Physically sensible result, not just "no error"**: every channel's
+  final S-curve (`final/scurve.csv`) is a clean monotonic 100%->0% turn-on.
+  The 50%-crossing DAC code across all 6 channels clusters within
+  209-221 (12 LSB spread) -- i.e. the calibration pulled per-channel
+  threshold mismatch into tight alignment, which is the point of the
+  routine.
+- Run data confirmed to remain untracked (`git check-ignore -v` on the run
+  directory matches the `radioroc_runs/` rule) -- nothing to stage.
+
+This closes the `AutocalibrationJob` real-hardware-validation item from the
+backlog below. Not run by this session's own initiative and not on this
+session's own timeline -- credit and any further hardware judgement about
+this run belongs to the operator; this entry only records that it was
+checked and found to genuinely pass, not asserted to pass.
+
+**Re-investigated the T1/T2/TQ *enable* bits (address 65, subaddress 7)
+left deliberately unimplemented since RADIOROC 30** and found the same
+blocker still holds, with no new evidence to resolve it. RADIOROC 30 had
+left this out because the bit order inside the shared byte wasn't
+independently cross-checked to the same confidence as every other register
+in that session. This session:
+- Re-pulled the vendor GUI's own tooltip for this byte from
+  `radioroc2UI.pyc` (`marshal.loads`/`dis`, per `AGENTS.md`): `"vref[3:0],
+  EN_th1, EN_th2, EN_thQ, EN_bg\n\nadd: 65 - subadd: 7"`, attached to
+  `lineEdit_65_7` -- the vendor's raw generic register editor on its
+  low-level Registers tab, not a dedicated named control. Unlike
+  single-bit fields elsewhere in the same file (e.g. the high-gain
+  shaping-LSB tooltip, which explicitly says `"... - bit: 6"`), this
+  tooltip lists four field names with no per-field bit position at all.
+  There is no separate named checkbox widget (e.g. `checkBox_en_th1`)
+  anywhere in the extraction to cross-check field order against, the way
+  other enable/select bits in this codebase were recovered.
+- Checked the vendor PDF user guide (`local_artifacts/downloads/Radioroc2
+  User Guide - 2_1_0_6(0125).pdf`) for a register table that might resolve
+  the ordering -- no mention of `EN_th1`/`EN_bg`/this address at all; it's
+  a user-level guide, not a register reference.
+- **Conclusion: still correctly left unimplemented.** Nothing in this
+  session's re-check changes RADIOROC 30's judgement call. Resolving it for
+  real needs either a different evidence source not yet checked, or a
+  narrow authorized-operator hardware test (write one candidate bit
+  pattern, read back / observe threshold behavior, confirm which physical
+  channel responds) -- not a documentation re-read. Deliberately not
+  guessed at under this session's own time pressure at handoff.
 
 ## RADIOROC 33 — Documented local_artifacts in AGENTS.md; three real CI bugs found and fixed, confirmed green via gh
 
