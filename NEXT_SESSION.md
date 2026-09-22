@@ -25,14 +25,24 @@ handoff — operator asked to continue and to think about main-merge timing):
    hardware-threshold` into `main`.** `main` hasn't moved since 2026-06-29;
    this branch has diverged by 88+ commits and is what's actually used for
    real lab work already. Recommended targeting the plan's own M3 gate
-   rather than the much-further-out M4/M5, but confirmed M3 itself isn't
-   fully met — the "one shell, one connection" architecture it calls for
-   was never built (`ThresholdWindow`/`HoldScanWindow`/`ScurveWindow`/
-   `AutocalibrationWindow` each still own an independent connection panel).
-   **No merge decision was made** — this needs the operator's input on what
-   `main` needs to represent (other consumers? a release process?) before
-   picking a real trigger point. Worth raising directly next time the
-   operator is around, rather than deciding unilaterally.
+   rather than the much-further-out M4/M5. **No merge decision was made**
+   — this needs the operator's input on what `main` needs to represent
+   (other consumers? a release process?) before picking a real trigger
+   point.
+   **Correction, caught by the operator directly:** this session initially
+   also claimed M3's "one shell, one connection" gate was unmet, citing a
+   stale RADIOROC 24 note without checking whether a later session had
+   already fixed it -- RADIOROC 28 did, and this was wrong to repeat. See
+   `IMPLEMENTATION_STATUS.md`'s RADIOROC 36 entry for the correction and
+   the exact source lines confirming the shared-connection shell
+   (`main_window.py`'s single `ConnectionWorker` passed into all four scan
+   windows) has existed since RADIOROC 28. **This M3 gate is met, not
+   open.** A useful, general lesson from this mistake: a "known gap" note
+   found via grep in `IMPLEMENTATION_STATUS.md` is a snapshot from
+   whichever session wrote it, not necessarily still true -- check the
+   current source (or at least scan for a later session's fix) before
+   repeating a status claim from an old entry, the same discipline this
+   file already applies to memory recommendations.
 2. **Landed F13 Phase A**: `src/radioroc/data/acquisition_reader.py`
    (`read_acquisition_run`) and `src/radioroc/data/vendor_acquisition.py`
    (`read_vendor_acquisition_file`). Delegated with a full contract, then
@@ -68,7 +78,10 @@ next.
 2. **Decide the `main`-merge trigger point with the operator** (see above) —
    this is a conversation to have, not a unilateral call, but it shouldn't
    be left open indefinitely either; the branch only gets bigger and riskier
-   to eventually reconcile the longer this goes unaddressed.
+   to eventually reconcile the longer this goes unaddressed. Note M3's own
+   readiness picture is better than RADIOROC 36 first (incorrectly)
+   reported — the shared-connection gate is already met — though the rest
+   of M3's gate criteria haven't been separately re-verified either.
 3. **`ProbesMasksPanel` still has no hardware read-back** — open in
    `CROSS_PLATFORM_REBUILD_PLAN.md`'s F04 backlog, unchanged.
 4. **T1/T2/TQ *enable* bits still unimplemented** (address 65, subaddress
@@ -82,15 +95,10 @@ next.
    asks for), but hasn't been explicitly validated as "done" against F11's
    own row in `CROSS_PLATFORM_REBUILD_PLAN.md` §3 — worth a deliberate
    check rather than assuming.
-6. **The "one shell, one connection" architecture gap** (see item 2's M3
-   context) is itself a real, standalone piece of missing work independent
-   of the merge-timing question — each scan window duplicating its own
-   connection panel is exactly what M3 says not to do. Worth scoping as its
-   own task regardless of when `main` gets touched.
-7. All of M5 (Windows-comparison bench, performance, packaging/release)
+6. All of M5 (Windows-comparison bench, performance, packaging/release)
    hasn't begun. See `CROSS_PLATFORM_REBUILD_PLAN.md` §3/§4 for the full
    list.
-8. **Minor, not urgent:** the CI run's own annotations flag
+7. **Minor, not urgent:** the CI run's own annotations flag
    `actions/checkout@v4`/`actions/setup-python@v5` as targeting a
    deprecated Node.js version.
 
@@ -104,8 +112,6 @@ next.
 3. **If the operator is present with the board and wants to resolve
    T1/T2/TQ (item 4)**, the narrow hardware test described there is the
    only path left to unblock it.
-4. Item 6 (the shared connection shell) is a good size for a dedicated
-   session if F13's GUI isn't the priority.
 
 ## Standing discipline (unchanged)
 

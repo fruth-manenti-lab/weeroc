@@ -17,15 +17,40 @@ nearly three months, while this branch has diverged by 88 commits and
 relied on for real lab work (RADIOROC 35's operator-run hardware test used
 this branch's code). Recommended targeting the plan's own M3 gate ("a
 useful desktop application through one complete workflow") rather than
-waiting for the much-further-out M4/M5, but flagged that M3 itself isn't
-fully met yet either -- checked and confirmed the "one shell, one
-connection" architecture M3 calls for was never actually built (recorded
-as a known gap in an earlier session): `ThresholdWindow`/`HoldScanWindow`/
-`ScurveWindow`/`AutocalibrationWindow` each still own an independent
-connection panel instead of sharing one. No merge decision made -- this
-was analysis and a recommendation, not an action; the operator hasn't
-weighed in on what `main` needs to represent (other consumers? a release
-process?) which would change the calculus.
+waiting for the much-further-out M4/M5.
+
+**Correction, same conversation, caught by the operator's direct question:**
+this session initially claimed M3's "one shell, one connection" gate was
+still unmet, citing RADIOROC 24's "known gap, deferred" note --
+`ThresholdWindow`/`HoldScanWindow`/`ScurveWindow` each owning an
+independent connection panel instead of sharing one. That was wrong: the
+grep hit was from RADIOROC 24 (2026 session, well before this one) and
+this session failed to check whether a later session had already resolved
+it, which RADIOROC 28 did, four sessions later. Confirmed directly in the
+current source before writing this correction, not from memory or another
+status-doc grep: `MainWindow.__init__` builds one shared `ConnectionWorker`
+and passes it into all four scan windows as `connection_worker=worker`
+(`src/radioroc/gui/main_window.py:191-194`); when a `connection_worker` is
+supplied, `ThresholdWindow`/`HoldScanWindow`/`ScurveWindow` each skip
+constructing their own `ConnectionPanel` entirely and just reflect the
+shared one's state (see the `if connection_worker is None: ... else: ...`
+branch in each, e.g. `threshold_window.py:96-127`); `AutocalibrationWindow`
+has no owned `ConnectionPanel` code path at all. RADIOROC 28's own entry
+documents building this shell and fixing two real hardware-discovered bugs
+on top of it (a port dropdown staying empty until a manual refresh, and a
+scan tab's mode selector staying incorrectly locked after connecting via
+the shared page). **M3's "one shell, one connection" gate has been met
+since RADIOROC 28** -- this is not a live gap. Whether the *rest* of M3's
+gate is met (CLI/GUI submitting the same configuration object, responsive
+UI during a run, defined stop/cleanup on window close, saved-result
+reopening) was not separately re-verified in this correction and should
+not be assumed from this entry alone.
+
+No merge decision was made in this session either way -- the analysis
+above was a recommendation, not an action; the operator hasn't weighed in
+on what `main` needs to represent (other consumers? a release process?)
+which would change the calculus, and the M3-readiness picture is now
+better than this session first (incorrectly) reported.
 
 **Landed F13 Phase A**, per RADIOROC 35's handoff: `src/radioroc/data/
 acquisition_reader.py` (`read_acquisition_run`, adapting `threshold_
