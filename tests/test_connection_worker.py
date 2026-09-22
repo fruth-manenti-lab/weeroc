@@ -10,6 +10,7 @@ from unittest.mock import patch
 import radioroc_client  # noqa: F401
 from radioroc_client import I2CRow, ThresholdScanConfig, ThresholdScanResult, bits
 
+from radioroc.application.autocalibration import AutocalibrationJobConfig
 from radioroc.application.channel_config import ChannelConfigOperation
 from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.application.jobs import JobBusyError
@@ -20,6 +21,7 @@ from radioroc.transport.discovery import BoardPort
 from radioroc.transport.errors import DeviceBusyError, TransportIOError
 from radioroc.transport.ownership import BoardLease
 from radioroc.transport.serial import RadiorocSerial
+from tests.test_scurve_jobs import ScurveTransport
 from tests.test_threshold_jobs import ThresholdTransport
 
 
@@ -357,6 +359,49 @@ class ConnectionWorkerTests(unittest.TestCase):
         self.assertEqual(len(threshold.rows), 1)
         self.assertEqual(set(transport.thread_ids + session.thread_ids),
                          {worker._thread.ident})
+        self.assertEqual(session.close_calls, 0)
+
+    def test_autocalibration_runs_on_persistent_owner_tracks_steps_and_publishes_rows(self):
+        # Same scripted readings/config shape as
+        # test_autocalibration_jobs.AutocalibrationJobTests: a worked 2-channel,
+        # tiny-range sequence with hand-verifiable corrections.
+        readings = [
+            (200, 200), (200, 0), (200, 0),      # step1_zero: 100 -> 0 -> 0, crosses at DAC 5.
+            (200, 200), (200, 200), (200, 0),    # step1_full: 100 -> 100 -> 0, crosses at DAC 15.
+            (200, 200), (200, 200),              # step2 DAC0: ch4=100, ch5=100
+            (200, 100), (200, 200),              # step2 DAC10: ch4=50, ch5=100
+            (200, 0), (200, 0),                  # step2 DAC20: ch4=0, ch5=0
+        ]
+        transport = ScurveTransport(point_readings=list(readings))
+        session = ThresholdSession(transport)
+        worker = self.started(session_factory=lambda config: session)
+        worker.connect(RadiorocConnectionConfig(port="fake-control"))
+        self.wait_for(worker, "connected")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            operation = AutocalibrationJobConfig(
+                channels=[4, 5], t1=True, out_dir=Path(tmp) / "run",
+                probe_dac_min=0, probe_dac_max=20, probe_dac_step=10,
+                transition_dac_step=10, transition_margin=5,
+                transition_dac_floor=20, transition_dac_cap=20,
+                final_window_before=5, final_window_after=5, final_dac_step=5,
+            )
+            worker.run_autocalibration(operation)
+            self.assertEqual(worker.snapshot().state, "scanning")
+            with self.assertRaises(JobBusyError):
+                worker.read_status()
+            snap = self.wait_for(worker, "connected", timeout=10)
+            outcome = worker.autocalibration_snapshot()
+
+        self.assertIsNone(snap.fault)
+        result = outcome.outcome.result
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.calibration_before, {4: 32, 5: 32})
+        self.assertEqual(result.calibration_after, {4: 42, 5: 22})
+        # By the time the job finishes, the snapshot reflects the last
+        # (final verification) sub-scan.
+        self.assertEqual(outcome.step, "final")
+        self.assertEqual(set(session.thread_ids), {worker._thread.ident})
         self.assertEqual(session.close_calls, 0)
 
     def test_channel_config_applies_verifies_restores_and_stays_on_worker_thread(self):

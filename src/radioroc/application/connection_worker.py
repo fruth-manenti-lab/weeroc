@@ -17,13 +17,33 @@ from radioroc.transport.config import RadiorocConnectionConfig
 from radioroc.transport.discovery import BoardPort, list_board_ports
 from radioroc.transport.serial import RadiorocSerial
 
+from .autocalibration import AutocalibrationJob, AutocalibrationJobConfig
 from .channel_config import ChannelConfigOperation, apply_channel_config
 from .hold_scan import HoldScanJob, HoldScanJobConfig
-from .jobs import CancellationToken, JobBusyError, JobCancelled
+from .jobs import CancellationToken, JobBusyError, JobCancelled, JobEvent
 from .raw_registers import RawRegisterWrite, read_all_registers, write_raw_register
 from .scurve import ScurveJob, ScurveJobConfig
 from .threshold import ThresholdJob, ThresholdJobConfig
 from .threshold_worker import WorkerOutcome, WorkerSnapshot
+
+_AUTOCALIBRATION_STEPS = ("step1_zero", "step1_full", "step2", "final")
+
+
+@dataclass(frozen=True)
+class AutocalibrationWorkerSnapshot:
+    """Like `WorkerSnapshot`, plus which of the four sub-scans is active.
+
+    `rows` only holds the *current* sub-scan's points (reset whenever the
+    active step changes) -- the four sub-scans are separate CSVs with
+    possibly different channel sets/DAC ranges, so concatenating their rows
+    would not make sense as one series to display or plot.
+    """
+
+    event: JobEvent | None
+    step: str | None
+    rows: tuple[tuple[tuple[str, object], ...], ...]
+    coalesced_events: int
+    outcome: WorkerOutcome | None
 
 
 @dataclass(frozen=True)
@@ -73,6 +93,13 @@ class ConnectionWorker:
         self._scurve_unread = False
         self._scurve_coalesced = 0
         self._scurve_outcome = None
+        self._autocalibration_token: CancellationToken | None = None
+        self._autocalibration_event = None
+        self._autocalibration_step = None
+        self._autocalibration_rows = []
+        self._autocalibration_unread = False
+        self._autocalibration_coalesced = 0
+        self._autocalibration_outcome = None
         self._channel_config_outcome = None
         self._raw_registers_rows = None
         self._raw_register_write_result = None
@@ -126,6 +153,14 @@ class ConnectionWorker:
                                            tuple(self._scurve_rows),
                                            self._scurve_coalesced,
                                            self._scurve_outcome))
+
+    def autocalibration_snapshot(self):
+        with self._lock:
+            self._autocalibration_unread = False
+            return deepcopy(AutocalibrationWorkerSnapshot(
+                self._autocalibration_event, self._autocalibration_step,
+                tuple(self._autocalibration_rows), self._autocalibration_coalesced,
+                self._autocalibration_outcome))
 
     def channel_config_snapshot(self):
         with self._lock:
@@ -257,6 +292,36 @@ class ConnectionWorker:
                 raise JobBusyError(f"cannot cancel_scurve while connection is {self._state}")
             self._scurve_token.cancel()
 
+    def run_autocalibration(self, operation: AutocalibrationJobConfig):
+        """Run one automatic threshold calibration on the persistent owned session."""
+        operation = deepcopy(operation)
+        AutocalibrationJob.preview(operation)
+        with self._lock:
+            if not self._started:
+                raise RuntimeError("connection worker has not been started")
+            if (self._shutdown_queued or self._pending or self._state != "connected"
+                    or self._fault is not None or self._device is None):
+                raise JobBusyError(f"cannot run_autocalibration while connection is {self._state}")
+            self._pending = True
+            self._state = "scanning"
+            self._error = None
+            self._close_error = None
+            self._autocalibration_token = CancellationToken()
+            self._autocalibration_event = None
+            self._autocalibration_step = _AUTOCALIBRATION_STEPS[0]
+            self._autocalibration_rows = []
+            self._autocalibration_unread = False
+            self._autocalibration_coalesced = 0
+            self._autocalibration_outcome = None
+            self._commands.put(("run_autocalibration", operation))
+
+    def cancel_autocalibration(self):
+        """Request cooperative cancellation without touching the transport."""
+        with self._lock:
+            if self._state != "scanning" or self._autocalibration_token is None:
+                raise JobBusyError(f"cannot cancel_autocalibration while connection is {self._state}")
+            self._autocalibration_token.cancel()
+
     def review_fault(self):
         """Clear a visible fault after the session has been released."""
         with self._lock:
@@ -287,6 +352,8 @@ class ConnectionWorker:
                 self._hold_token.cancel()
             if self._scurve_token is not None:
                 self._scurve_token.cancel()
+            if self._autocalibration_token is not None:
+                self._autocalibration_token.cancel()
             self._commands.put(("shutdown", None))
 
     def _submit(self, command, argument, busy_state, allowed_states):
@@ -390,6 +457,21 @@ class ConnectionWorker:
                 else:
                     self._scurve_coalesced += 1
 
+    def _publish_autocalibration(self, event, step):
+        with self._lock:
+            if step != self._autocalibration_step:
+                self._autocalibration_step = step
+                self._autocalibration_rows = []
+            if self._autocalibration_unread:
+                self._autocalibration_coalesced += 1
+            self._autocalibration_event = event
+            self._autocalibration_unread = True
+            if event.kind == "point":
+                if len(self._autocalibration_rows) < 1024:
+                    self._autocalibration_rows.append(event.values)
+                else:
+                    self._autocalibration_coalesced += 1
+
     def _run(self):
         while True:
             command, argument = self._commands.get()
@@ -413,6 +495,8 @@ class ConnectionWorker:
                 self._run_hold_scan(argument)
             elif command == "run_scurve":
                 self._run_scurve(argument)
+            elif command == "run_autocalibration":
+                self._run_autocalibration(argument)
             elif command == "shutdown":
                 with self._lock:
                     hold = self._hold_shutdown_for_job_fault
@@ -562,6 +646,25 @@ class ConnectionWorker:
             )
         return "; ".join(problems) or None
 
+    @staticmethod
+    def _autocalibration_fault(result, error):
+        problems = []
+        if error:
+            problems.append(error)
+        if result is None:
+            if not problems:
+                problems.append("autocalibration job returned no result")
+            return "; ".join(problems)
+        expected_cancel = (result.status == "cancelled"
+                           and isinstance(result.error, JobCancelled))
+        if result.error is not None and not expected_cancel:
+            problems.append(f"{type(result.error).__name__}: {result.error}")
+        if result.status in {"failed", "disconnected"}:
+            problems.append(f"autocalibration status: {result.status}")
+        if result.reference_restored is False:
+            problems.append("reference channel calibration DAC restoration was not confirmed")
+        return "; ".join(problems) or None
+
     def _run_hold_scan(self, operation):
         result = None
         error = None
@@ -614,6 +717,52 @@ class ConnectionWorker:
         with self._lock:
             self._scurve_outcome = outcome
             self._scurve_token = None
+            if fault:
+                if self._fault is None:
+                    self._fault = fault
+                elif fault not in self._fault:
+                    self._fault = f"{self._fault}; {fault}"
+                self._state = "faulted"
+                self._error = fault
+                self._close_error = None
+                if self._shutdown_queued:
+                    self._hold_shutdown_for_job_fault = True
+            else:
+                self._state = "connected"
+                self._error = None
+                self._close_error = None
+            self._pending = False
+
+    def _run_autocalibration(self, operation):
+        result = None
+        error = None
+        with self._lock:
+            token = self._autocalibration_token
+            device = self._device
+        # AutocalibrationJob runs four sub-scans in sequence, each starting
+        # with its own "preparing" state event; step names are inferred from
+        # that fixed order rather than threading step identity through
+        # JobEvent (which every job type already shares the shape of).
+        step_index = [-1]
+
+        def on_event(event):
+            if event.kind == "state" and event.status == "preparing":
+                step_index[0] = min(step_index[0] + 1, len(_AUTOCALIBRATION_STEPS) - 1)
+            step = _AUTOCALIBRATION_STEPS[max(step_index[0], 0)]
+            self._publish_autocalibration(event, step)
+
+        try:
+            result = AutocalibrationJob().run(
+                device, operation, cancellation=token,
+                on_event=on_event, verify_restoration=True,
+            )
+        except Exception as exc:
+            error = self._describe(exc)
+        outcome = WorkerOutcome(result, error, None)
+        fault = self._autocalibration_fault(result, error)
+        with self._lock:
+            self._autocalibration_outcome = outcome
+            self._autocalibration_token = None
             if fault:
                 if self._fault is None:
                     self._fault = fault

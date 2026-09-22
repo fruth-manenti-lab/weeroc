@@ -288,6 +288,13 @@ class AutocalibrationJob:
         total = len(scan_values(scan.dac_min, scan.dac_max, scan.dac_step, name="DAC"))
         sub_result = ScurveResult(csv_path=Path(scan.out_dir) / "scurve.csv",
                                   metadata=metadata, channels=list(scan.channels))
+        # ScurveJob.run() always sets this before calling _run_locked (whose
+        # very first action is to emit a "state" event carrying whatever
+        # result.status already holds); skipping it would leave the
+        # dataclass default ("completed") on that first event instead of
+        # "preparing", the status callers use to detect a new sub-scan
+        # starting (see ConnectionWorker._run_autocalibration's step-tracking).
+        sub_result.status = "preparing"
         return ScurveJob()._run_locked(device, sub_config, rows, sub_result, total,
                                        cancellation, on_event, False)
 
