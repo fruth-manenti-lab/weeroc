@@ -1,5 +1,75 @@
 # Implementation status
 
+## RADIOROC 33 — Documented local_artifacts in AGENTS.md; found and fixed a real, currently-broken CI step
+
+Continuing on `feat/desktop-hardware-threshold`, operator present and directing.
+
+**Durable reminder that `local_artifacts/` is evidence, not just archives.**
+Added a bullet to `AGENTS.md` (auto-loaded every session in this repo) and
+a memory entry describing the extraction path, the `marshal.loads`/`dis`
+technique, and what each subdirectory holds -- prompted by this session's
+own repeated use of it (register maps, the channel-select panel mechanism
+and colors, confirming vendor scan behavior) making clear it wasn't
+reliably surfacing to a fresh session otherwise.
+
+**Found and fixed a real, currently-broken CI step before pushing**, per
+the operator's explicit request not to reproduce past failed GitHub Actions
+runs. Rather than push and hope, reproduced every `.github/workflows/
+python.yml` step locally end to end: built the wheel, installed it in a
+clean venv, and ran `tools/check_installed_package.py --gui --plot`
+exactly as CI does. It failed. Root-caused before assuming it was this
+session's fault: reproduced the identical failure against the pre-session
+commit in an isolated `git worktree`, confirming it predates every change
+made this session.
+
+The actual cause: an earlier commit (`be042b7`, "Default scan windows to
+Hardware mode", already on `main` before this session started) changed
+every scan window's default mode from Simulation to Hardware. The regular
+GUI test suites were updated for this at the time (each now explicitly
+selects Simulation in its own `setUp`), but `tools/check_installed_package
+.py`'s own hardcoded `GUI_PROBE` script was not -- it still assumes
+Simulation is the default and never explicitly selects it, so its first
+`window.start_run()` silently falls into the (unconnected) hardware branch
+and no-ops instead of running the simulated job, and the probe fails
+downstream trying to read output that was never written. Nothing in
+`tools/check_development.py`'s own test suite exercises this script, so
+this has been silently broken since that commit with no local signal --
+very likely the actual cause of prior failed GitHub Actions runs, since
+this exact step runs on every push across the full ubuntu/macos x
+python 3.11/3.13 matrix.
+
+Fixed with one line (`window.mode.setCurrentIndex(0)` before the probe's
+first run), mirroring the regular test suites' own fix for the same
+default-mode change. Re-verified the complete sequence locally afterward --
+build, wheel install, `check_installed_package.py` bare/`--plot`/`--gui
+--plot`, and `unittest discover -p test_threshold_gui.py` against the
+installed wheel -- all pass. This also incidentally confirmed this
+session's own channel-select changes are packaging-correct: every new
+module (`channel_select.py`, `autocalibration.py`,
+`autocalibration_window.py`, `autocalibration_reader.py`,
+`radioroc_autocalibrate.py`) is present in the built wheel and importable
+outside the checkout.
+
+**Evidence:** 357/357 offline tests via `tools/check_development.py`,
+clean under a hard `timeout` with confirmed process exit (one unrelated
+load-sensitive flake -- `test_abrupt_process_exit_leaves_durable_
+nonterminal_run`, a real-subprocess 10s-timeout test -- reproduced failing
+only under the heavy concurrent build/venv load this verification itself
+created, confirmed passing instantly in isolation; not a regression). Full
+CI sequence reproduced locally as described above, all green. Pushed to
+`origin/feat/desktop-hardware-threshold`
+(`86b0760..9abfbbd`); GitHub Actions result not directly checked (no `gh`
+CLI/auth available in this environment) -- if it still fails, it is not
+this specific gap, which is now confirmed fixed and re-verified locally
+end to end.
+
+**Not done:** the same "regular test suite never exercises this script"
+gap could hide a similar issue again in the future for any GUI-default
+change -- worth considering whether `check_installed_package.py --gui`
+should run as part of routine `tools/check_development.py` checks (it
+currently only runs in CI's separate wheel-verification stage) so this
+class of bug surfaces locally next time, not just on push.
+
 ## RADIOROC 32 — Channel selection redesigned to match the vendor app; survived a mid-session Pi restart (offline)
 
 Continuing on `feat/desktop-hardware-threshold`, operator present and directing.
