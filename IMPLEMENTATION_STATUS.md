@@ -1,5 +1,197 @@
 # Implementation status
 
+## RADIOROC 30 — Hold-scan diagnosis confirmed; A7585 descoped; "Main" (F02) register map recovered (offline)
+
+Continuing on `feat/desktop-hardware-threshold`, operator present and directing.
+
+**Hold-scan noise-self-trigger diagnosis (RADIOROC 29) is confirmed, not just
+recommended.** A re-run at `threshold_dac=250` already existed locally
+(`radioroc_runs/hardware/20260922-105500-056b6058/`, `created_at`
+2026-09-22T00:59:16Z, ~5 minutes after the diagnosed 150-DAC run) but had not
+been picked up when RADIOROC 29's handoff was written. Comparing the two
+runs directly: at `threshold_dac=150`, `ch4_count` was 21-22 against a
+requested 10 and `ch4_hg_stdev` peaked at ~419 in the 475-625 ns
+transition/peak region; at `threshold_dac=250`, `ch4_count` is exactly 10 at
+every hold point and the same region's stdev tops out at ~24. This is a
+clean confirmation of the diagnosis (per-channel-discriminator ADC arming on
+its own noise-triggered crossings at 150, not just the FPGA synchro pulse,
+roughly doubling and corrupting the batch). No further action needed on
+this item; nothing to re-run.
+
+**A7585 (F15) is out of scope, permanently**, per explicit operator
+decision: this lab does not use or own a CAEN A7585 supply module. Removed
+it from `CROSS_PLATFORM_REBUILD_PLAN.md`'s parity table, bench-validation
+stage table, and M4 slice order. Do not build, simulate, or plan validation
+for it going forward.
+
+**Correction to prior status: the "Main" tab (F02) register map was never
+actually blocked on missing source.** Prior sessions (RADIOROC 30 handoff,
+RADIOROC 27) described it as needing "more time on reverse-engineering," which
+was true, but the framing that it was waiting on new material was wrong — the
+same vendor extraction already used for the threshold-calibration/input-DAC/
+mask registers (`local_artifacts/extracted/RadiorocUI_2_2_0_5.exe_extracted/
+PYZ-00.pyz_extracted/radioroc2UI.pyc`, read via `marshal.loads()` on the raw
+`.pyc` bytes past the 16-byte header, no decompiler needed since this
+machine's CPython 3.13 matches the bundled bytecode exactly) has held the
+"Main" tab's register map all along, including the harder common-block
+(`add >= 64`) registers RADIOROC 27 ran out of time on. This session mined
+`Ui_MainWindow.retranslateUi`'s ~1400 string constants (tooltips embed
+`add: N - subadd: M - bit: [a:b]` directly after each control's plain-English
+description, and the raw-register-view labels at `add: 64-66` separately name
+every bit field, e.g. `dac1[7:0]`, `hysteresis1,hysteresis2, EN_delay,
+selHoldExt, selTrig[3:0]`) and recovered:
+
+- **Trigger preamplifier (paT), per channel** (`add`=channel 0-63, `subadd`=1):
+  compensation = bits `[7:6]`, gain = bits `[5:0]` (1=max gain, 63=min gain,
+  0=open loop).
+- **Energy measurement, per channel** (`add`=channel, `subadd`=2 for gain,
+  `subadd`=3 for shaping, `subadd`=7 for LSB select): HG gain bits `[3:0]`,
+  LG gain bits `[7:4]` of subadd 2; HG shaping bits `[3:0]`, LG shaping bits
+  `[7:4]` of subadd 3 (shaping time = 20 ns x code or 120 ns x code depending
+  on the LSB select bit); HG shaping LSB = subadd 7 bit 6, LG shaping LSB =
+  subadd 7 bit 7 (same byte already used per-channel for Ctest connect/bit 4
+  and injection-capacitor bit 5 - four independent flags packed into one row).
+- **Threshold DACs T1/T2/TQ, common/ASIC-wide, not per-channel** (`add`=65):
+  three 10-bit DAC codes packed across three shared bytes - `dac1[7:0]` at
+  subadd 1, `dac1[9:8]`+`dac2[5:0]` sharing subadd 2, `dac2[9:6]`+`dacQ[3:0]`
+  sharing subadd 3, `dacQ[9:4]` (+2 unused bits) at subadd 4. Enable bits
+  (`EN_th1`, `EN_th2`, `EN_thQ`, plus bandgap `EN_bg` and `vref[3:0]`) live
+  together at subadd 7.
+- **Trigger selection, common** (`add`=65, `subadd`=12): one shared byte -
+  `hysteresis1`, `hysteresis2`, `EN_delay`, `selHoldExt`, `selTrig[3:0]` - the
+  combo box's six options (`External`=0000, `Local T1`=0001, `Local T2`=0010,
+  `Local TQ`=0011, `Global T1`=0100, `Global T2`=1000, `Global TQ`=1100) map
+  directly onto `selTrig[3:0]`.
+- **Delay/slope, common** (`add`=65): delay code = `subadd`=8 bits `[7:0]`
+  (`delay[7:0]`), slope trim = `subadd`=9 bits `[7:4]` (`slopeTrim[3:0]`,
+  sharing the byte with an internal bias current `ibi_discri_delay[3:0]` that
+  is not a user control and must be preserved on write).
+
+Every shared-byte field above (HG/LG shaping LSBs on the per-channel subadd-7
+byte; the T1/T2/TQ DAC split across subadd 1-4; trigger-selection's five
+packed fields; delay/slope's shared subadd-9 byte) follows the exact
+read-row/modify-one-slice/write-row pattern this codebase already uses in
+`RadiorocDevice.set_mask_for_channel`/`set_tq_mask_for_channel`/
+`set_calibration_dac_for_channel` - no new RMW mechanism needed, just applying
+the existing one to new bit positions. Cross-checked bit widths and shared-byte
+membership against the corresponding `add: 64-66` raw-register-view labels (a
+second, independent source inside the same binary) before trusting them, and
+against the packaged default-config CSV (`configs/radio_default_i2c.csv`):
+channel 0's default trigger-preamp compensation decodes to 0 (matches the
+vendor guide's "keep to 0" recommendation exactly), and address-65
+subaddress-12's default byte (`11100100`) decodes `selTrig[3:0]` to `0100` -
+exactly the "Global T1" code enumerated from the "Trigger selection" combo
+box's own tooltip text, an independent numeric match that confirms both the
+bit position and the enumerated codes at once. The two shaping-LSB bits'
+polarity (bit=1 means 120 ns/code, bit=0 means 20 ns/code) is inferred from
+the paired checkbox's shaping-time formula rather than cross-checked against
+a default (both HG/LG default to 0 = 20 ns either way, so the default can't
+distinguish the two directions) - flagged as the one still-soft assumption
+here. Not yet independently verified against real hardware, same caveat as
+every other register recovered this way in this codebase.
+
+**Built on this:** added 15 new `RadiorocDevice` setters
+(`radioroc_client.py`) covering every register above: per-channel trigger-
+preamp gain/compensation, HG/LG gain/shaping/shaping-LSB, and common (ASIC-
+wide) T1/T2/TQ threshold DACs, trigger selection, and delay code/slope. Each
+follows the existing docstring/style convention (recovered-register
+provenance, explicit range, RMW side effects, not-yet-hardware-verified
+caveat). Two new test methods in `tests/test_radioroc_core.py`
+(`test_main_tab_per_channel_front_end_bit_positions`,
+`test_main_tab_common_threshold_and_trigger_selection`) check every bit
+position, every shared-byte preservation, and the two default-value
+cross-checks above.
+
+**Evidence:** 298/298 offline tests (2 new), `tools/check_development.py`
+clean under a hard `timeout` with confirmed process exit.
+
+**Built on top of that, same session (delegated, reviewed):** the
+application layer and GUI panel that make F02 actually usable.
+`ChannelConfigOperation`/`apply_channel_config` (`src/radioroc/application/
+channel_config.py`) gained 14 new fields (8 per-channel dicts, 6 common
+scalars/string) mirroring the existing `t1_calibration_dac_values`/
+`input_dac_impedance` patterns exactly, with matching validation and
+touched-register tracking for every shared byte. New `MainPanel`
+(`src/radioroc/gui/main_panel.py`) reproduces the vendor "Main" tab layout —
+a channel selector (0..63), "Trigger preamplifier (paT)" and "Energy
+measurement" (High/Low gain) groups for the per-channel front end, and a
+"Common thresholds and timing" group for `Threshold1`/`Threshold2`/
+`ThresholdQ`/`Trigger selection`/`Delay`/`Slope` — following
+`ThresholdCalibrationPanel`'s async apply/poll/show_snapshot pattern. Since
+this tab shows one channel at a time with no per-channel readback path
+(unlike the 64-cell grid panels), edited values are accumulated per-channel
+in memory as the operator switches channels (seeded from the packaged
+defaults on first visit) and every visited channel is included when Apply
+is pressed. Wired into `MainWindow` as the first `asic_config_tabs` tab
+("Main"), matching the vendor's own tab order. Reviewed directly against
+the diff (not just the delegated report): default-value arithmetic
+independently re-derived from `configs/radio_default_i2c.csv` and confirmed
+correct (T1=0, T2=2, TQ=520, delay=255, slope=4, trigger selection=Global
+T1, per-channel gains=8/shaping=4/compensation=0), RMW preservation checked
+register-by-register, and `MainWindow` wiring matches the established
+per-panel convention with no shortcuts taken.
+
+**Evidence:** 312/312 offline tests (14 new: 3 application-layer, 10 panel,
+1 `MainWindow` wiring), independently re-run clean under a hard `timeout`
+with confirmed process exit (not just the delegated report's own claim).
+
+**Not done:** hover-hints for the new panel (see RADIOROC 29/30's other open
+item) and hardware validation - nothing in this session touched real
+hardware. The T1/T2/TQ *enable* bits (`EN_th1`/`EN_th2`/`EN_thQ`/`EN_bg`,
+address 65 subaddress 7) remain intentionally unimplemented: their bit
+order inside that shared byte wasn't independently cross-checked to the same
+confidence as everything else above (the default value's grouping doesn't
+resolve enable-bit order the way the trigger-selection default resolved
+`selTrig`), and shipping a wrong enable-bit write is worse than leaving that
+one control out of a future GUI pass until it's confirmed the same way.
+
+**Real usability bug found and fixed via a live visual check, same session.**
+The operator reported they couldn't see the bottom of the window and didn't
+know whether a hint/status bar existed there at all. Launched the actual
+desktop app against the real X display (`DISPLAY=:0`, screen confirmed
+1600x900 via `xrandr`) rather than guessing, and screenshotted it. Confirmed
+two compounding causes:
+1. `MainWindow.resize(1280, 900)` requested a window exactly as tall as the
+   full 1600x900 screen, leaving zero margin for the window manager's own
+   title bar and top panel - guaranteed to push the window's bottom off
+   the visible screen on this display (and any screen the same size or
+   smaller).
+2. The new `MainPanel` (this session's own F02 GUI work, above) stacks three
+   full group boxes vertically with no scrolling; it is taller than the
+   space every other ASIC-config tab was built to fit in, so its own Apply
+   button and status label - where a future hint would show - were
+   completely unreachable even once the window itself fit on screen.
+
+Screenshot evidence before the fix: `Trigger selection`/`Delay`/`Slope`/
+`Apply`/status label were all rendered below the visible screen edge, with
+no scrollbar to reach them. Fixed both causes in `src/radioroc/gui/
+main_window.py`: (1) the initial window size is now clamped to
+`QApplication.primaryScreen().availableGeometry()` (with a margin) instead
+of a bare literal, so it fits whatever screen it opens on; (2) every
+ASIC-config tab's panel (not just `MainPanel`) is now wrapped in its own
+`QScrollArea` via a new `_scrollable()` helper, so a panel taller than the
+available window height scrolls instead of clipping - general, future-proof
+protection for every current and future ASIC-config tab, not a `MainPanel`-
+specific patch. Re-screenshotted after the fix: the window now fits the
+screen (desktop/taskbar visible around all four edges) and the Main tab
+shows a working vertical scrollbar. Updated the one test that asserted a
+tab's widget identity directly (`test_main_panel_is_the_first_asic_config_tab`
+in `tests/test_main_window.py`) to account for the new `QScrollArea` wrapper.
+
+**Evidence:** 312/312 offline tests (no count change - existing test updated,
+not added), independently re-run clean under a hard `timeout` with confirmed
+process exit. Visually confirmed via two real screenshots (before/after)
+against the actual display, not just headless/offscreen test coverage.
+
+**Not done:** an actual `HintBar` (hover-tooltip status line) for
+`MainWindow`/any ASIC-config panel still does not exist - this session fixed
+a *visibility* bug (content and the existing persistent connection-status
+strip were unreachable), not the separate, still-open feature gap. Do not
+conflate the two: `MainWindow` does have one permanent bottom status strip
+(`self.status_strip`, connection state only, unrelated to hover-hints) which
+was simply invisible before this fix and is now visible; it is not a
+`HintBar`.
+
 ## RADIOROC 29 — Hardware-first default mode; hover-hint status line; hold-scan log diagnosis (offline)
 
 **Hold-scan log diagnosis (no code change).** The operator ran a real hold

@@ -1,4 +1,4 @@
-# RADIOROC 30 — Wire hover-hints into MainWindow/ASIC panels, or "Main" tab register mapping
+# RADIOROC 31 — Wire an actual HintBar into MainWindow/ASIC panels, hardware-validate the "Main" tab, or pick up F11–F13/F08
 
 Continuing on `feat/desktop-hardware-threshold`. Working tree clean once this
 handoff is committed. Read `AGENTS.md` first for delegation, recording, and
@@ -6,100 +6,126 @@ offline-testing discipline; the standing per-action hardware-authorization
 rule applies as always (a grant given in one conversation is for that
 conversation only — don't assume it forward to a new chat).
 
-## What RADIOROC 29 did
+## What RADIOROC 30 did
 
-See `IMPLEMENTATION_STATUS.md`'s RADIOROC 29 entry for full detail. Summary:
+See `IMPLEMENTATION_STATUS.md`'s RADIOROC 30 entry for full detail. Summary:
 
-1. **Diagnosed a real hold-scan run the operator asked about** (no code
-   change): `radioroc_runs/hardware/20260922-105042-43d9bc20/`, run at
-   `threshold_dac=150`, showed `ch4_count` ≈ 21–22 against a requested 10,
-   and huge stdev (up to ~420) specifically in the 475–625 ns transition/peak
-   region. Traced this to 150 sitting inside the noisy region this session's
-   earlier threshold scan had mapped, combined with this run's
-   `trigger_source=3` (individual per-channel discriminator) ADC config —
-   meaning the ADC also arms on the channel's own noise-triggered crossings,
-   not just the FPGA synchro pulse, roughly doubling the count and mixing
-   randomly-timed noise samples into each batch. **Not yet confirmed**: the
-   operator hasn't re-run at `threshold_dac=250` (the validated preset
-   value) to check whether the count drops to ~11 and the stdev collapses,
-   which would confirm this diagnosis. Worth doing early next session if the
-   operator has the board.
-2. **Hardware is now the default mode** in all three scan windows
-   (`ThresholdWindow`/`HoldScanWindow`/`ScurveWindow`), not Simulation —
-   direct operator request, since the desktop app is now used against real
-   hardware routinely. The three GUI test suites (which are
-   simulation-only by design) now select Simulation explicitly in `setUp`
-   instead of relying on the old default; a new regression test
-   (`test_scan_windows_default_to_hardware_mode` in `test_main_window.py`)
-   guards the new default going forward.
-3. **New hover-hint status line**: `src/radioroc/gui/hint_bar.py`'s
-   `HintBar` wires Enter/Leave events on any widget to a `QStatusBar`
-   (each scan window's own `self.statusBar()`), showing a one-line
-   description of whatever's under the cursor and a window-level default
-   otherwise — mirroring the vendor app's bottom help line. Wired into
-   every control in all three scan windows, including plain-language
-   descriptions of Ctest and the FPGA synchro-trigger pulse (the operator
-   asked what these do). Unit-tested directly in `tests/test_hint_bar.py`.
+1. **Confirmed RADIOROC 29's hold-scan noise-self-trigger diagnosis** — a
+   `threshold_dac=250` re-run already existed locally
+   (`radioroc_runs/hardware/20260922-105500-056b6058/`) but hadn't been
+   noticed. `ch4_count` is exactly 10 (not 21–22) and stdev in the 475–625 ns
+   region tops out at ~24 (not ~419). Nothing left to do on this item.
+2. **A7585 (F15) is permanently out of scope** — operator confirmed this lab
+   doesn't use or own the module. Removed from `CROSS_PLATFORM_REBUILD_PLAN.md`'s
+   parity table, bench-validation stage table, and M4 slice order.
+3. **Recovered the "Main" tab (F02) register map** from the same vendor
+   extraction already used for prior register work — a correction, not new
+   work: the material was never missing, prior sessions just hadn't mined
+   `Ui_MainWindow.retranslateUi`'s ~1400 string constants for it yet. Full
+   mapping recorded in `IMPLEMENTATION_STATUS.md`'s RADIOROC 30 entry,
+   cross-checked two independent ways.
+4. **Implemented the full stack on top of that register map, end to end**:
+   device-level `RadiorocDevice` setters (lead-owned register reasoning),
+   an application-layer `ChannelConfigOperation` extension and a new
+   `MainPanel` GUI tab (delegated, reviewed diff-by-diff, not just the
+   delegated report's claims). F02 is now feature-complete offline except
+   the T1/T2/TQ enable bits (deliberately deferred, see below).
+5. **Found and fixed a real usability bug via a live visual check, not just
+   offline tests.** The operator said they couldn't see the bottom of the
+   window and didn't know if a hint/status bar existed there. Rather than
+   guessing, launched the actual desktop app against the real X display and
+   screenshotted it (before/after) — this is the way to check any future GUI
+   change too, not just read the code. Confirmed two compounding causes:
+   `MainWindow.resize(1280, 900)` requested a window exactly as tall as the
+   1600x900 screen with zero margin for window-manager decorations, and the
+   new `MainPanel` stacked three full group boxes with no scrolling, taller
+   than every other ASIC-config tab's fitted space. Fixed both in
+   `src/radioroc/gui/main_window.py`: the initial size now clamps to
+   `QApplication.primaryScreen().availableGeometry()`, and every ASIC-config
+   tab's panel is now wrapped in its own `QScrollArea` (a new `_scrollable()`
+   helper) so any panel taller than the available height scrolls instead of
+   clipping — general protection, not a `MainPanel`-only patch. Re-confirmed
+   visually after the fix: window fits the screen, Main tab scrolls.
+   **This was a visibility bug, not the missing-HintBar feature gap** —
+   `MainWindow` has always had one permanent bottom connection-status strip
+   (unrelated to hover-hints) that was simply invisible before this fix;
+   there is still no `HintBar` (hover-tooltip line) anywhere outside the
+   three scan windows.
 
-296/296 offline tests (6 new), full suite re-run clean, `tools/check_development.py` passes.
+312/312 offline tests, full suite independently re-run clean three times
+across this session's changes, `tools/check_development.py` passing with a
+confirmed process exit each time. Two real screenshots (before/after) taken
+against the actual display to verify the sizing fix, not just headless tests.
 
 ## What's explicitly still missing
 
-1. **Hover-hints don't cover `MainWindow` or the ASIC-config panels yet** —
-   only the three scan windows have them. `MainWindow` itself (its tab bar,
-   the shared `ConnectionPanel`) and the five ASIC-config sub-tabs (channel
-   config, input DAC grid, probes/masks, threshold calibration, raw
-   registers) still show no hint when hovered. `MainWindow` is a
-   `QMainWindow` too, so the same `HintBar(self.statusBar(), ...)` pattern
-   applies directly — see any of the three scan windows' `__init__` (near
-   the end, after all widgets/signals are set up) for the exact pattern to
-   copy. This is bounded, repetitive, well-specified work — a good
-   candidate to delegate per `AGENTS.md` rather than have the lead do by hand.
-2. **"Main" sub-tab (`F02`) register mapping** — still unbuilt, carried
-   over from RADIOROC 28/29 (trigger preamp gain/compensation, HG/LG gain
-   and shaping, T1/T2/TQ thresholds, delay code/slope, test-input routing).
-   The reverse-engineering method is proven and repeatable (`strings` on
-   the raw `.pyc`, or `marshal.loads()` + `dis`) — see RADIOROC 27's entry
-   for what was tried on the common-block (`add >= 64`) registers
-   specifically. Needs someone to spend more time on this tab, not a new
-   technique.
-3. **Hardware follow-up:** none of RADIOROC 27/28's new panels (input DAC
-   grid, mask grids, threshold calibration grid, raw registers) have been
-   validated against the *real* board yet — only S-curve/Hold-scan/
-   Threshold-scan have real hardware evidence.
+1. **T1/T2/TQ *enable* bits are still unimplemented** (address 65,
+   subaddress 7: `EN_th1`/`EN_th2`/`EN_thQ`/`EN_bg`) — bit order inside the
+   shared byte wasn't cross-checked to the same confidence as everything
+   else recovered this session. Needs another default-value cross-check or
+   a hardware readback comparison before implementing.
+2. **`HintBar` (the actual hover-tooltip status line) still doesn't exist
+   for `MainWindow` or any ASIC-config panel** — carried over three sessions
+   now, untouched again. Do not confuse this with the connection-status
+   strip fixed this session (that's a different, older, always-on widget).
+   Same bounded task as before: see any of the three scan windows'
+   `__init__` for the `HintBar(self.statusBar(), ...)` pattern to copy. Six
+   panels now need it: `MainPanel`, `ChannelConfigPanel`, `InputDacGridPanel`,
+   `ThresholdCalibrationPanel`, `ProbesMasksPanel`, `RawRegisterPanel`, plus
+   `MainWindow`'s own tab bar/`ConnectionPanel`.
+3. **Hardware follow-up:** none of the ASIC-config panels (channel config,
+   input DAC grid, mask grids, threshold calibration grid, raw registers,
+   and now `MainPanel`) have been validated against the real board yet —
+   only S-curve/Hold-scan/Threshold-scan have real hardware evidence. The
+   new F02 register writes in particular have never been driven against
+   real hardware; only offline/simulated coverage exists.
+4. **F11–F13 (DAQ trigger logic/acquisition orchestration/spectra GUI) and
+   F08 (autocalibration migration into the core package) are still entirely
+   unstarted**, and all of M5 (Windows-comparison bench, performance,
+   packaging/release) hasn't begun. See `CROSS_PLATFORM_REBUILD_PLAN.md`
+   §3/§4 for the full list.
+5. **Only the "Main" tab was screenshot-checked.** The other five
+   ASIC-config tabs were only just wrapped in `QScrollArea` this session and
+   have not themselves been visually re-confirmed to still look right (they
+   likely already fit without scrolling, since they predate this bug, but
+   that's an assumption, not a screenshot-verified fact).
 
 ## Suggested next task (pick with judgment, same as always)
 
-1. **If the operator is present with the board**, ask them to re-run the
-   hold scan at `threshold_dac=250` first — cheap, confirms or refutes
-   RADIOROC 29's diagnosis before building anything else on top of it.
-2. **Wire `HintBar` into `MainWindow` and the five ASIC-config panels** —
-   delegate this to a subagent: give it `src/radioroc/gui/hint_bar.py`'s
-   API and one of the three scan windows as a reference pattern, and the
-   list of panel files above. Should include a test per file confirming at
-   least one hint fires (see `tests/test_hint_bar.py` for the
-   `QEvent(QEvent.Type.Enter)` pattern used to test this without a real
-   mouse).
-3. **Extend the register-mapping technique to "Main"** (see above) if
-   there's more appetite for reverse-engineering than for GUI polish this
-   session.
-4. Anything else reasonable from `CROSS_PLATFORM_REBUILD_PLAN.md` §3 that
-   doesn't need new register mappings.
+1. **If the operator is present with the board**, hardware-validate
+   `MainPanel`/F02 the same way S-curve was validated in RADIOROC 27 —
+   especially the T1/T2/TQ threshold DAC shared-byte splits, the part of
+   this session's work with the most room for a subtle RMW bug to hide,
+   since offline tests can only check the codebase's own RMW logic, not
+   that it matches physical register semantics.
+2. **Wire an actual `HintBar` into `MainWindow` and all six ASIC-config
+   panels** (item 2 above) — bounded, well-specified, good delegation
+   candidate now that the sizing bug that would have hidden it either way
+   is fixed.
+3. **Or start F11–F13/F08** if there's more appetite for a new vertical
+   slice — larger and less scoped, expect real scoping time before
+   delegating any of it.
 
-## Standing discipline (unchanged)
+## Standing discipline (unchanged, plus one addition)
 
 Offline tests and fake transports only unless the operator is present and
 explicitly authorizes a specific hardware action, per-action. Never run
-`radioroc_env_check.py` as an offline check (it enumerates hardware through
-D2XX even when you don't intend to use it). Run `tools/check_development.py`
-after every meaningful change — after touching anything connection/
-threading-related, don't just check it prints "OK": wrap it in a hard
-`timeout` and confirm the process itself exits. When a panel or window
-submits work to `ConnectionWorker` and then reads a result, remember that
-submission is asynchronous — verify with a real (or faithfully fake)
-transport under timing, not just a synchronous test double, before trusting
-that the result shown is fresh. Delegate bounded, well-specified
-implementation/test work to subagents per `AGENTS.md`; keep shared
-contracts, uncertain hardware reasoning, and integration for the lead.
+`radioroc_env_check.py` as an offline check. Run `tools/check_development.py`
+after every meaningful change — wrap it in a hard `timeout` and confirm the
+process itself exits. A7585 (F15) is permanently out of scope. Delegate
+bounded, well-specified implementation/test work to subagents per
+`AGENTS.md`; keep shared contracts, uncertain hardware/register reasoning,
+and integration for the lead, and review a delegated diff line by line
+before trusting its own report.
+
+**New this session:** for any GUI change, a live visual check (launch the
+real desktop app — `PYTHONPATH=src:. .conda-radioroc/bin/python -m
+radioroc.gui` with `DISPLAY` set — and screenshot it, e.g. with `scrot`)
+caught a real bug that 312 passing offline/offscreen tests entirely missed,
+because every GUI test runs under `QT_QPA_PLATFORM=offscreen` with no real
+screen size to clip against. Do this whenever a session touches window
+sizing, layout, or adds a new panel — not just when the operator reports a
+problem.
+
 Record what you did, what's next, and any real findings in
 `IMPLEMENTATION_STATUS.md` and a fresh `NEXT_SESSION.md` before you stop.

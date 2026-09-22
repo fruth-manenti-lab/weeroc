@@ -182,7 +182,7 @@ meaningful, not a literal CLI equivalent to each mouse gesture.
 | F12 | DAQ internal/external acquisition trigger and hold, conversion delay, sync, reset options, finite/continuous operation | ADC primitives and batch CLI exist; orchestration must move to core | Pedestal/forced-trigger path then signal acquisition |
 | F13 | DAQ results: HG/LG channel spectra and separate HG/LG event/acquisition views, selection/visibility/clear, bins/scales, live updates, save/load/export including vendor acquisition files | Event CSV and spectrum script exist; interactive parity missing | Recorded data, known ADC vectors, signal runs |
 | F14 | FPGA I/O routing, synchronization clocks/triggers, trigger indicators, validation-event control, documented signals/options | Mux and sync helpers exist; validation-event behavior needs porting | Readback; physical signal timing on scope |
-| F15 | CAEN A7585 supply integration exposed by vendor UI | No shared implementation identified | Simulator then actual module and its reference software |
+| F15 | ~~CAEN A7585 supply integration exposed by vendor UI~~ — **out of scope**: this lab does not use or own an A7585 module, per operator decision 2026-09-22. Do not build or validate it. | N/A | N/A |
 | F16 | Application behavior: defaults, persistent settings, help, shortcuts, plot controls, errors, cancellation | Requires Windows screen-by-screen audit | Windows walkthrough and GUI tests |
 | F17 | Existing repository extras: presets, append acquisition, scan comparisons, derivative/error plots, metadata, finger-spectrum views | Already used in lab; preserve even if outside vendor scope | Existing files and logbook workflows |
 
@@ -306,7 +306,8 @@ evidence remain distinct.
 
 Deliver vertical slices in this order: full ASIC configuration and file interchange;
 S-curves/autocalibration; threshold and hold scans; full DAQ trigger combinations
-and visualization; FPGA/probe diagnostics; A7585 and remaining optional controls.
+and visualization; FPGA/probe diagnostics; remaining optional controls (A7585
+excluded, see F15).
 Each slice includes API, CLI, UI, tests, help, and Windows comparison evidence.
 Code that accepts an undocumented numeric trigger mode is not sufficient parity.
 
@@ -358,7 +359,6 @@ depends on the unresolved 2.2.0.5 surface and equipment availability.
 | C | Oscilloscope and suitable probe/cables | Actual FPGA routing, sync clocks/pulses, analog/digital probes and timing; register readback alone cannot establish signal correctness |
 | D | Pulse generator, appropriate attenuation/injection path and scope | Signal S-curves, internal/external hold, peak sensing, HG/LG response; suitable independent inputs for coincidence/window trigger tests; external clock versus synchro-trigger routing checked separately |
 | E | Known SiPM, its appropriate bias supply, dark enclosure | Dark threshold staircase, finger spectra/gain, realistic detector acquisition and input-DAC effects |
-| F | Actual CAEN A7585, if required for vendor parity | Supply discovery/configuration/readback and supported output behavior using module-specific procedures |
 | G | Windows reference machine and target Linux machine(s) | Controlled Windows comparisons and physical USB/driver behavior on Debian/Ubuntu |
 
 Nothing needs to be connected for software architecture, simulation, packaging,
@@ -374,8 +374,10 @@ checked against the current wiring and board revision. Never treat old SiPM or
 generator values as universally appropriate settings for new equipment.
 
 If an item is unavailable, continue the corresponding software work with
-simulation/replay and record physical validation as pending. Preserve A7585 in
-scope even if absent; do not substitute a simulated test for its release validation.
+simulation/replay and record physical validation as pending.
+
+A7585 (F15) is out of scope: this lab does not use or own the module, per
+operator decision 2026-09-22. Do not build, simulate, or validate it.
 
 ## 6. Agent execution plan
 
