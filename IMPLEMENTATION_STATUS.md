@@ -1,6 +1,6 @@
 # Implementation status
 
-## RADIOROC 31 — Hover hints wired everywhere; F08 autocalibration job built end to end (offline)
+## RADIOROC 31 — Hover hints wired everywhere; F08 autocalibration job + CLI built end to end (offline)
 
 Continuing the same session as RADIOROC 30, per operator direction to keep
 going after the "Main" tab/window-sizing work landed.
@@ -128,13 +128,30 @@ hardware/file access. 327/327 offline tests total this session (6 new here),
 independently re-run clean under a hard `timeout` with confirmed process
 exit.
 
-**Not done:** `AutocalibrationJob` has no CLI or GUI entry point yet (no
-`scripts/radioroc_autocalibrate.py`, no GUI button/panel) and has never run
-against real hardware -- only the scripted fake-transport tests above. The
-T1/T2/TQ enable bits (address 65 subaddress 7) from RADIOROC 30 are still
-unimplemented for the same reason as before. `HintBar`'s wording (this
-session's own text, not verbatim vendor tooltips beyond the three threshold
-one-liners already in `main_panel.py`) hasn't been read over by the operator.
+**`AutocalibrationJob` now has a CLI command**, `scripts/radioroc_autocalibrate.py`,
+built the same session by the lead following `scripts/radioroc_scurve.py`'s
+exact pattern (shared `radioroc_cli_common` helpers, `--execute`/dry-run-by-
+default write safety, `AutocalibrationJob.preview()` -- a new static method
+mirroring `ScurveJob.preview()` -- for the dry-run JSON report, the same
+SIGINT-requests-cancellation handling, the same error-chain printer). Exposes
+every `AutocalibrationJobConfig` field as a flag, including
+`--transition-dac-floor`/`--transition-dac-cap` (needed so a CLI invocation
+can exactly reproduce any config, not just the common fields). 3 new tests
+(`tests/test_autocalibration_jobs.py`): dry-run touches no serial/files;
+CLI and direct-API calls with equivalent settings produce byte-identical
+transport command traces (proves the CLI wiring adds no hidden behavior
+difference, not just that it runs); invalid configuration is rejected before
+any hardware access. 330/330 offline tests (17 legacy CLI help checks, up
+from 16), independently re-run clean under a hard `timeout` with confirmed
+process exit.
+
+**Not done:** no GUI panel/button for `AutocalibrationJob` yet -- CLI only.
+Never run against real hardware -- only the scripted fake-transport tests
+above. The T1/T2/TQ enable bits (address 65 subaddress 7) from RADIOROC 30
+are still unimplemented for the same reason as before. `HintBar`'s wording
+(this session's own text, not verbatim vendor tooltips beyond the three
+threshold one-liners already in `main_panel.py`) hasn't been read over by
+the operator.
 
 ## RADIOROC 30 — Hold-scan diagnosis confirmed; A7585 descoped; "Main" (F02) register map recovered (offline)
 

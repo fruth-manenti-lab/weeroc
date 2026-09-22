@@ -229,6 +229,23 @@ class AutocalibrationResult:
 
 
 class AutocalibrationJob:
+    @staticmethod
+    def preview(config: AutocalibrationJobConfig) -> dict:
+        config = deepcopy(config)
+        config.load_rows()
+        probe_points = len(scan_values(config.probe_dac_min, config.probe_dac_max,
+                                       config.probe_dac_step, name="DAC"))
+        return {"execution_mode": "dry-run", "operation": config.as_dict(),
+                "reference_channel": config.channels[0],
+                "step1_points_per_probe": probe_points,
+                "sub_scans": ["step1_zero", "step1_full", "step2", "final"],
+                "temporary_asic_registers": len(config.registers()),
+                "preparation_policy": "explicit initialization/defaults persist; "
+                                      "the reference channel's probed calibration DAC and "
+                                      "every sub-scan's own temporary settings are restored; "
+                                      "corrected calibration DAC values are the intentional, "
+                                      "persistent output"}
+
     def run(self, device: RadiorocDevice, config: AutocalibrationJobConfig, *,
             metadata: RadiorocRunMetadata | None = None,
             cancellation: CancellationToken | None = None, on_event=None,

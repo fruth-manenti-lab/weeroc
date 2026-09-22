@@ -1,16 +1,20 @@
 """Offline autocalibration (F08) acceptance tests using the real device operations."""
 
+import contextlib
 from dataclasses import replace
+import io
 import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from radioroc_client import RadiorocDevice, parse_bits
 from radioroc.application.autocalibration import (
     AutocalibrationJob, AutocalibrationJobConfig,
 )
 from radioroc.application.jobs import CancellationToken, JobBusyError
+from scripts import radioroc_autocalibrate as cli
 from test_scurve_jobs import ScurveTransport
 
 
@@ -135,6 +139,49 @@ class AutocalibrationJobTests(unittest.TestCase):
             AutocalibrationJob().run(self.device, bad_config)
         self.assertFalse(self.directory.exists())
         self.assertEqual(self.transport.trace, [])
+
+    def test_cli_dry_run_never_constructs_serial_or_creates_outputs(self):
+        with patch("sys.argv", ["autocalibrate", "--port", "/does/not/exist",
+                                "--out-dir", str(self.directory)]), \
+             patch.object(cli.RadiorocSerial, "from_config",
+                         side_effect=AssertionError("serial access")), \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(cli.main(), 0)
+        self.assertEqual(json.loads(output.getvalue())["execution_mode"], "dry-run")
+        self.assertFalse(self.directory.exists())
+
+    def test_cli_and_api_have_identical_command_traces_and_values(self):
+        # The CLI defaults to initializing the FPGA unless --skip-fpga-init
+        # is passed; self.config leaves initialize_fpga at its own default
+        # (False), so match the CLI's actual behavior here.
+        expected = AutocalibrationJob().run(self.device, replace(self.config, initialize_fpga=True))
+        actual_transport = ScurveTransport(point_readings=list(self.readings))
+        cli_dir = self.directory.parent / "cli"
+        arguments = [
+            "autocalibrate", "--execute", "--channels", "4,5",
+            "--probe-dac-min", "0", "--probe-dac-max", "20", "--probe-dac-step", "10",
+            "--transition-dac-step", "10", "--transition-margin", "5",
+            "--transition-dac-floor", "20", "--transition-dac-cap", "20",
+            "--final-window-before", "5", "--final-window-after", "5", "--final-dac-step", "5",
+            "--out-dir", str(cli_dir),
+        ]
+        with patch("sys.argv", arguments), \
+             patch.object(cli.RadiorocSerial, "from_config", return_value=actual_transport), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(), 0)
+        self.assertEqual(actual_transport.trace, self.transport.trace)
+        self.assertEqual(expected.calibration_after, {4: 42, 5: 22})
+        manifest = json.loads((cli_dir / "autocalibration_metadata.json").read_text())
+        self.assertEqual(manifest["status"], "completed")
+
+    def test_cli_reports_invalid_configuration_without_hardware_access(self):
+        with patch("sys.argv", ["autocalibrate", "--channels", "4,5", "--probe-dac-step", "0"]), \
+             patch.object(cli.RadiorocSerial, "from_config",
+                         side_effect=AssertionError("serial access")), \
+             contextlib.redirect_stdout(io.StringIO()), \
+             contextlib.redirect_stderr(io.StringIO()) as error_output:
+            self.assertEqual(cli.main(), 1)
+        self.assertIn("ERROR", error_output.getvalue())
 
 
 if __name__ == "__main__":
