@@ -60,10 +60,47 @@ actual implementation (new job/writer/simulator files, the
 `radioroc_acquire.py` refactor to use the new job, and matching offline
 tests mirroring `tests/test_hold_scan_jobs.py`) to a background agent in an
 isolated git worktree, with the full contract above spelled out explicitly
-so it has no ambiguous design decisions left to make on its own. Result not
-yet reviewed or merged as of this entry -- **do not treat F12 as landed
-until a following entry says the diff was reviewed and
-`check_development.py` passed against it.**
+so it has no ambiguous design decisions left to make on its own.
+
+**F12 reviewed, one real bug found and fixed, then merged -- landed, not
+just delegated.** Read every changed/new file line-by-line against the
+contract above rather than trusting the agent's own summary. Findings:
+- The port itself matched the contract faithfully, including two places
+  where the agent surfaced a genuine ambiguity instead of silently
+  guessing: it correctly noted my own instruction to "mirror hold_scan's
+  `prepare_trigger_masks` re-apply-before-restore step" was wrong (`hold_scan.py`
+  has no such step at all) and inferred I meant the *old script's* cleanup
+  order instead -- the more sensible reading, and the one I'd intended.
+- **Found and fixed one real gap in `AcquisitionRunWriter`'s append mode**:
+  if a prior run was interrupted between `metadata.json` and `events.csv`'s
+  own two exclusive-creates (a real window -- `HoldRunWriter` has the
+  identical two-step construction), a later `--append` run would see the
+  surviving `metadata.json`, skip `_header()` entirely, and start writing
+  event rows into a CSV with no header row, corrupting
+  `plot_acquisition_spectrum.py`'s schema. Fixed directly (write the
+  missing header if only one of the two files survived) and added a
+  regression test (`test_append_mode_recovers_a_csv_missing_from_an_
+  interrupted_prior_run`) rather than sending it back to the agent -- a
+  one-line, low-risk fix not worth the round-trip.
+- Independently re-ran the full suite from the reviewed worktree (391/391,
+  not the agent's own claimed number), then ran a real end-to-end
+  `AcquisitionJob` against the new simulator by hand: dry-run preview
+  correct, a real run completed with `cleanup=restored`, the register
+  snapshot count matched a hand count exactly (132 = 64 discriminator-select
+  + 64 mask + 2 threshold + 1 preamp-gain + 1 control byte), and the
+  *untouched* `plot_acquisition_spectrum.py` correctly read the job's own
+  `events.csv` output (150 events for 5 batches x 30 acquisitions, exact).
+- Committed in the worktree, merged into `feat/desktop-hardware-threshold`
+  with `--no-ff` (clean merge, no conflicting files), re-ran
+  `check_development.py` on the actual merged tree as the final gate
+  (394/394 -- 357 pre-F12 + 36 from the agent + 1 from my own fix), then
+  removed the now-fully-merged worktree and its branch.
+
+**F12 is landed as of this entry.** `radioroc_acquire.py` now has the same
+snapshot/restore/cancellation/verification contract every other scan
+workflow in this codebase has, with a wider (safer) register footprint than
+before. Not yet run against real hardware -- offline/simulation only, same
+as every other job type before its first hardware validation.
 
 ## RADIOROC 34 — Live-visual-checked the GUI (Probes/Masks grids, Autocalibration tab), both items deferred since RADIOROC 31/32
 
