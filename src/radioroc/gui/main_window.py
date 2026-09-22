@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QScrollArea, QStackedWidget, QTabWidget, QVBoxLayout, QWidget,
 )
 
+from .acquisition_window import AcquisitionWindow
 from .autocalibration_window import AutocalibrationWindow
 from .channel_config_panel import ChannelConfigPanel
 from .connection_panel import ConnectionPanel
@@ -192,10 +193,12 @@ class MainWindow(QMainWindow):
         self.hold_scan_window = HoldScanWindow(connection_worker=worker)
         self.scurve_window = ScurveWindow(connection_worker=worker)
         self.autocalibration_window = AutocalibrationWindow(connection_worker=worker)
+        self.acquisition_window = AcquisitionWindow(connection_worker=worker)
         self.calibration_tabs.addTab(self.threshold_window, "Threshold scan")
         self.calibration_tabs.addTab(self.hold_scan_window, "Hold scan")
         self.calibration_tabs.addTab(self.scurve_window, "S-curve")
         self.calibration_tabs.addTab(self.autocalibration_window, "Autocalibration")
+        self.calibration_tabs.addTab(self.acquisition_window, "Acquisition")
         self.pages.addWidget(calibration_page)
 
         # An injected connection_worker means each scan window's own
@@ -255,7 +258,7 @@ class MainWindow(QMainWindow):
 
     def _scan_windows(self):
         return (self.threshold_window, self.hold_scan_window, self.scurve_window,
-                self.autocalibration_window)
+                self.autocalibration_window, self.acquisition_window)
 
     def _busy(self):
         scanning = any(window.worker is not None for window in self._scan_windows())
