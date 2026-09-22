@@ -1,5 +1,47 @@
 # Implementation status
 
+## RADIOROC 37 — M3 milestone squash-merged to `main` via PR #1; started F13's `AcquisitionWindow` skeleton on a new branch
+
+Same conversation as RADIOROC 36, continuing after the operator returned.
+`feat/desktop-hardware-threshold` (92 commits, +29257/-978 across 146 files)
+was opened as PR #1 against `main` (stale since 2026-06-29) and squash-merged
+by the operator. New work now continues on `feat/daq-results-gui`, branched
+from the updated `main`.
+
+**Rough plan-completion assessment given on request** (not previously
+recorded anywhere): M0 ~50% (coarse F01-F17 backlog exists; the plan's own
+"detailed parity table" per row was never built as an artifact), M1 ~85%,
+M2 ~85%, M3 100% (confirmed this session), M4 ~55% functionally built but
+~15% by the plan's own strict "compared against the real running Windows
+app" gate (everything vendor-derived so far is static `.pyc` disassembly,
+not a live side-by-side run), M5 ~5%. Headline rough estimate given:
+~35-40% of the full plan, explicitly caveated as swinging between ~25-30%
+(strict gate) and ~50-55% (functional-only) depending which bar is used.
+
+**Started F13's next slice: an `AcquisitionWindow` GUI skeleton** --
+connect (via the same shared `ConnectionWorker` shell every other window
+uses), configure an `AcquisitionConfig`, preview/run/cancel, live
+batch-progress display, reopen a saved run via the already-landed
+`read_acquisition_run`. Deliberately scoped to exclude spectra/histogram
+rendering, bins/scales controls, and vendor-file import/export UI --
+those need visual iteration this session (last ~30 minutes before the
+operator left for a train) isn't positioned to get right blind, matching
+RADIOROC 35/36's own judgment call to hold off on exactly that kind of
+work when unsupervised.
+
+Delegated to a background agent in an isolated worktree with a contract
+built from a fresh, careful read of `threshold_worker.py`/
+`connection_worker.py`'s threshold-specific state and methods/
+`threshold_window.py`'s dual-mode (owned-panel vs shared-connection) split
+-- the same rigor as F12/F13 Phase A's delegations, including an explicit
+flag that `connection_worker.py` (917 lines, shared by every window) is
+sensitive shared-contract territory and the agent should say so rather
+than improvise if any part of mirroring the threshold pattern there isn't
+a confident, purely-additive change. **Not yet reviewed or merged as of
+this entry** -- do not treat the `AcquisitionWindow` skeleton as landed
+until a following entry says the diff was reviewed and
+`check_development.py` passed against it under `.conda-radioroc`.
+
 ## RADIOROC 36 — Landed F13 Phase A: acquisition-run reader and vendor-file reader, one more real bug found in review
 
 New conversation continuing directly from RADIOROC 35's handoff (`NEXT_SESSION.md`
