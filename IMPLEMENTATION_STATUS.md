@@ -1,5 +1,61 @@
 # Implementation status
 
+## RADIOROC 39 (continued) — Priority 3: closed the missing host-receipt-timestamp gap
+
+Same session, offline (no hardware touched), while the operator was away
+from the bench. A Priority 3 review of `src/radioroc/data/acquisition.py`
+and `application/acquisition.py` against `PLINT_STUDENT_MVP_DIRECTIVE.md`'s
+provenance requirements found most of it already satisfied by the
+existing design, and one real, concrete gap:
+
+- **Already fine, verified by reading the code, not assumed**: below-
+  threshold amplitude retention (every accepted batch writes HG/LG for
+  every configured channel, not just ones that crossed threshold --
+  matches what RADIOROC 39's own bench data showed empirically for the
+  uninvolved channel earlier the same day); event uniqueness (no single
+  ID column, but `(batch, event, channel)` is a verified-unique compound
+  key including across appended segments, per the existing
+  `test_append_mode_continues_batch_numbering_without_truncating`); no
+  irreversible cuts (the writer never filters on amplitude or any other
+  criterion -- thresholding is a hardware trigger-decision step, never a
+  data-writing step).
+- **Real gap, fixed**: no timestamp existed anywhere below the whole-run
+  level (`created_at`/`finished_at` in the manifest, nothing per-batch,
+  nothing in the CSV). A run with many batches had no way to tell when
+  within that run any given accepted event happened, which directly
+  limits the directive's "observed accepted-event rate" requirement to a
+  single run-wide average.
+
+**Fix**: added a `batch_received_at` list to the manifest (`{"batch": N,
+"received_at": <ISO 8601 UTC>}` per completed batch), recorded
+immediately after `acquire_adc_batch` returns -- i.e. genuinely a
+host-receipt timestamp, not a physical-event timestamp the hardware
+doesn't supply, named and documented as such so it can't be
+mis-claimed as trigger-time precision later. Deliberately added to the
+manifest, not the CSV: `AcquisitionRunWriter.POINT_FIELDS` is a fixed
+schema `scripts/plot_acquisition_spectrum.py` already parses, and this
+avoids touching it. `manifest.setdefault(...)` rather than a plain
+assignment, matching this job's existing per-segment-manifest convention
+(`completed_points` and others already reset per appended segment, per
+the same existing test above) -- verified this is consistent with, not a
+new exception to, how append mode already works here, rather than
+assuming a "preserve across segments" behavior that doesn't actually
+exist elsewhere in this file yet.
+
+New assertions added to the existing
+`test_success_values_progress_and_manifest` (not a new test function --
+this is exactly the manifest-shape check that test already owns) confirm
+the list has one entry per batch with the correct batch number and a
+parseable ISO timestamp. 450/450 offline tests pass under
+`.conda-radioroc` (`tools/check_development.py`).
+
+**Not done**: `HoldScanJob`/`ThresholdJob`'s manifests were not given the
+equivalent field -- this review was scoped to the acquisition path
+specifically (the directive's Priority 3 language is about acquired
+*events*), and adding it elsewhere wasn't verified as needed. Worth a
+quick check before assuming those manifests already have adequate timing
+granularity, rather than assuming either way.
+
 ## RADIOROC 39 (continued) — SiPMs biased for the first time; explained (not fixed) the single-shot anomaly as a test-methodology artifact, not a hardware finding
 
 Same day, continuing directly from the entry below. Two developments,

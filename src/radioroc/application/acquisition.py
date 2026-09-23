@@ -179,6 +179,15 @@ class AcquisitionJob:
         })
         if mode == "simulation" and hasattr(device.transport, "simulation_metadata"):
             manifest["simulation"] = deepcopy(device.transport.simulation_metadata)
+        # Host-receipt time per batch, not a physical-event timestamp the
+        # hardware doesn't supply (PLINT_STUDENT_MVP_DIRECTIVE.md Priority 3).
+        # setdefault, not a plain assignment, so a caller-supplied prior
+        # manifest's entries aren't clobbered -- though per this job's
+        # existing append convention (completed_points and others reset per
+        # segment too, see test_append_mode_continues_batch_numbering_
+        # without_truncating), an appended segment's manifest reflects only
+        # that segment's own batches, same as everything else in it.
+        manifest.setdefault("batch_received_at", [])
         writer = AcquisitionRunWriter(Path(acquisition.out_dir), manifest, append=append)
         result.metadata_path = writer.metadata_path
         fpga = {}
@@ -287,6 +296,7 @@ class AcquisitionJob:
                 high_gain, low_gain = device.acquire_adc_batch(
                     nb_acq=acquisition.acquisitions_per_batch, timeout_s=acquisition.timeout_s,
                     synchro_trigger=acquisition.synchro_trigger)
+                manifest["batch_received_at"].append({"batch": batch, "received_at": _now()})
                 token.checkpoint()
                 event_rows = []
                 for channel in acquisition.channels:

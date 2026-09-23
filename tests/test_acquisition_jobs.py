@@ -3,6 +3,7 @@
 import contextlib
 import csv
 from dataclasses import replace
+from datetime import datetime
 import io
 import json
 from pathlib import Path
@@ -178,6 +179,13 @@ class AcquisitionJobTests(unittest.TestCase):
         self.assertEqual(manifest["execution_mode"], "simulation")
         self.assertEqual(manifest["firmware_status_word"], bits(5))
         self.assertEqual(manifest["cleanup"]["status"], "restored")
+        # Priority 3 (PLINT_STUDENT_MVP_DIRECTIVE.md): host-receipt time per
+        # batch, distinct from any physical-event timestamp the hardware
+        # doesn't supply.
+        received = manifest["batch_received_at"]
+        self.assertEqual([entry["batch"] for entry in received], [0, 1])
+        for entry in received:
+            datetime.fromisoformat(entry["received_at"])  # raises if malformed
 
     def test_cancel_after_point_preserves_partial_data(self):
         token = CancellationToken()
