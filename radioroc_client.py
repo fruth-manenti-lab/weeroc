@@ -1615,6 +1615,40 @@ class RadiorocDevice:
         data[5] = "1" if enabled else "0"
         self.write_register(channel, 6, "".join(data))
 
+    def unmask_channel_for_individual_coincidence(self, channel: int, enabled: bool = True) -> None:
+        """Unmask all three discriminator levels for one coincidence channel.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `enabled` (`bool`): Mask bit value applied to all three levels.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel mask register if present in the loaded defaults.
+
+        `configure_adc_external_hold`'s `trigger_source`/`trigger_source_2 ==
+        3` ("Individual trigger") selects a specific channel for one of the
+        ADC DAQ tab's two coincidence-input slots, but which per-channel
+        discriminator level (T1, T2, or TQ -- the three independent mask
+        bits `set_mask_for_channel`/`set_tq_mask_for_channel` control) that
+        path actually taps has not been recovered from disassembly (see
+        IMPLEMENTATION_STATUS.md RADIOROC 39/40) and needs a physical test
+        to resolve conclusively. Rather than guess, this unmasks all three
+        levels for the one named channel, which is safe specifically because
+        genuine two-distinct-channel coincidence never simultaneously uses
+        an OR-tree mode (NORT1/NORT2/NORTQ) on either slot -- so unmasking
+        extra levels on the two named channels cannot pull any other,
+        unintended channel into the trigger; every channel this call is not
+        applied to stays fully masked out by `prepare_trigger_masks`.
+        """
+
+        validate_channel(channel)
+        self.set_mask_for_channel(channel, t1=True, enabled=enabled)
+        self.set_mask_for_channel(channel, t1=False, enabled=enabled)
+        self.set_tq_mask_for_channel(channel, enabled=enabled)
+
     def set_input_dac_enable_for_channel(self, channel: int, enabled: bool) -> None:
         """Enable or disable one channel's input DAC.
 

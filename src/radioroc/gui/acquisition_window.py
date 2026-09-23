@@ -248,8 +248,31 @@ class AcquisitionWindow(QMainWindow):
         self.low_gain_code.setSpecialValueText("Keep current")
         self.discriminator = QComboBox()
         self.discriminator.addItems(["T1", "T2"])
+        # Vendor ADC DAQ tab combo items, recovered from radioroc2UI.pyc/
+        # adc.pyc disassembly (IMPLEMENTATION_STATUS.md RADIOROC 39). Trigger
+        # channel/mode fields below are always visible rather than mirroring
+        # the vendor app's show/hide-by-mode behavior, to keep this first
+        # cut simple; irrelevant fields for a given trigger type are simply
+        # unused by AcquisitionConfig.validate().
+        self.trigger_type = QComboBox()
+        self.trigger_type.addItems(["Simple trigger", "2 channels coincidence", "Time window"])
+        self.trigger_source = QComboBox()
+        self.trigger_source.addItems(["NORT1", "NORT2", "NORTQ", "Individual trigger", "OR64 (FPGA)"])
+        self.trigger_source.setCurrentIndex(3)
+        self.trigger_source_2 = QComboBox()
+        self.trigger_source_2.addItems(["NORT1", "NORT2", "NORTQ", "Individual trigger", "OR64 (FPGA)"])
+        self.trigger_channel_2 = _integer(0, 63, 5)
+        self.adc_window_ns = _integer(0, 10000, 50)
+        self.adc_window_ns.setSingleStep(5)
+        self.adc_nb_trig = _integer(0, 63, 1)
         form.addRow(self.channel_select)
-        for label, field in [("Trigger channel", self.trigger_channel),
+        for label, field in [("Trigger type", self.trigger_type),
+                             ("Trigger channel (T1 slot)", self.trigger_channel),
+                             ("Trigger source (T1 slot)", self.trigger_source),
+                             ("Trigger channel (T2 slot)", self.trigger_channel_2),
+                             ("Trigger source (T2 slot)", self.trigger_source_2),
+                             ("Coincidence/time window (ns)", self.adc_window_ns),
+                             ("Time-window trigger count", self.adc_nb_trig),
                              ("Threshold DAC", self.threshold_dac),
                              ("Hold delay (ns)", self.hold_delay_ns),
                              ("Conversion delay (ns)", self.conversion_delay_ns),
@@ -666,6 +689,12 @@ class AcquisitionWindow(QMainWindow):
             high_gain_code=self.high_gain_code.value() or None,
             low_gain_code=self.low_gain_code.value() or None,
             t1=self.discriminator.currentIndex() == 0, use_mask=self.mask.isChecked(),
+            trigger_type=self.trigger_type.currentIndex(),
+            trigger_source=self.trigger_source.currentIndex(),
+            trigger_source_2=self.trigger_source_2.currentIndex(),
+            trigger_channel_2=self.trigger_channel_2.value(),
+            adc_window_ns=self.adc_window_ns.value(),
+            adc_nb_trig=self.adc_nb_trig.value(),
             out_dir=Path(output).expanduser(),
         )
         return AcquisitionJobConfig(acquisition)

@@ -71,6 +71,22 @@ class AcquisitionGuiTests(unittest.TestCase):
         self.assertEqual(operation.acquisition.channels, [1, 3, 6])
         self.assertEqual(operation.acquisition.trigger_channel, 3)
 
+    def test_operation_wires_two_channel_coincidence_fields(self):
+        self.window.channel_select.set_channels([2, 5])
+        self.window.trigger_type.setCurrentIndex(1)  # "2 channels coincidence"
+        self.window.trigger_channel.setValue(2)
+        self.window.trigger_source.setCurrentIndex(3)  # "Individual trigger"
+        self.window.trigger_channel_2.setValue(5)
+        self.window.trigger_source_2.setCurrentIndex(3)  # "Individual trigger"
+        self.window.adc_window_ns.setValue(25)
+        operation = self.window.operation()
+        self.assertEqual(operation.acquisition.trigger_type, 1)
+        self.assertEqual(operation.acquisition.trigger_channel, 2)
+        self.assertEqual(operation.acquisition.trigger_source, 3)
+        self.assertEqual(operation.acquisition.trigger_channel_2, 5)
+        self.assertEqual(operation.acquisition.trigger_source_2, 3)
+        self.assertEqual(operation.acquisition.adc_window_ns, 25)
+
     def test_optional_fields_default_to_keep_current(self):
         operation = self.window.operation()
         self.assertIsNone(operation.acquisition.threshold_dac)

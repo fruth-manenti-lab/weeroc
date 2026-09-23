@@ -255,6 +255,14 @@ class HoldScanJob:
             device.prepare_trigger_masks(t1=scan.t1, use_mask=scan.use_mask, use_ctest=scan.use_ctest)
             if scan.use_mask:
                 device.set_mask_for_channel(scan.trigger_channel, t1=scan.t1, enabled=True)
+                # Genuine 2-distinct-channel coincidence (both coincidence-input
+                # slots set to "Individual trigger"): unmask both named channels
+                # at all three discriminator levels rather than guessing which
+                # one "Individual trigger" taps -- see
+                # RadiorocDevice.unmask_channel_for_individual_coincidence.
+                if scan.trigger_type == 1 and scan.trigger_source == 3 and scan.trigger_source_2 == 3:
+                    device.unmask_channel_for_individual_coincidence(scan.trigger_channel)
+                    device.unmask_channel_for_individual_coincidence(scan.trigger_channel_2)
             if scan.use_ctest:
                 device.set_ctest_for_channel(scan.trigger_channel, enabled=True)
             if scan.threshold_dac is not None:

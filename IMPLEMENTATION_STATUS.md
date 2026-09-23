@@ -1,5 +1,79 @@
 # Implementation status
 
+## RADIOROC 39 (continued) — Closed the second-channel mask gap and added `AcquisitionWindow` coincidence controls: Priority 0's software side is done
+
+Same session, continuing directly from the entry below. The user asked to
+close out Priority 0 as completely as possible in software.
+
+**Closed the channel-mask gap without guessing the open discriminator-level
+question.** Rather than pin down which level (T1, T2, or TQ) "Individual
+trigger" mode taps -- more disassembly (`cbx_type_handle`, `init`'s signal
+wiring in `adc.pyc`) turned up no further evidence, and the actual mux is
+almost certainly FPGA gateware/ASIC-internal wiring this codebase's Python
+control-plane simply doesn't touch, so it is a genuine dead end for static
+analysis, not a missed search -- added
+`RadiorocDevice.unmask_channel_for_individual_coincidence`, which unmasks
+**all three** per-channel discriminator levels (T1, T2, and TQ mask bits at
+`(channel, subadd=6)`, string indices 3/4/5) for one named channel. This is
+safe specifically because genuine two-distinct-channel coincidence never
+simultaneously runs an OR-tree mode (NORT1/NORT2/NORTQ) on either slot --
+so unmasking extra levels on exactly the two named channels cannot pull in
+any other, unintended channel; every channel this isn't applied to stays
+masked out by the existing `prepare_trigger_masks`. `application/
+acquisition.py` and `application/hold_scan.py` now call this for both
+`trigger_channel` and `trigger_channel_2` whenever `trigger_type == 1` and
+both slots are `trigger_source(_2) == 3` (genuine Individual+Individual
+coincidence) and `use_mask` is set. New test:
+`test_unmask_channel_for_individual_coincidence_sets_all_three_levels` in
+`tests/test_radioroc_core.py`.
+
+Incidentally found (not fixed, out of scope): `write_fifo`/
+`prepare_trigger_masks` never update `RadiorocDevice`'s own `find_i2c_row`
+cache (`select_i2c_rows` explicitly returns copies), unlike the single-row
+`write_register` path `set_mask_for_channel` uses. This only matters for
+code that reads `find_i2c_row` back after a `write_fifo`-based write
+expecting to see the new value -- the existing acquisition/hold-scan
+restoration tests pass because their verification reads real transport
+state, not this cache, so this is not a live bug in anything currently
+shipped, just a latent trap for future code. Worth a look if a future
+session adds anything that reads channel-mask state back through
+`find_i2c_row` after `prepare_trigger_masks`.
+
+**Added `AcquisitionWindow` GUI controls** for everything RADIOROC 39
+recovered: a trigger-type combo (Simple trigger / 2 channels coincidence /
+Time window), a channel + mode pair for each of the two coincidence-input
+slots (T1 slot pre-defaults to "Individual trigger" on the existing
+`trigger_channel` field; the new T2 slot defaults to channel 5, mode
+"NORT1" -- i.e. unchanged legacy behavior until a user actually picks
+"Individual trigger" for it), a coincidence/time-window-width field, and a
+time-window trigger-count field. Deliberately always-visible rather than
+mirroring the vendor app's show/hide-by-mode behavior, to keep this first
+cut simple -- fields irrelevant to the selected mode are just unused.
+Wired into `AcquisitionConfig` construction in `operation()`. New test:
+`test_operation_wires_two_channel_coincidence_fields` in
+`tests/test_acquisition_gui.py`. Independently rendered the real window
+offscreen (`QT_QPA_PLATFORM=offscreen`) at three scroll positions and
+visually confirmed all seven new fields lay out cleanly with the existing
+form, no clipping or collision --
+`acquisition_window_controls{,2,3}.png` in this session's scratchpad.
+
+448/448 -> 450/450 offline tests pass under `.conda-radioroc`
+(`tools/check_development.py`): +1 from the mask-gap test, +1 from the new
+GUI test.
+
+**Priority 0's software side is now, as far as this session can take it,
+complete and tested**: the register contract is correct, the channel mask
+is closed for the one configuration the plint actually needs (genuine
+two-distinct-channel coincidence), and a student-operable GUI path exists
+to configure it. **What remains is exactly one thing, and it is
+irreducible**: per the directive, "simulated behavior alone cannot close
+this item." Nothing in this or the previous entry is a substitute for the
+designated operator running the bounded 5-case bench test with the
+now-known-correct recipe (`trigger_type=1`, `trigger_source=3` +
+`trigger_channel=A`, `trigger_source_2=3` + `trigger_channel_2=B`, mask
+unmasked automatically by the fix above). Not run this session -- no
+hardware access was taken, per the standing per-action authorization rule.
+
 ## RADIOROC 39 (continued) — Landed the delegated Priority 1 legend/log-scale fix
 
 Same session, in parallel with the Priority 0 work above (non-overlapping

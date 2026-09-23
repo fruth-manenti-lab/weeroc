@@ -294,6 +294,34 @@ class RadiorocCoreTests(unittest.TestCase):
                 trigger_source_2=3, trigger_channel_2=2,
             )
 
+    def test_unmask_channel_for_individual_coincidence_sets_all_three_levels(self) -> None:
+        # Which discriminator level (T1, T2, or TQ) "Individual trigger"
+        # mode taps is not recovered from disassembly (RADIOROC 39/40), so
+        # this unmasks all three for the named channel rather than guessing.
+        device = RadiorocDevice(RadiorocMemoryTransport(), dry_run=True)  # type: ignore[arg-type]
+        device.load_default_config()
+        # Force channel 5's mask bits to a known "everything masked out"
+        # state directly (write_register, not the multi-row write_fifo path
+        # prepare_trigger_masks uses -- select_i2c_rows returns copies, so a
+        # write_fifo call never updates find_i2c_row's own cache).
+        device.write_register(5, 6, "00000000")
+        row = device.find_i2c_row(5, 6).data
+        self.assertEqual(row[3], "0")  # T1 masked out
+        self.assertEqual(row[4], "0")  # T2 masked out
+        self.assertEqual(row[5], "0")  # TQ masked out
+
+        device.unmask_channel_for_individual_coincidence(5)
+        row = device.find_i2c_row(5, 6).data
+        self.assertEqual(row[3], "1")  # T1 mask
+        self.assertEqual(row[4], "1")  # T2 mask
+        self.assertEqual(row[5], "1")  # TQ mask
+
+        device.unmask_channel_for_individual_coincidence(5, enabled=False)
+        row = device.find_i2c_row(5, 6).data
+        self.assertEqual(row[3], "0")
+        self.assertEqual(row[4], "0")
+        self.assertEqual(row[5], "0")
+
 
 class RadiorocAnalysisTests(unittest.TestCase):
     def test_threshold_csv_and_summary(self) -> None:

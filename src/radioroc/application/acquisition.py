@@ -257,6 +257,15 @@ class AcquisitionJob:
             device.prepare_trigger_masks(t1=acquisition.t1, use_mask=acquisition.use_mask, use_ctest=False)
             if acquisition.use_mask:
                 device.set_mask_for_channel(acquisition.trigger_channel, t1=acquisition.t1, enabled=True)
+                # Genuine 2-distinct-channel coincidence (both coincidence-input
+                # slots set to "Individual trigger"): unmask both named channels
+                # at all three discriminator levels rather than guessing which
+                # one "Individual trigger" taps -- see
+                # RadiorocDevice.unmask_channel_for_individual_coincidence.
+                if acquisition.trigger_type == 1 and acquisition.trigger_source == 3 \
+                        and acquisition.trigger_source_2 == 3:
+                    device.unmask_channel_for_individual_coincidence(acquisition.trigger_channel)
+                    device.unmask_channel_for_individual_coincidence(acquisition.trigger_channel_2)
             if acquisition.threshold_dac is not None:
                 device.set_threshold_dac(acquisition.threshold_dac, t1=acquisition.t1)
             result.status = "running"

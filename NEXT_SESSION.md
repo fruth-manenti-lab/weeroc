@@ -1,139 +1,129 @@
-# RADIOROC 40 — Priority 0 continued: pin down "Individual trigger" discriminator level, then close the second-channel mask gap
+# RADIOROC 40 — Priority 0's last step: the operator bench test, then Priority 2/3
 
 **Read `PLINT_STUDENT_MVP_DIRECTIVE.md` in full before anything else** (still
 this week's priority document, not summarized completely below), then
 `AGENTS.md`, then this file in full, then `IMPLEMENTATION_STATUS.md`'s
-RADIOROC 39 entry (search "RADIOROC 39" — near the top of the file). Older
-status entries may be superseded; verify current source before treating a
-historical gap as live. The standing per-action hardware-authorization rule
-applies as always: a grant given in one conversation is for that
-conversation only. Coordinate any bench work through the operator directly.
+RADIOROC 39 entries (search "RADIOROC 39" — there are three, all near the
+top of the file, read all of them in order). Older status entries may be
+superseded; verify current source before treating a historical gap as
+live. The standing per-action hardware-authorization rule applies as
+always: a grant given in one conversation is for that conversation only.
+Coordinate any bench work through the operator directly.
 
 Continuing on `feat/daq-results-gui`. Working tree clean once this handoff
-is committed, other than whatever the still-running legend-fix delegation
-(see below) leaves staged.
+is committed.
 
-## What RADIOROC 39 did
+## What RADIOROC 39 did — Priority 0's software side is now complete
 
-Investigated Priority 0's core question with hard evidence, not
-assumption: does `radioroc_client.py`'s existing `trigger_type`/
-`trigger_source` implement genuine two-*distinct*-channel coincidence, or
-could one repeatedly-firing channel also satisfy it?
+Three things landed this session, all recorded in their own
+`IMPLEMENTATION_STATUS.md` entries (read those for full detail; this is a
+compressed summary):
 
-**Found and fixed a real, confirmed bug, not just an ambiguity.** Recovered
-the exact FPGA register layout for the ADC DAQ tab's coincidence trigger
-from `radioroc2UI.pyc`/`adc.pyc` disassembly (`marshal.loads` + `dis.dis`,
-per `AGENTS.md`) cross-checked against the vendor PDF guide's section 3.3.
-The vendor app has **two independent coincidence-input slots** (T1 and T2,
-each with its own mode combo — NORT1/NORT2/NORTQ/Individual channel/OR64 —
-and its own channel-number field), not the single shared `trigger_source`
-field `radioroc_client.py` exposed. `configure_adc_external_hold` had T2's
-slot **hardcoded** to NORT1 (an OR of every unmasked channel), with no way
-to name a second channel at all — meaning every prior `trigger_type=1`
-("2 channels coincidence") configuration actually built "channel A AND an
-OR of whatever's unmasked," not "channel A AND channel B." Fixed by adding
-`trigger_source_2`/`trigger_channel_2` to `configure_adc_external_hold`,
-`AcquisitionConfig`, and `HoldScanConfig`, writing FPGA words 23/30 exactly
-as the vendor app does, with a new regression test
-(`test_adc_two_channel_coincidence_bit_positions` in
-`tests/test_radioroc_core.py`) pinning the exact bit positions. Backward
-compatible: omitting the new fields reproduces the old (buggy) behavior
-bit-for-bit, so nothing existing changed silently. 448/448 offline tests
-pass under `.conda-radioroc` (`tools/check_development.py`).
+1. **Recovered the real ADC coincidence-trigger register contract** from
+   `radioroc2UI.pyc`/`adc.pyc` disassembly, cross-checked against the
+   vendor PDF guide, and **fixed a confirmed bug**: `configure_adc_
+   external_hold` only ever exposed one of the vendor app's two independent
+   coincidence-input slots, hardcoding the second to "OR of every unmasked
+   channel." So `trigger_type=1` ("2 channels coincidence") never actually
+   implemented two-*distinct*-channel coincidence, regardless of settings.
+   Added `trigger_source_2`/`trigger_channel_2` to `configure_adc_
+   external_hold`, `AcquisitionConfig`, `HoldScanConfig`, writing the
+   correct FPGA words (23/30). Backward compatible.
+2. **Closed the channel-mask gap** without guessing the one remaining
+   unknown (which discriminator level — T1, T2, or TQ — "Individual
+   trigger" mode actually taps; more disassembly hit a genuine dead end,
+   likely FPGA gateware this codebase's Python control-plane can't see).
+   Added `RadiorocDevice.unmask_channel_for_individual_coincidence`, which
+   defensively unmasks all three levels for one named channel — safe
+   because genuine 2-channel coincidence never runs an OR-tree mode on
+   either slot simultaneously, so this can't pull in an unintended channel.
+   Wired into both `application/acquisition.py` and `application/
+   hold_scan.py`.
+3. **Added `AcquisitionWindow` GUI controls** for trigger type, both
+   coincidence slots' channel + mode, window width, and time-window
+   trigger count — a student can now actually configure 2-channel
+   coincidence from the app, not just from a script. Independently
+   rendered and visually inspected offscreen.
 
-**Read the full RADIOROC 39 entry for the complete evidence trail** — this
-summary omits the specific PDF section, `.pyc` function names, and exact
-bit offsets recorded there.
+450/450 offline tests pass under `.conda-radioroc`
+(`tools/check_development.py`).
 
-## What's still open — this session's job
+**What remains for Priority 0 is exactly one thing, and it's the one thing
+no amount of further disassembly or code review can substitute for**: per
+the directive, "simulated behavior alone cannot close this item." Every
+other part of Priority 0's software contract is done and tested.
 
-RADIOROC 39 explicitly left three things unresolved, in dependency order:
+## This session's job: the operator bench test
 
-### 1. Pin down what discriminator level "Individual trigger" mode uses
+1. **Get the operator's per-action authorization first**, per the standing
+   rule — a grant from any earlier conversation does not carry over.
+   Coordinate timing; do not launch or close another session's apps or
+   interfere with an active operator.
+2. **Design the 5-case test before touching hardware**, per the directive
+   (specify expected accept/reject outcomes and timing tolerances first):
+   - (a) One selected channel pulsing alone; repeated pulses on that same
+     channel — must NOT trigger a coincidence accept.
+   - (b) Two distinct selected channels, pulses inside the coincidence
+     window — must accept.
+   - (c) Two channels, pulses outside the window (with timing margin
+     appropriate to the hardware) — must NOT accept.
+   - (d) An excluded (unselected) channel plus representative pairs across
+     the selected channel set.
+   - (e) Known, distinguishable amplitudes on multiple channels — confirms
+     event/channel association is correct (not just matching array
+     lengths), including channels that stayed below threshold still being
+     recorded.
+   Use the now-known-correct configuration recipe: `trigger_type=1`,
+   `trigger_source=3` + `trigger_channel=A`, `trigger_source_2=3` +
+   `trigger_channel_2=B`, `use_mask=True` (the mask fix above then unmasks
+   both A and B automatically). Use the new `AcquisitionWindow` controls
+   directly rather than a script, since that's the actual student path and
+   is worth exercising for real.
+3. **Do not interpret uncontrolled dark-count activity as proof of
+   coincidence semantics** — use suitable controlled inputs (pulser/
+   injection per the directive's equipment note) and check capture/hold
+   timing as well as the trigger decision.
+4. **If the board can't implement the requested multiplicity as expected**,
+   surface it promptly with evidence and propose concrete alternatives
+   (a different supported trigger mode; external coincidence hardware; a
+   documented offline-cuts scheme with explicit rate/dead-time caveats) —
+   do not silently substitute one or guess a register write.
+5. Record the outcome — accept/reject results per case, any timing
+   findings, and whether the "unmask all three levels" defensive choice
+   from RADIOROC 39 turned out to matter (e.g., did an "Individual trigger"
+   config only work once a specific level was unmasked, which would
+   actually answer the open discriminator-level question after the fact) —
+   in a fresh `IMPLEMENTATION_STATUS.md` entry, closing Priority 0 for real
+   if it passes, or documenting the blocker precisely if it doesn't.
 
-The vendor's `comboBox_adcT1`/`comboBox_adcT2` items are NORT1/NORT2/NORTQ
-(each explicitly a T1, T2, or TQ *level*) plus a single undifferentiated
-"Individual trigger" item — no "Individual T1" vs "Individual T2". So when
-a slot is set to "Individual trigger" for a named channel, it's genuinely
-unknown from the disassembly gathered so far whether that channel's T1 or
-T2 (or TQ) discriminator output is what actually feeds the coincidence
-logic, or whether it instead routes through whatever the ASIC's separate,
-already-recovered `selTrig`/"Main tab" trigger-selection register (`add=65,
-subadd=12`, RADIOROC 30) is currently configured to. This matters because
-the fix in (2) below needs to know which per-channel mask bit (`t1=True`
-selects the T1 mask bit, `t1=False` selects T2, per `set_mask_for_channel`)
-to clear for the second channel — get this wrong and the second channel's
-discriminator stays masked out even though the register-level config in
-RADIOROC 39 looks correct, silently reproducing the same "coincidence that
-isn't" bug in a new place.
+## Once Priority 0 is physically closed: what's next
 
-**Where to look**: more disassembly of `adc.pyc`/`radioroc2UI.pyc` around
-whatever function actually reads `comboBox_adcT1`/`comboBox_adcT2`'s
-"Individual trigger" selection and drives the ASIC/FPGA trigger mux — the
-functions already checked (`get_acq_setup`, `start_adc`) don't show this
-because they only build the register words, not the ASIC-side mux/selTrig
-interaction. Also check `generated_notes/*.txt` for anything from a prior
-session that might already cover FPGA trigger-mux logic before
-re-disassembling from scratch. If disassembly genuinely can't resolve it,
-the fallback is asking the operator to drive the real vendor Windows app
-(already installed per `local_artifacts/downloads/setup_Radioroc2UI_2_2_0_5.exe`,
-if a Windows machine is available) and observe which selTrig/level setting
-"Individual trigger" mode actually respects — do not guess.
+Per the directive, Priorities 2 and 3 are **not started at all** yet and
+should not wait on a second Priority-0-adjacent session if bench time with
+the operator becomes the bottleneck — offline-safe work can proceed in
+parallel:
 
-### 2. Close the second-channel mask gap, once (1) is answered
+- **Priority 2 (calibration procedure)**: pedestals/noise per channel
+  (dead/noisy/saturated identification), relative gain characterization,
+  threshold alignment, hold/conversion timing suitable for the now-settled
+  trigger setup, saved/attributable calibration. Reuse F02–F10 and existing
+  calibration/scan jobs — this is about defining and documenting the
+  *procedure*, not new hardware primitives, unless a real gap turns up.
+- **Priority 3 (provenance/trustworthiness)**: re-check (don't assume) that
+  the current CSV/manifest schema actually satisfies: event IDs unique
+  within a run including appended segments, host-receipt vs. physical-event
+  timestamp distinction, retaining below-threshold amplitudes for all
+  selected channels, no irreversible cuts in saved data. This is a review
+  task against existing code (`radioroc/data/acquisition.py`,
+  `AcquisitionRunWriter`), not necessarily new implementation — read it
+  first and report findings before changing anything.
+- **Priority 1 leftovers**: an individual-event amplitude view distinct
+  from the histogram (not built yet); the M2 raw/scaled units check is
+  folded into the Priority 3 review above since they overlap.
 
-`application/acquisition.py` and `application/hold_scan.py` currently call
-`device.set_mask_for_channel(trigger_channel, t1=..., enabled=True)` for
-only the single `trigger_channel`, never for `trigger_channel_2`. This is
-mechanically a one-line addition per file (mirroring the existing call,
-conditioned on `trigger_source_2 == 3`) — not blocked by any *register*
-uncertainty (RADIOROC 39 corrected an earlier draft's mistaken claim that
-this depended on the RADIOROC 30/34 `EN_th1`/`EN_th2`/`EN_thQ` ASIC-wide
-enable-bit question at `(65, 7)`; that's a different, unrelated register).
-It's blocked purely on knowing which `t1` value to pass for the second
-channel, per (1) above.
-
-### 3. Add `AcquisitionWindow` coincidence controls
-
-`src/radioroc/gui/acquisition_window.py` still only ever constructs
-`AcquisitionConfig` with `trigger_type=0` ("Simple trigger") — no combo for
-trigger type, no per-slot mode/channel fields, no window-width or
-`adc_nb_trig` inputs. Once (1) and (2) are settled, this is bounded,
-well-specified UI work (mirror the vendor's own ADC DAQ tab layout
-recovered in RADIOROC 39: a trigger-type combo, two channel-number +
-mode-combo pairs for T1/T2, a window-width field, an N-triggers field) —
-a good candidate to delegate to a subagent with the settled contract, per
-`AGENTS.md`'s delegation preference. Do not build this against the
-still-incomplete backend from (2) — the GUI would just surface the same
-gap with a nicer control.
-
-### 4. The physical demonstration itself
-
-Per the directive, "simulated behavior alone cannot close this item." Once
-(1)-(3) are done, prepare (do not run without the operator) the bounded
-5-case test from `PLINT_STUDENT_MVP_DIRECTIVE.md` Priority 0 using the
-now-known-correct recipe: `trigger_type=1`, `trigger_source=3` +
-`trigger_channel=A`, `trigger_source_2=3` + `trigger_channel_2=B`, both A
-and B unmasked. Specify expected accept/reject outcomes and timing
-tolerances before proposing to measure anything, per the directive. This
-still needs the designated operator at the bench, per-action authorized,
-same as always — not run this session or the last one.
-
-## Already landed this session: the delegated Priority 1 legend/log-scale fix
-
-RADIOROC 38 found and documented (but did not fix) a real, confirmed
-usability bug: all four plot windows called `axes.legend(fontsize=8)` with
-no `loc=`. RADIOROC 39 delegated the fix to a subagent (bounded to the four
-GUI files only), reviewed the diff line-by-line, independently re-rendered
-and visually inspected two of the affected windows, and re-ran the full
-suite itself rather than trusting the agent's reported count (448/448).
-See the "RADIOROC 39 (continued) — Landed the delegated Priority 1
-legend/log-scale fix" entry in `IMPLEMENTATION_STATUS.md` for the full
-diff summary and verification. Nothing further needed here unless new
-issues surface during later visual checks. One follow-on worth a look
-before Priority 4's student rehearsal: these windows default to
-`resize(1180, 820)`, which may exceed a smaller laptop's usable screen
-height — not yet checked against the actual student machine.
+Priority 4 (stabilization + student rehearsal) is the final gate and
+should not be started until at least Priority 0 is physically closed and
+some calibration procedure exists for Priority 2.
 
 ## Standing discipline (unchanged, all still applies)
 
@@ -147,17 +137,19 @@ than truncating). A self-created venv without the `[gui]` extra will
 silently skip every GUI test and look green when it isn't (RADIOROC 36).
 Delegate bounded, well-specified implementation/test work to subagents per
 `AGENTS.md`; keep shared contracts, uncertain hardware/register reasoning,
-and integration for the lead — this session's register-layout recovery and
-the `configure_adc_external_hold` fix were kept with the lead for exactly
-that reason. When delegating to an isolated worktree or a parallel
-subagent, review the actual diff line-by-line against the contract before
-merging, and go beyond the delegated agent's own test count with at least
-one real check of your own.
+and integration for the lead. When delegating, review the actual diff
+line-by-line against the contract before merging (RADIOROC 39's legend-fix
+delegation is the model: bounded to non-overlapping files, reviewed
+line-by-line, independently re-rendered and re-tested rather than trusting
+the agent's own report), and go beyond the delegated agent's own test count
+with at least one real check of your own.
 
 `main` has the M3 milestone (PR #1, squash-merged). Feature work continues
 on `feat/daq-results-gui`; when this branch's scope feels like a complete
 stage, the same PR-then-branch pattern from RADIOROC 37 is the model to
 repeat — raise the timing with the operator rather than deciding alone.
+Given Priority 0's software side is now essentially done, this may be a
+natural point to raise that question once the bench test above lands.
 
 `gh` is installed and authenticated — use it (`gh run list --branch
 <branch>`, `gh run view <id>`, `gh run view --log-failed`) to check CI
@@ -177,34 +169,12 @@ and the next action. Separate software completion from equipment/operator
 dependencies. Record actual checks and remaining limitations in a fresh
 `IMPLEMENTATION_STATUS.md` entry and `NEXT_SESSION.md`, retaining the
 session-numbering convention, rather than copying aspirational acceptance
-claims into the log — this session's own correction of its first-draft
-status entry (see "channel-mask gap" in RADIOROC 39) is the concrete
-example to hold the next entry to the same standard.
+claims into the log.
 
-## Other directive priorities (unchanged from RADIOROC 39's handoff; read the directive for full detail)
+## Deferred, not dropped
 
-- **Priority 1**: mostly landed (channel-labelled HG/LG spectra, channel
-  selection/plot controls, responsive progress/cancellation, saved-run
-  reopening). Still open: an individual-event amplitude view distinct from
-  the histogram; re-checking (not assuming) that the current CSV/manifest
-  schema satisfies M2's raw/scaled encoding and units requirements; the
-  legend/log-scale bug above.
-- **Priority 2**: an end-to-end calibration procedure for the student
-  (pedestals/noise per channel, dead/noisy/saturated identification,
-  relative gain characterization, threshold alignment, hold/conversion
-  timing suitable for the actual trigger setup once Priority 0 fully
-  resolves it, saved/attributable calibration). Not started this session
-  or last.
-- **Priority 3**: run provenance and data-trustworthiness requirements —
-  event IDs unique within a run including appended segments, distinguishing
-  host-receipt from physical-event timestamps, retaining below-threshold
-  amplitudes for all selected channels, no irreversible cuts in saved data.
-  Not re-reviewed this session or last.
-- **Priority 4**: stabilization and an actual rehearsal with the student on
-  the student's machine — the final gate, not a starting point.
-
-Do not treat Priority 1-4 as blocked on Priority 0's full physical
-resolution — per the directive, work that doesn't touch
-`radioroc_client.py`'s trigger primitives or `AcquisitionConfig`/
-`HoldScanConfig` can proceed in parallel, as it did this session with the
-legend-fix delegation.
+Broad Windows screen-by-screen parity, unrelated trigger combinations,
+cosmetic refinements, and general macOS/Debian/Ubuntu release work remain
+explicitly deferred by the directive until after this checkpoint. None of
+F01–F17/M0–M5 are deleted by this reprioritization. F15/A7585 remains
+permanently out of scope.
