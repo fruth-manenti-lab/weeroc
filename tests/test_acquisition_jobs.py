@@ -352,7 +352,17 @@ class AcquisitionJobTests(unittest.TestCase):
     def test_invalid_configuration_has_no_hardware_or_files(self):
         for changes in ({"batches": 0}, {"acquisitions_per_batch": 0}, {"acquisitions_per_batch": 256},
                         {"adc_window_ns": 3}, {"timeout_s": 0}, {"trigger_channel": 999},
-                        {"channels": [70]}, {"hold_delay_ns": 3}, {"start_batch": -1}):
+                        {"channels": [70]}, {"hold_delay_ns": 3}, {"start_batch": -1},
+                        # A real bug found live (RADIOROC 40): a trigger channel
+                        # absent from `channels` used to pass validation, then
+                        # silently never got its amplitude written per accepted
+                        # event -- application/acquisition.py unconditionally
+                        # unmasks trigger_channel, and for a genuine 2-channel
+                        # coincidence (trigger_type=1, both sources=3) also
+                        # unmasks trigger_channel_2, but only ever writes rows
+                        # for channels in `channels`.
+                        {"trigger_channel": 7},  # channels=[4], trigger_channel not among them
+                        {"trigger_type": 1, "trigger_source_2": 3, "trigger_channel_2": 7}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 AcquisitionJob().run(self.device, AcquisitionJobConfig(replace(self.acquisition, **changes)))
         self.assertEqual(self.transport.trace, [])

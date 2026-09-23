@@ -1,5 +1,73 @@
 # Implementation status
 
+## RADIOROC 40 (continued) — Found and fixed a real silent per-event data-loss bug: trigger channel(s) not required to be among saved channels
+
+A second delegated defect-hunt pass (scoped to the GUI panel/window files
+the first pass didn't cover: `channel_config_panel.py`, `connection_panel.py`,
+`threshold_calibration_panel.py`, `probes_masks_panel.py`,
+`raw_register_panel.py`, `input_dac_grid_panel.py`, `main_panel.py`,
+`hint_bar.py`, and the five scan windows) found one real, severe,
+independently-verified finding, ruled out several plausible-looking
+candidates (a structurally-identical close-hang pattern in the standalone
+scan windows' own `closeEvent`, confirmed unreachable through the real
+`MainWindow`-driven app; a `RawRegisterPanel` busy-state ambiguity,
+confirmed to be at worst a display-timing delay, not a wrong result), and
+reported nothing else -- an honest, mostly-empty second pass, not padded.
+
+**Defect** (severity: high -- silent per-event data loss, directly
+contradicts Priority 0/3's "each accepted event must retain the signal
+amplitudes on all selected SiPMs"): `AcquisitionConfig.validate()`
+(`radioroc_client.py`) never checked that `trigger_channel`/
+`trigger_channel_2` were members of `channels` (the channels whose
+amplitudes actually get saved). `AcquisitionWindow`'s own defaults already
+demonstrate the gap: `channel_select` defaults to `(4,)` while
+`trigger_channel_2` defaults to `5` -- a student who switches Trigger type
+to "2 channels coincidence" with Trigger channel/source = 4/Individual and
+Trigger channel 2/source 2 = 5/Individual, but leaves the channel-selection
+grid at its own default, gets a hardware run that correctly triggers on
+the real ch4-AND-ch5 coincidence (confirmed: `application/acquisition.py`
+unconditionally unmasks `trigger_channel`, and for a genuine 2-channel
+coincidence also unmasks `trigger_channel_2`) but then writes per-event
+rows only `for channel in acquisition.channels` -- channel 5's amplitude,
+despite being one of the two channels whose coincidence produced every
+accepted event, is silently absent from `events.csv`, with no warning
+anywhere. Exactly the scenario Priority 0's own test plan named ("acquisition
+of channels that did not cross threshold") and exactly what Priority 3
+requires retained.
+
+**Verified independently before fixing**: read the actual write path
+(`application/acquisition.py` lines ~267-309) and `AcquisitionConfig.
+validate()` directly, confirmed no cross-check existed anywhere in the
+stack, confirmed the existing coincidence-wiring test
+(`test_operation_wires_two_channel_coincidence_fields`) happens to always
+set matching channels so it could never have caught this.
+
+**Fix**: two narrowly-scoped checks added to `AcquisitionConfig.validate()`,
+each tied to an actual evidenced write/unmask condition, not a blanket
+rule invented past what's confirmed:
+- `trigger_channel` must always be in `channels` (matches
+  `set_mask_for_channel(acquisition.trigger_channel, ...)` running
+  unconditionally regardless of trigger_type).
+- `trigger_channel_2` must be in `channels` specifically when
+  `trigger_type == 1 and trigger_source == 3 and trigger_source_2 == 3`
+  (mirrors `application/acquisition.py`'s own exact gating condition for a
+  genuine 2-distinct-channel coincidence -- the one case where
+  `trigger_channel_2` names a second real trigger channel, per that
+  dataclass's own docstring).
+- Deliberately did **not** extend the same check to `HoldScanConfig`,
+  which has structurally similar `trigger_channel`/`trigger_channel_2`/
+  `channels` fields -- that job's writer code wasn't audited this
+  session, so applying the same rule there without evidence would be
+  guessing, not a verified fix; flagged for a future session (see
+  `NEXT_SESSION.md`), not silently left as an assumed-safe gap.
+- Two regression subTest cases added to the existing
+  `test_invalid_configuration_has_no_hardware_or_files` in
+  `tests/test_acquisition_jobs.py` (not a new test function -- this is
+  exactly the test that already owns "configurations that must be
+  rejected before any hardware/file access").
+
+461/461 offline tests pass under `.conda-radioroc` (`tools/check_development.py`).
+
 ## RADIOROC 40 — Finalized Step 3, built Step 6's calibration-record artifact
 
 Operator was away from the bench (remote via AnyDesk; PSU channels 1/3 and

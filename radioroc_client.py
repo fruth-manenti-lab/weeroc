@@ -500,6 +500,16 @@ class AcquisitionConfig:
         if len(set(self.channels)) != len(self.channels):
             raise ValueError("channels must be unique")
         validate_channel(self.trigger_channel)
+        if self.trigger_channel not in self.channels:
+            # application/acquisition.py unconditionally unmasks trigger_channel
+            # (set_mask_for_channel) regardless of trigger_type/trigger_source,
+            # and only writes per-event HG/LG rows for channels in self.channels
+            # -- a trigger channel absent from channels would trigger real
+            # events whose own amplitude is then silently never saved.
+            raise ValueError(
+                "trigger_channel must be one of channels, or its amplitude will never "
+                "be saved for any accepted event"
+            )
         if self.threshold_dac is not None and not 0 <= self.threshold_dac <= 1023:
             raise ValueError("threshold_dac must be in range 0..1023")
         if self.hold_delay_ns < 0 or self.hold_delay_ns % 5 != 0:
@@ -526,6 +536,18 @@ class AcquisitionConfig:
         if not 0 <= self.trigger_source_2 <= 7:
             raise ValueError("trigger_source_2 must be in range 0..7")
         validate_channel(self.trigger_channel_2)
+        if (self.trigger_type == 1 and self.trigger_source == 3 and self.trigger_source_2 == 3
+                and self.trigger_channel_2 not in self.channels):
+            # Mirrors application/acquisition.py's own gating condition for a
+            # genuine 2-distinct-channel individual coincidence (the only mode
+            # where trigger_channel_2 names a second real trigger channel,
+            # which that same code then unmasks and expects to be one of the
+            # channels whose amplitude gets saved per accepted event).
+            raise ValueError(
+                "trigger_channel_2 must be one of channels for a 2-channel individual "
+                "coincidence trigger, or its amplitude will never be saved for any "
+                "accepted event"
+            )
         if self.trigger_source_2 == 3 and self.peak_sensing:
             raise ValueError(
                 "trigger_source_2 == 3 (a second individual coincidence channel) and "

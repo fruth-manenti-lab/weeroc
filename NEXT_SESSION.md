@@ -53,10 +53,23 @@ as three separate commits:
    for the lead's attention (not a live bug, verified both callers already
    turn it into a visible fault -- see the third RADIOROC 40
    "(continued)" entry).
+7. **Found and fixed a real, high-severity silent data-loss bug**: a
+   second defect-hunt pass (GUI panel/window files) found that
+   `AcquisitionConfig.validate()` never required `trigger_channel`/
+   `trigger_channel_2` to be among the saved `channels` -- a student
+   running 2-channel coincidence whose channel-selection grid didn't
+   happen to include both trigger channels (exactly the GUI's own default
+   state: `channel_select` defaults to channel 4 alone, `trigger_channel_2`
+   defaults to 5) got a hardware-correct trigger but silently lost that
+   second channel's amplitude from every accepted event. Fixed with two
+   narrowly-scoped, evidence-tied validation checks; regression tests
+   added. **Deliberately not extended to `HoldScanConfig`**, which has the
+   same-shaped `trigger_channel`/`trigger_channel_2`/`channels` fields but
+   wasn't audited this session -- see this session's job item 5 below.
 
 461/461 offline tests pass under `.conda-radioroc` (`tools/check_development.py`),
 confirmed clean after every change, run as one combined suite before each
-commit. All three commits are already on `feat/daq-results-gui`, nothing
+commit. All four commits are already on `feat/daq-results-gui`, nothing
 pushed.
 
 **Every delegated result this session was independently verified before
@@ -105,6 +118,13 @@ drifted to `0` (not `5`) partway through RADIOROC 39 -- check
    raises instead; both real callers already handle that safely). Not
    worth doing under deadline pressure unless it's blocking something
    else -- it was flagged, not queued.
+5. **Check `HoldScanConfig` for the same trigger-channel/channels gap**
+   just fixed in `AcquisitionConfig`: does `HoldScanJob`'s writer path
+   also only record data for channels in `self.channels`, and would a
+   `trigger_channel`/`trigger_channel_2` outside that set similarly lose
+   data silently? Read `application/hold_scan.py`'s actual writer code
+   before assuming either way (the field shapes are identical, but the
+   semantics of what gets recorded per hold-delay point may not be).
 
 ## Standing discipline (unchanged, all still applies)
 
