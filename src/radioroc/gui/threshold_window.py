@@ -703,7 +703,7 @@ class ThresholdWindow(QMainWindow):
         if rows:
             for channel in (name for name in rows[0] if name != "DAC"):
                 self.axes.plot([row["DAC"] for row in rows], [row[channel] for row in rows],
-                               marker=".", linewidth=1.5, label=channel)
+                               marker=".", linewidth=1.5, label=channel, drawstyle="steps-post")
             self.axes.legend()
         self.canvas.draw_idle()
 
