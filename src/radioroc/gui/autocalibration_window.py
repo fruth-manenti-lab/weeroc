@@ -489,7 +489,12 @@ class AutocalibrationWindow(QMainWindow):
                 key = f"ch{channel}"
                 ys = [row.get(key) for row in rows]
                 self.axes.plot(xs, ys, marker=".", linewidth=1.2, label=f"ch{channel}")
-            self.axes.legend(fontsize=8)
+            # Fixed outside-axes placement instead of loc="best": "best"
+            # re-picks a position from the current data shape on every
+            # redraw, which visibly jumps around during a live scan and can
+            # land the legend box on top of the title above it.
+            self.axes.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0),
+                             borderaxespad=0.0)
         self.canvas.draw_idle()
 
     def choose_output(self):

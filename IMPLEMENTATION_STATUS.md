@@ -1,5 +1,196 @@
 # Implementation status
 
+## RADIOROC 39 (continued) — Landed the delegated Priority 1 legend/log-scale fix
+
+Same session, in parallel with the Priority 0 work above (non-overlapping
+files, per `AGENTS.md`). Delegated RADIOROC 38's already-diagnosed bug
+(all four plot windows' `axes.legend(fontsize=8)` with no `loc`, causing
+legend "jumping" between redraws and a title/legend collision plus
+unreadable overlapping log-scale tick labels on the spectra plot) to a
+subagent, scoped to only `src/radioroc/gui/{acquisition,autocalibration,
+scurve,hold_scan}_window.py`.
+
+**Reviewed the actual diff line-by-line, not just the reported test
+count**: all four files now anchor the legend outside the axes
+(`loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0.0`) instead
+of the data-dependent `"best"`, identically in all four -- confirmed this
+can't collide with a title placed above the axes, and no longer changes
+position between redraws since it no longer depends on data shape.
+`acquisition_window.py`'s histogram (the only one of the four with a Log Y
+control) additionally sets `axes.yaxis.set_minor_formatter(NullFormatter())`
+right after `set_yscale`, which keeps clean major decade labels
+(`10^0`, `10^1`, ...) while suppressing the crowded auto-labelled minor
+ticks (`2x10^0`, `3x10^0`, ...) that caused the reported clutter when the
+data spans under about one decade. All four windows already use
+`Figure(..., layout="constrained")`, which reallocates axes width for the
+new outside-anchored legend automatically -- no separate layout change was
+needed, and the agent correctly did not invent one.
+
+**Independently verified beyond the agent's own report**, per `AGENTS.md`:
+opened both PNGs the agent rendered from the real window classes (not a
+prototype) -- `/tmp/real_acquisition_window.png` (3-channel synthetic
+Gaussian HG spectrum, Log Y on) and `/tmp/real_scurve_window.png`
+(8-channel synthetic S-curve) -- and visually confirmed the legend sits
+cleanly outside the plot, no title collision, a single clean `10^0` label
+with no clutter, and the plot area is still fully usable with 8 legend
+entries. Re-ran the full suite myself afterward rather than trusting the
+agent's reported count: 448/448 under `.conda-radioroc`
+(`tools/check_development.py`, `MPLBACKEND=Agg QT_QPA_PLATFORM=offscreen`).
+
+One unrelated observation the agent surfaced but correctly left
+unchanged (outside this bounded bug's scope): these windows default to
+`resize(1180, 820)`, and 820px height slightly exceeds a 1366x768 laptop
+screen's usable height after the OS taskbar/title bar. Worth a look before
+the student rehearsal (Priority 4) if the student's actual machine has a
+smaller display.
+
+This closes RADIOROC 38's "not fixed in this entry" item and Priority 1's
+"a real visual check confirms the screen is usable" acceptance criterion
+for this specific defect.
+
+## RADIOROC 39 — Priority 0: recovered the real ADC coincidence-trigger register contract and fixed a confirmed 2-channel-coincidence gap in `configure_adc_external_hold`
+
+Per `PLINT_STUDENT_MVP_DIRECTIVE.md` Priority 0 and `NEXT_SESSION.md`'s
+handoff. The plint experiment's trigger is "two distinct selected channels
+above threshold within a coincidence window." It was genuinely unknown
+whether `radioroc_client.py`'s existing `trigger_type`/`trigger_source`
+fields (already used by `AcquisitionJob`/`HoldScanJob`, default
+`trigger_source=3`, never previously checked against this distinction)
+implement that, or something weaker like "N total threshold crossings from
+anywhere" that a single channel firing repeatedly could also satisfy.
+
+**Evidence gathered, in order, per `AGENTS.md`'s local-vendor-evidence-first
+rule:**
+
+1. `local_artifacts/downloads/Radioroc2 User Guide - 2_1_0_6(0125).pdf`
+   (`pdftotext -layout`), section 3.3 "Data acquisition": the ADC DAQ tab's
+   trigger-type combo box offers "Simple trigger," "coincidence between two
+   selected triggers," or "N triggers in a time window." Figure 25's
+   caption explicitly describes coincidence "between channel 0 and channel
+   1" — i.e., named channels, not an abstract source code. This confirms
+   the *documented* feature is a real per-channel coincidence, but the PDF
+   doesn't show the underlying widget/register wiring.
+2. `local_artifacts/extracted/RadiorocUI_2_2_0_5.exe_extracted/PYZ-00.pyz_
+   extracted/radioroc2UI.pyc`, disassembled directly with
+   `marshal.loads(data[16:])` + `dis.dis()` (genuine CPython 3.13 bytecode,
+   per `AGENTS.md`). `Ui_MainWindow.retranslateUi`'s `setItemText` calls
+   give the exact combo-box index→label mapping:
+   - `comboBox_adcTriggerType`: `0`="Simple trigger", `1`="2 channels
+     coincidence", `2`="Time window" (only 3 of the 4 values the client's
+     `0..3` range check allows are ever used by the vendor UI).
+   - `comboBox_adcT1` **and** `comboBox_adcT2` (two separate, independently
+     populated combo boxes — not one shared "trigger source" field):
+     `0`="NORT1", `1`="NORT2", `2`="NORTQ", `3`="Individual trigger",
+     `4`="OR64 (FPGA)". Each has its own paired channel-number field
+     (`lineEdit_T1` / `lineEdit_T2`), used only when that combo is
+     "Individual trigger."
+3. `adc.pyc`'s `start_adc` function (the actual register-write path, not
+   just the human-readable summary in `get_acq_setup`), disassembled the
+   same way. This nails down the exact bit layout the vendor app writes:
+   - FPGA word 22 = T1's channel number (`00` + 6 bits), written only when
+     `comboBox_adcT1.currentIndex() == 3`, else zeroed.
+   - FPGA word 23 = T2's channel number (`00` + 6 bits), written only when
+     `comboBox_adcT2.currentIndex() == 3`, else zeroed. (This register is
+     reused for an unrelated purpose when the vendor's separate
+     `checkBox_peakSensing` path is active — see below.)
+   - FPGA word 24 = coincidence/time window width in units of 5 ns. Matches
+     what `radioroc_client.py` already implemented correctly.
+   - FPGA word 25 = `T1_mode(3 bits) + rstn_manual(1) + ext_hold(1) +
+     ext_trig(1) + trigger_type(2 bits)`.
+   - FPGA word 27 = time-window trigger count (`adc_nb_trig`). Matches.
+   - FPGA word 30 = `hold_delay_high_nibble(4 bits) + T2_mode(3 bits)`
+     (7 meaningful bits; the vendor's own layout, not a bug in ours).
+
+**The confirmed bug**: `radioroc_client.py`'s `configure_adc_external_hold`
+(and the `AcquisitionConfig`/`HoldScanConfig` dataclasses feeding it)
+implemented word 22/24/25/27 correctly but had **no T2-slot fields at
+all** — word 23 was hardcoded to `"00000000"` (or an unrelated
+peak-sensing value) and word 30's low 3 bits were hardcoded to
+`bits(0, 3)` (`"000"` = NORT1). This means every acquisition run to date
+that requested `trigger_type=1` ("2 channels coincidence") actually
+configured: T1 = whatever `trigger_source`/`trigger_channel` said, **AND
+T2 = permanently "NORT1," an OR of every currently unmasked channel's T1
+output** — never a second, distinct, named channel. Worse, `acquisition.py`
+and `hold_scan.py` only ever call `device.set_mask_for_channel(...,
+enabled=True)` for the single `trigger_channel` (see `use_mask` handling in
+both application modules) — no code path unmasks a second channel at all.
+So even independent of the register gap, an OR-mode T2 input would
+currently degenerate to exactly the same single unmasked channel as T1,
+making the "coincidence" trivially self-satisfied by one channel's one
+threshold crossing. This is exactly the ambiguity the directive asked to
+resolve, now confirmed by disassembly rather than assumed — and it turns
+out to be *worse* than "ambiguous": as wired, `trigger_type=1` could not
+have implemented real 2-channel coincidence at all, regardless of what
+`trigger_source` was set to.
+
+**Fixed this session** (the part with a certain, disassembly-backed
+answer): added `trigger_source_2: int` and `trigger_channel_2: int` to
+`configure_adc_external_hold`, `AcquisitionConfig`, and `HoldScanConfig`,
+writing them to words 23/30 exactly as the vendor app does, with the same
+validation ranges as the existing `trigger_source`/`trigger_channel`. A new
+regression test, `test_adc_two_channel_coincidence_bit_positions` in
+`tests/test_radioroc_core.py`, exercises the exact bit positions on all
+four affected words plus the unchanged default (backward-compatible)
+behavior when the new fields are omitted. Also added a `ValueError` for
+combining `trigger_source_2 == 3` with `peak_sensing=True`, since both
+write FPGA word 23 and the vendor's own recovered layout gives no evidence
+either combination is meaningful — refusing loudly rather than guessing a
+priority between them. `application/acquisition.py` and
+`application/hold_scan.py` now pass these fields through from their
+configs. Independently verified: 448/448 under `.conda-radioroc`
+(`tools/check_development.py`).
+
+**Not fixed this session, and explicitly still open** (per the directive's
+"do not guess register writes to meet the deadline"):
+
+- **The channel-mask gap.** `set_mask_for_channel` is still only ever
+  called for the single `trigger_channel` in both application modules
+  (mechanically, adding a second `set_mask_for_channel(trigger_channel_2,
+  t1=..., enabled=True)` call when `trigger_source_2 == 3` is simple, and
+  the per-channel mask register itself, `(channel, subadd=6)`, is already
+  well-understood and unrelated to the separate `EN_th1`/`EN_th2`/`EN_thQ`
+  ASIC-wide enable bits at `(65, 7)` that RADIOROC 30/34 actually left
+  open — that was a different register and this entry's first draft
+  conflated the two; corrected here). The real open question is which
+  discriminator *level* (T1 or T2) "Individual trigger" mode taps for a
+  given slot: the vendor's `comboBox_adcT1`/`comboBox_adcT2` items have no
+  separate "Individual T1" vs "Individual T2" choice, so it's unconfirmed
+  whether that path routes through the ASIC-wide `selTrig` (Main tab)
+  setting, through the existing `t1: bool` config field applied
+  identically to both channels, or something else — nothing in the
+  disassembly captured so far pins this down. **This means a real
+  acquisition job run today, even after this fix, still cannot be trusted
+  to correctly unmask a second channel** — the register-level contract is
+  now correct and tested, but the full "two distinct channels actually
+  both contribute to the trigger" contract is not yet closed end-to-end.
+- **No GUI controls.** `AcquisitionWindow` (`src/radioroc/gui/
+  acquisition_window.py`) does not expose `trigger_type`, either T1/T2
+  slot's mode or channel, window width, or `adc_nb_trig` at all today — it
+  only ever constructs `AcquisitionConfig` with defaults (`trigger_type=0`,
+  "Simple trigger"). A student cannot configure coincidence mode from the
+  app yet. Adding these controls is bounded, well-specified follow-up work
+  now that the underlying contract is settled — a good candidate to
+  delegate once the mask gap above is also resolved (so the GUI isn't
+  built against a still-incomplete backend contract).
+- **The physical demonstration itself.** Per the directive, "simulated
+  behavior alone cannot close this item." The bounded 5-case test
+  (repeated single-channel pulses; two distinct channels in-window; two
+  channels outside the window; an excluded channel plus representative
+  pairs; distinguishable amplitudes confirming event/channel association)
+  still needs the designated operator at the bench, using the
+  now-known-correct recipe: `trigger_type=1`, `trigger_source=3` +
+  `trigger_channel=A`, `trigger_source_2=3` + `trigger_channel_2=B`, and
+  (once the mask gap is closed) both A and B unmasked. Not run this
+  session — no hardware access was taken, per the standing per-action
+  authorization rule.
+
+**Next bounded task**: pin down what discriminator level "Individual
+trigger" mode actually uses (more disassembly, or ask the operator to
+check the vendor app's own behavior/tooltips directly), then close the
+channel-mask gap for `trigger_channel_2` with that answer in hand, then
+add `AcquisitionWindow` coincidence controls, then request the operator
+for the bench test above.
+
 ## RADIOROC 38 (continued) — Real, systemic plot-usability bug found from a live screenshot: legend placement and log-scale readability
 
 Same conversation, right at handoff. The operator screenshotted the

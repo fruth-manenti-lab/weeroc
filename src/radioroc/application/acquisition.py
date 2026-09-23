@@ -270,7 +270,8 @@ class AcquisitionJob:
                 conversion_delay_ns=acquisition.conversion_delay_ns, nb_acq=acquisition.acquisitions_per_batch,
                 trigger_type=acquisition.trigger_type, trigger_source=acquisition.trigger_source,
                 rstn_manual=acquisition.rstn_manual, ext_trig=False, peak_sensing=acquisition.peak_sensing,
-                adc_window_ns=acquisition.adc_window_ns, adc_nb_trig=acquisition.adc_nb_trig)
+                adc_window_ns=acquisition.adc_window_ns, adc_nb_trig=acquisition.adc_nb_trig,
+                trigger_source_2=acquisition.trigger_source_2, trigger_channel_2=acquisition.trigger_channel_2)
             for batch_offset in range(acquisition.batches):
                 token.checkpoint()
                 batch = acquisition.start_batch + batch_offset

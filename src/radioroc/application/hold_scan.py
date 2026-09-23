@@ -276,7 +276,8 @@ class HoldScanJob:
                         trigger_type=scan.trigger_type, trigger_source=scan.trigger_source,
                         rstn_manual=scan.rstn_manual, ext_trig=scan.external_trigger,
                         peak_sensing=scan.peak_sensing, adc_window_ns=scan.adc_window_ns,
-                        adc_nb_trig=scan.adc_nb_trig)
+                        adc_nb_trig=scan.adc_nb_trig,
+                        trigger_source_2=scan.trigger_source_2, trigger_channel_2=scan.trigger_channel_2)
                 high_gain, low_gain = device.acquire_adc_batch(
                     nb_acq=scan.acquisitions, timeout_s=scan.timeout_s, synchro_trigger=scan.synchro_trigger)
                 token.checkpoint()

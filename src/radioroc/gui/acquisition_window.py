@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 )
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+from matplotlib.ticker import NullFormatter
 
 from radioroc_client import AcquisitionConfig
 from radioroc.application.acquisition import AcquisitionJob, AcquisitionJobConfig
@@ -913,6 +914,12 @@ class AcquisitionWindow(QMainWindow):
         self.axes.set_xlabel(f"{gain_label} (ADC counts)")
         self.axes.set_ylabel("Counts")
         self.axes.set_yscale("log" if self.spectra_log_y.isChecked() else "linear")
+        # Log scale: matplotlib auto-labels minor ticks (2x10^0, 3x10^0, ...)
+        # whenever the data spans less than ~1 decade, which crowds into an
+        # unreadable cluster on this window's compact plot area. Major
+        # decade ticks (10^0, 10^1, ...) stay labelled; only the minor
+        # in-between labels are suppressed.
+        self.axes.yaxis.set_minor_formatter(NullFormatter())
         self.axes.grid(True, alpha=0.2)
         bins = self.spectra_bins.value()
         selected = [channel for channel, box in sorted(self.spectra_channel_checks.items())
@@ -928,7 +935,12 @@ class AcquisitionWindow(QMainWindow):
                     self.axes.hist(values, bins=bins, alpha=0.55, label=f"ch{channel}")
                     plotted = True
         if plotted:
-            self.axes.legend(fontsize=8)
+            # Fixed outside-axes placement instead of loc="best": "best"
+            # re-picks a position from the current data shape on every
+            # redraw, which visibly jumps around during a live run and can
+            # land the legend box on top of the title above it.
+            self.axes.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0),
+                             borderaxespad=0.0)
         self.canvas.draw_idle()
 
     def clear_spectra(self):
