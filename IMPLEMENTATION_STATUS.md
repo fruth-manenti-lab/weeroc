@@ -1,5 +1,74 @@
 # Implementation status
 
+## RADIOROC 40 — Finalized Step 3, built Step 6's calibration-record artifact
+
+Operator was away from the bench (remote via AnyDesk; PSU channels 1/3 and
+the signal generator output confirmed off, board USB-connected but
+unpowered) -- offline-only session, no hardware actions. Note: `NEXT_SESSION.md`
+was titled "RADIOROC 44" at handoff, but every actual entry (including the
+one it said it continued from) is numbered RADIOROC 39, with nothing
+in between -- treating that as a numbering slip in the title, not a sign of
+missed sessions, and resuming at 40.
+
+**Step 3 (operating threshold) finalized**: read RADIOROC 39's actual saved
+CSVs rather than trust the prior summary. Step 1's pedestal scan
+(`radioroc_runs/hardware/20260923-151828-99b393ae/thresholdscan.csv`) shows
+residual counts of 10-20 Hz through DAC 480, essentially flat ~10 Hz by
+500-520 (not exactly zero at 460-480 as the prior summary's rounding
+suggested). Step 4's confirmed final gain scan
+(`.../20260923-165254-9de939d9/thresholdscan.csv`, matched by its exact cited
+plateau values) shows a real ~10-12 kHz Ctest-injected-pulse plateau from
+DAC ~425 onward. Per `docs/plint_calibration_procedure.md`'s own Step 3 rule
+(margin of +50-250 DAC codes above the clean floor, no hardcoded universal
+value), operator agreed **DAC 575** -- roughly +75-95 codes above the
+480-500 floor, well clear of noise, well below where the Ctest plateau
+starts. Recorded here as the chosen value and reasoning, not hardcoded in
+any source file.
+
+**Step 6 (saved calibration record) built**, closing the gap
+`docs/plint_calibration_procedure.md` and `NEXT_SESSION.md` had flagged as
+real and open:
+- `src/radioroc/data/calibration_record.py`: `save_calibration_record`/
+  `load_calibration_record`, schema_version 1, matching existing
+  `threshold_reader.py`-style conventions. Validates every referenced
+  sub-scan directory has a `metadata.json` with `status: "completed"`
+  (`ValueError` naming the step label otherwise) and that all referenced
+  sub-scans agree on `board_identity` (`ValueError` listing every
+  conflicting label=value otherwise) -- a real hardware-identity
+  consistency check, not cosmetic. `per_channel_relative_response` and all
+  calibration settings (threshold DAC/margin reasoning, hold/conversion
+  delay, gain codes, excluded channels) are caller-supplied and passed
+  through as-is; this module computes nothing.
+- `scripts/radioroc_save_calibration_record.py`: thin CLI to write one by
+  hand from the sub-scan output directories plus the operator's judgment
+  calls, matching the project's existing script conventions.
+- `tests/test_calibration_record.py`: 5 tests (happy-path round trip,
+  missing metadata, wrong status, conflicting board_identity, schema
+  rejection).
+- Delegated the implementation (bounded, offline, with explicit acceptance
+  checks) to a worker agent per this project's delegation preference, then
+  reviewed the result before accepting it -- and found one real bug: the
+  new CLI script imported `radioroc.data.calibration_record` with no
+  `src`-path bootstrap, unlike every other script under `scripts/`, which
+  gets that for free as a side effect of importing `radioroc_client.py`
+  first (its own guarded `sys.path.insert` onto `src/`). The worker's own
+  claim -- that `.conda-radioroc` lacking `pytest`/an installed `radioroc`
+  package was a pre-existing environment gap unrelated to its change --
+  was half right (true that nothing is installed there) but wrong in
+  conclusion: every other script already works around exactly that gap,
+  and the new one was the only one that didn't, which is exactly what
+  `tools/check_development.py`'s per-script `--help` check caught. Fixed
+  directly (small, well-scoped) by adding the same guarded bootstrap.
+  455/455 offline tests pass under `.conda-radioroc`
+  (`tools/check_development.py`), confirmed after the fix, not just
+  before it.
+- Not yet run for real: no actual `calibration_record.json` exists yet --
+  that needs Step 5 done first (hold delay is one of its fields) and the
+  operator physically present to point the CLI at the real Steps 1/2/4/5
+  output directories.
+
+455/455 offline tests pass under `.conda-radioroc` (`tools/check_development.py`).
+
 ## RADIOROC 39 (continued) — Priority 2 rehearsal: operator ran the calibration procedure through the GUI, found and fixed two real plotting bugs
 
 Same day, same bench (SiPMs still biased from earlier). Per the
