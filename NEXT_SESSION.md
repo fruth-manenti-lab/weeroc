@@ -1,86 +1,73 @@
-# RADIOROC 42 — Priority 0's real remaining question: single-shot coincidence anomaly, then Priority 2/3
+# RADIOROC 43 — Design a valid case (c) test, then Priority 2/3
 
 **Read `PLINT_STUDENT_MVP_DIRECTIVE.md` in full before anything else**, then
 `AGENTS.md`, then this file in full, then `IMPLEMENTATION_STATUS.md`'s
-RADIOROC 39 entries (search "RADIOROC 39" — there are five, all near the
-top of the file, read them in order — the most recent one, "Case (c)
-attempted with real external single-shot triggering," is the one this
-handoff continues directly from and is not fully summarized below). Older
-status entries may be superseded; verify current source before treating a
-historical gap as live. The standing per-action hardware-authorization
-rule applies as always: a grant given in one conversation is for that
-conversation only.
+RADIOROC 39 entries (search "RADIOROC 39" — there are six, all near the
+top of the file, read them in order — the most recent one, "SiPMs biased
+for the first time...", is the one this handoff continues directly from
+and corrects an alarm raised earlier the same day; read that whole entry,
+not just this summary). Older status entries may be superseded; verify
+current source before treating a historical gap as live. The standing
+per-action hardware-authorization rule applies as always: a grant given
+in one conversation is for that conversation only.
 
-Continuing on `feat/daq-results-gui`. Working tree clean once this handoff
-is committed.
+Continuing on `feat/daq-results-gui`. Working tree clean once this
+handoff is committed.
 
-## Where Priority 0 actually stands
+## Where Priority 0 actually stands — read this carefully, it's nuanced
 
-Not a firmware limitation anymore, and not fully closed either — read
-this carefully, it's more specific than earlier handoffs assumed:
-
-- **The register/mask fix is solidly demonstrated** under continuous,
-  repeated real-signal conditions: accept/reject/exclusion/per-channel
-  association all held up correctly across 20+ real events, reproduced
-  multiple times.
-- **External single-shot triggering is now achievable** — the earlier
-  "BST* commands unsupported over SCPI" finding was real but a red
-  herring: the operator configured burst mode on the generator's **front
-  panel**, not remotely. Confirmed genuinely gated (zero acquisitions
-  while idle) and confirmed exactly one scope acquisition per one fired
-  synchro trigger, clean pulse shape (~52 mV, ~100 ns, matching the
-  continuous-mode calibration point after the operator corrected the
-  amplitude for a fan-in/fan-out module's insertion loss).
-- **A new, reproducible, unexplained anomaly showed up specifically in
-  single-shot mode.** The *identical* configuration that passed
-  repeatedly under continuous signal conditions gave backwards results
-  under single-shot conditions: a trivial positive control (both channels
-  hit simultaneously by one pulse) was rejected, and the genuine "outside
-  the window" case (two channels ~150 ms apart) was accepted — the
-  opposite of what both should do. Three specific causes were tested and
-  ruled out (a stale ready flag, hold/conversion timing, a bug in this
-  session's own test-script arming logic — see the full entry for exactly
-  how each was ruled out). **Not resolved.** Stopped deliberately rather
-  than force a conclusion, given deadline pressure, with the operator's
-  agreement.
+- **The register/mask fix (cases a/b/d) is solidly demonstrated** under
+  continuous, repeated real-signal conditions, reproduced multiple times.
+  This remains the operative evidence and is unaffected by anything below.
+- **SiPMs are now biased** (PSU channel 3, 29.5 V, 10 mA current limit,
+  confirmed ~20x headroom above the ~0.5 mA steady-state draw) — the
+  first time this project has exercised real SiPM light response rather
+  than Ctest's direct-injection bypass. **Left ON at handoff.**
+- **Case (c) ("outside the coincidence window") is still not validly
+  tested — not failed, not passed.** A same-day debugging session found
+  and then *fully explained* a false-accept pattern: it traced to
+  switching which channel has Ctest enabled between two pulses (this
+  bench's only way to simulate "channel B fires later" with one shared
+  injection line) — the switch itself is a real electrical transient on
+  the ASIC that looks like a threshold crossing to the newly-enabled
+  channel, independent of any genuine timing question. This was proven
+  directly: firing channel 4's pulse, then switching Ctest to channel 6
+  **without ever firing a second pulse**, still produced a false accept.
+  Every case-(c)-shaped result from today (including an earlier, wrong,
+  mid-session conclusion that no real time window is enforced at all) is
+  explained by this artifact and should be disregarded as evidence either
+  way, not treated as a real hardware finding.
 
 ## This session's job
 
-### 1. Investigate the single-shot anomaly
+### 1. Design a case (c) test that doesn't share this confound
 
-One specific, undeveloped hypothesis from the prior entry, worth testing
-first: continuous mode gives the trigger logic thousands of chances per
-test, so a per-attempt reliability problem could hide behind that
-repetition. Concretely:
+The core problem: this bench has one shared Ctest injection line, so
+"channel 4 fires, then channel 6 fires later" can currently only be
+simulated by switching which channel has Ctest enabled — and that switch
+is itself a false signal. Two real options, not attempted yet:
 
-- Repeat the single-shot positive control (Ctest on both channels, one
-  external trigger) **many times** (e.g. 20-50 separate single-shot
-  attempts) and check whether it accepts *some fraction of the time*
-  rather than never — a nonzero but imperfect accept rate would point at
-  a timing/reliability race, not a logic bug, and would also explain why
-  case (c) seemed to "accept" (same intermittent phenomenon, wrong
-  case).
-- Check whether the FPGA's ready flag (word 4 bit 5) is a level that
-  stays high until read, or something more transient that a 10 ms polling
-  interval could miss — worth checking the vendor's `adc.pyc`
-  disassembly again specifically for this, or bench-testing with a
-  tighter poll interval.
-- Consider whether the *previous* session's continuous-mode success
-  might have been masking this the whole time — i.e. whether continuous
-  mode's "10/10 events" success was actually closer to "10 accepted out
-  of many more attempts than 10," which the batch-count-based
-  `acquire_adc_batch` API wouldn't surface either way.
+- **A genuinely independent second injection path** — not a channel
+  switch on the shared line, an actual second, separately controllable
+  source. Ask the operator whether this bench can provide one (a second
+  pulser channel, a delay generator, two LEDs independently triggered —
+  anything that puts a real, controllable-relative-timing signal on
+  channel 6 without touching channel 4's Ctest configuration at all).
+- **Real, uncorrelated SiPM dark counts as the timing source**, now that
+  biasing makes them genuinely available. Set threshold above the real
+  noise floor (this session found DAC 550 was *not* clear of it once
+  biased — DAC 800 was; re-verify, since the environment may have
+  changed), enable both channels' native trigger paths with no Ctest
+  involved at all, and observe over a long enough window to characterize
+  the real accidental-coincidence rate statistically. This is a genuine
+  design task (observation duration, what "no coincidence" would mean
+  given a nonzero accidental rate, whether the 50 ns window is even the
+  right thing to check this way) — not a quick follow-up script.
 
-### 2. Once resolved (or if it resolves quickly): case (c)
+Do not reach for channel-switching again as a shortcut; it's now a known,
+proven-confounded technique for this specific test.
 
-Re-run channel-4-then-channel-6-~150ms-apart and confirm rejection, now
-that the mechanism is understood. If the anomaly turns out to be a
-genuine hardware/timing limitation of single-shot triggering rather than
-a fixable software issue, that itself is a legitimate, documentable
-answer for Priority 0 — but only after the "many attempts" check above,
-not before.
-
-### 3. If Priority 0 is closed (or the operator decides to move on
+### 2. If Priority 0 is closed (or the operator decides to move on
 regardless): Priority 2/3
 
 Both remain **not started at all**:
@@ -88,16 +75,17 @@ Both remain **not started at all**:
 - **Priority 2 (calibration procedure)**: pedestals/noise per channel,
   dead/noisy/saturated identification, relative gain characterization,
   threshold alignment, hold/conversion timing suitable for the trigger
-  setup, saved/attributable calibration. This session's threshold scan
-  (DAC 550 for a ~50 mV Ctest-injected signal) and hold scan (peak at
-  ~530-550 ns) were done to unblock the coincidence test, not as
-  calibration deliverables — don't treat them as more settled than that.
+  setup, saved/attributable calibration. With SiPMs now biased, a real
+  dark-noise threshold scan is finally possible and relevant groundwork —
+  this session's own scan (DAC 550 sits inside the real dark-noise tail;
+  DAC 800 is clear) was done to unblock debugging, not as a calibration
+  deliverable; don't treat it as more settled than that.
 - **Priority 3 (provenance/trustworthiness)**: re-check (don't assume)
   event ID uniqueness across appended segments, host-receipt vs.
   physical-event timestamp distinction, retaining below-threshold
-  amplitudes (already observed working in this session's bench data for
-  the uninvolved channel in an accepted event — worth citing once
-  reviewed properly), no irreversible cuts in saved data.
+  amplitudes (already observed working in earlier bench data for the
+  uninvolved channel in a genuinely accepted event), no irreversible cuts
+  in saved data.
 - **Priority 1 leftover**: an individual-event amplitude view distinct
   from the histogram — not built yet.
 
@@ -118,18 +106,25 @@ bounded, well-specified implementation/test work to subagents per
 reasoning, and integration for the lead.
 
 **Before assuming any bench state carried over from a prior session**:
-this session found IO1's FPGA mux index had silently drifted to `0` (not
-`5`) since earlier in the *same* day — check `read_fpga_io_mux()` rather
-than assuming a previously-set mux index, sync routing, or generator mode
-is still in effect. When something that worked before doesn't, prefer
-systematically ruling out specific hypotheses (as this session did) over
-guessing at alternate syntax or settings repeatedly.
+this same day, IO1's FPGA mux index had silently drifted to `0` (not `5`)
+between the morning's continuous-mode work and the afternoon's single-shot
+work — check `read_fpga_io_mux()` rather than assuming a previously-set
+mux index is still in effect. **SiPM bias is currently ON (PSU CH3, 29.5V)
+— check its actual state rather than assuming either way; do not power it
+off without checking whether it's still needed.**
+
+When a result contradicts strong prior evidence (like this session's
+"positive control now fails" and later "no time window enforced"
+moments), treat that contradiction itself as a signal to find the
+confound in the *new* test before trusting it over the old evidence — this
+session did that correctly both times (SiPM bias explained the first
+contradiction, the Ctest-switch artifact explained the second) rather
+than either dismissing the anomaly or overwriting solid earlier evidence
+with an unexplained new result.
 
 Multiple Claude Code sessions share this working directory (confirmed via
-peer messaging this session — several were active on this same repo,
-some on a different branch as recently as the same day). Confirm no
-other session is mid-hardware-action before touching the board or bench
-instruments.
+peer messaging in an earlier RADIOROC 39 entry). Confirm no other session
+is mid-hardware-action before touching the board or bench instruments.
 
 `main` has the M3 milestone (PR #1, squash-merged). Feature work continues
 on `feat/daq-results-gui`. `gh` is installed and authenticated for CI

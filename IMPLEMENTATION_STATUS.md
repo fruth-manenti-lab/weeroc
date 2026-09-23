@@ -1,5 +1,101 @@
 # Implementation status
 
+## RADIOROC 39 (continued) — SiPMs biased for the first time; explained (not fixed) the single-shot anomaly as a test-methodology artifact, not a hardware finding
+
+Same day, continuing directly from the entry below. Two developments,
+read in order because the second reframes the first.
+
+**SiPMs biased for the first time this project.** The operator realized
+mid-session that the three mounted SiPMs (channels 4/6/32) had never
+actually been powered to their operating high voltage -- everything in
+every earlier RADIOROC 39 entry today used Ctest, which injects charge
+directly into the ASIC and bypasses the SiPM entirely, so this did not
+invalidate those results, but it meant nothing today had yet exercised a
+real SiPM light response. Operator specified channel 3 of the Keysight
+EDU36311A PSU at 29.5 V. Set the current limit to 10 mA first (voltage
+and current both set with output still off, verified by readback before
+enabling), then enabled the output: measured ~10 mA during the brief
+capacitive-charging ramp (expected, not a fault), settling to **29.499 V
+at ~0.45-0.51 mA steady-state** -- confirms 10 mA is comfortably
+sufficient (~20x headroom), not marginal.
+
+**Re-ran the exact single-shot test from the entry below with SiPMs now
+biased -- the positive control that was failing is now fixed.** Same
+config (`trigger_type=1`, both slots Individual on channels 4/6,
+`hold_delay_ns=530`): the trivial positive control (Ctest on both
+channels, one external trigger) now correctly **accepts**, with a real,
+consistent signal on both channels (HG 405.5/406.0, versus ~75/67 under
+Ctest alone without SiPM gain). This strongly suggests the earlier
+positive-control failure was underpowered signal amplitude/reliability
+from Ctest injection alone, not a logic bug -- consistent with the
+continuous-mode result from the entry below (also Ctest-only) still
+being valid there, since continuous mode's repetition gave many chances
+where single-shot gave exactly one.
+
+**But then hit a second problem, live-diagnosed and resolved down to a
+correct explanation before the session ended:** ch4-alone and the
+"outside window" case both started showing false accepts. Root-caused in
+order:
+
+1. A fresh real (no-Ctest) threshold scan on the now-biased SiPMs showed
+   the DAC 550 threshold from the Ctest-only calibration sits inside the
+   real dark-noise tail (sparse but nonzero counts observed out to DAC
+   ~950) -- biasing changed the noise floor entirely, so the old
+   threshold no longer meant what it did. Moved to DAC 800, comfortably
+   clear.
+2. At DAC 800, ch4-alone correctly rejected again -- but the genuine
+   "outside window" case (ch4 pulse, then Ctest switched to ch6, then a
+   second pulse) still falsely accepted, with ch4 showing a real signal
+   and ch6 showing only a pedestal-level value in the same "accepted"
+   event -- i.e., the array had an entry for both channels but only one
+   of them reflected an actual event, exactly the "do not infer event
+   association from matching array lengths alone" pitfall the directive
+   names explicitly.
+3. **Decisive check**: repeated the same sequence -- fire ch4's pulse,
+   switch Ctest from channel 4 to channel 6 -- but never fired a second
+   pulse at all. This *still* showed "accepted," with the same
+   real-signal-on-ch4/pedestal-on-ch6 pattern. **This isolates the false
+   trigger to the act of switching which channel has Ctest enabled**, not
+   to anything about coincidence-window timing. The vendor guide's own
+   note that Ctest channel changes require "slow control ... sent to take
+   into account any change in the injected channel" is the likely
+   mechanism: reconfiguring the ASIC's internal Ctest-routing switch mid-
+   test is itself a small electrical transient on the newly-enabled
+   channel's front end, unrelated to any deliberate injected pulse.
+
+**Correction to this session's own record, made before it could stand
+uncorrected**: this session's every attempt at case (c) used exactly this
+Ctest-channel-switching technique to simulate "channel B fires later than
+channel A" -- meaning every case-(c)-shaped result produced today
+(including the "no time window enforced" conclusion stated mid-session)
+reflects this switching artifact, not genuine coincidence-window
+behavior, and should be disregarded as evidence either way. The
+continuous-mode result in the entry below did not use this technique
+(both channels' Ctest were enabled together, never switched during a
+timing-sensitive test) and is **not** affected by this finding -- it
+remains the operative evidence for Priority 0's core accept/reject/
+exclusion/association behavior.
+
+**Where this actually leaves Priority 0**: unchanged in substance from
+the entry below, now for a clearer reason. Case (c) is not failed and not
+passed -- it is **not yet validly tested**, because this bench's single
+shared Ctest injection line has no way to make channel 4 and channel 6
+fire at genuinely different times without also triggering this
+channel-switch artifact. Closing it needs either a second, independently
+timed injection path (a real one, not a channel-switched shared line), or
+accepting real uncorrelated SiPM dark counts as the timing source (now
+that biasing makes those genuinely available) with a long enough
+observation window to be statistically meaningful -- not attempted this
+session; a real design task, not a quick follow-up.
+
+**Left in a safe state**: Ctest disabled and masks cleared on all three
+channels, board disconnected cleanly. **SiPM bias (PSU channel 3, 29.5 V,
+10 mA limit) was left ON** -- unlike the board/generator, this was not
+powered back down, since biasing is now a standing prerequisite for any
+future real-signal work rather than a per-test setting; note this
+explicitly for whoever picks this up next so it isn't mistaken for
+already-off.
+
 ## RADIOROC 39 (continued) — Case (c) attempted with real external single-shot triggering: got the mechanism working, hit a new, unexplained anomaly, deliberately stopped rather than force a result
 
 Same day, continuing directly from the entry below (read it first — this one
