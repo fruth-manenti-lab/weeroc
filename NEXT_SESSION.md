@@ -1,121 +1,145 @@
-# RADIOROC 44 — Finish Priority 2 (Steps 3/5/6), then the Priority 4 rehearsal
+# RADIOROC 41 — Step 5 hold-scan rehearsal, write the real Step 6 record, then the Priority 4 rehearsal
 
-**Read `PLINT_STUDENT_MVP_DIRECTIVE.md` in full before anything else**, then
-`AGENTS.md`, then this file in full, then `IMPLEMENTATION_STATUS.md`'s
-RADIOROC 39 entries (search "RADIOROC 39" — there are eight, all near the
-top of the file, read them in order — the most recent one, "Priority 2
-rehearsal: operator ran the calibration procedure through the GUI," is the
-one this handoff continues directly from). Older status entries may be
-superseded; verify current source before treating a historical gap as
-live. The standing per-action hardware-authorization rule applies as
-always: a grant given in one conversation is for that conversation only.
+Read `PLINT_STUDENT_MVP_DIRECTIVE.md` in full before anything else, then
+`AGENTS.md`, then this file in full, then `IMPLEMENTATION_STATUS.md`'s three
+RADIOROC 40 entries (search "RADIOROC 40" -- one plus two "(continued)"
+entries, near the top), which this handoff continues directly from. The
+standing per-action hardware-authorization rule applies as always: a grant
+given in one conversation is for that conversation only.
 
-Continuing on `feat/daq-results-gui`. Working tree clean once this
-handoff is committed.
+Continuing on `feat/daq-results-gui`.
 
-## Equipment state at handoff — check before assuming
+## Where things stand at handoff
 
-- **SiPM bias**: PSU channel 3, 29.5 V, 10 mA current limit — **left ON**.
-  Verify it's still on and at spec before relying on it; don't assume.
-- **Signal generator**: mode left as **burst/single-shot external-
-  triggering** (front-panel configured, not SCPI-controllable on this
-  unit — see the RADIOROC 39 entry on the BST* SCPI limitation),
-  **output OFF**. Deliberate choice: this mode was hard-won this session;
-  switching to continuous free-run (`PULSFREQ 10000` + `OUTPUT ON`, one
-  command) is trivial to redo if this session wants threshold/gain scans
-  instead of coincidence-timing work.
-- **RADIOROC board**: disconnected cleanly.
-- **IO1 FPGA mux index**: was found drifted to `0` (not `5`, needed for
-  the synchro-trigger signal) partway through RADIOROC 39 — check
-  `read_fpga_io_mux()` rather than assume it's still `5`.
+RADIOROC 40 was an entirely offline overnight session (operator asleep;
+before that, remote via AnyDesk with PSU channels 1/3 and the signal
+generator confirmed off, board USB-connected but unpowered -- no hardware
+actions taken at any point). It ran as a self-paced autonomous loop
+(multiple delegated worker agents, each reviewed and integrated by the
+lead before committing) and closed real work across three areas, landed
+as three separate commits:
 
-## Where things stand: `docs/plint_calibration_procedure.md`
+1. **Step 3 (operating threshold) finalized: DAC 575.** Reasoning tied to
+   the actual saved Step 1/Step 4 CSVs, recorded in `IMPLEMENTATION_STATUS.md`.
+2. **Step 6 (saved calibration record) now has a real artifact**:
+   `src/radioroc/data/calibration_record.py` (save/load, schema_version 1),
+   `scripts/radioroc_save_calibration_record.py` (CLI), and
+   `tests/test_calibration_record.py`. Validates that every referenced
+   sub-scan is `completed` and that they all agree on `board_identity`.
+   **Not yet run for real** -- no actual `calibration_record.json` exists;
+   that needs Step 5 done first (hold delay is one of its fields).
+3. **GUI restructure** (direct operator request): `AcquisitionWindow` is
+   now its own top-level sidebar page (sidebar: ASIC config. / Acquisition
+   / Calibration), not Calibration's fifth sub-tab. Real visual check done
+   offscreen, not just tests.
+4. **A real, severe bug found and fixed**: `MainWindow` could hang
+   forever on close if a hardware job faulted at exactly the moment the
+   app was closed (`ConnectionWorker`'s own documented held-shutdown
+   contract requires an explicit retry that `closeEvent` never issued).
+   Found via a delegated, scope-bounded defect-hunt review; independently
+   reproduced, fixed, and reproduced-again-without-the-fix to confirm the
+   regression test actually guards it. See the second RADIOROC 40
+   "(continued)" entry for the full mechanism.
+5. **Priority 3's outstanding timestamp question resolved**: no,
+   Threshold/HoldScan/S-curve/Autocalibration manifests do not need the
+   same host-receipt timestamp Acquisition got -- they're aggregate
+   rate/mean curves, not accepted physical events, and the directive's
+   Priority 3 language is specifically about the latter. Checked and
+   closed, not left ambiguous.
+6. **Closed 5 genuine Priority-4-sanctioned test-coverage gaps** (offline
+   cancellation/storage-failure/connection-loss/cleanup-failure exercises
+   for `acquisition` and `autocalibration`) and flagged one API
+   inconsistency in `AutocalibrationJob`'s manifest-writer error handling
+   for the lead's attention (not a live bug, verified both callers already
+   turn it into a visible fault -- see the third RADIOROC 40
+   "(continued)" entry).
 
-Steps 1, 2, and 4 were run for real this session (operator driving the
-GUI directly, as a genuine Priority 4 rehearsal data point, not just a
-Priority 2 exercise) and independently verified from saved run data, not
-just on-screen summaries:
+461/461 offline tests pass under `.conda-radioroc` (`tools/check_development.py`),
+confirmed clean after every change, run as one combined suite before each
+commit. All three commits are already on `feat/daq-results-gui`, nothing
+pushed.
 
-- **Step 1** (pedestal/noise/dead-channel ID): done. Clean floor ~DAC
-  460-480 on channels 4/6/32, none excluded.
-- **Step 2** (threshold alignment): done. Channels aligned to within
-  ~2-4 DAC codes (~176-180).
-- **Step 4** (relative gain): done, after working through two real
-  mistakes live (generator left in gated single-shot mode gave a false
-  "no signal" result; a truncated 0-250 DAC rescan looked wrong for a
-  different reason — still inside the noise peak, nowhere near the
-  informative high-DAC region). Final result: channels 4/6/32 show
-  closely matching ~10-11 kHz plateaus, no gain outlier.
-- **Step 3** (pick an operating threshold): not finalized. DAC 550-600
-  was suggested (comfortably above Step 1's ~460-480 floor) but not
-  agreed as a final number.
-- **Step 5** (hold/conversion timing): not re-run through
-  `HoldScanWindow` this session specifically — the earlier same-day CLI
-  hold-scan result (peak ~530-550 ns, channel 4, Simple trigger) stands
-  as evidence but wasn't rehearsed through the GUI the way Steps 1/2/4
-  were. Worth doing for rehearsal completeness.
-- **Step 6** (saved calibration record): still just the manual
-  record-keeping checklist in the procedure doc — no dedicated artifact
-  exists yet. Worth building now that Steps 1/2/4 have real data to put
-  in one: channels 4/6/32, DAC alignment ~178, threshold TBD (Step 3),
-  gain characterization (all consistent), hold delay ~530-550ns.
+**Every delegated result this session was independently verified before
+being trusted** -- one delegated worker's own environment-gap explanation
+turned out to be wrong (see the first RADIOROC 40 entry); the defect-hunt
+finding was independently reproduced, not taken on faith; the two
+test-coverage-audit results were spot-checked against the actual
+manifest-writing code before being accepted. Keep doing this -- it caught
+a real bug and a real wrong claim in the same night.
 
-Two real GUI bugs were found live during this rehearsal and already
-fixed/committed: `ThresholdWindow` now renders a proper staircase
-(matching the CLI tool and the project's own established convention) and
-has a "Log Y" toggle (without it, Step 4's actual signal plateau was
-visually indistinguishable from zero on a linear axis — this is exactly
-what caused the "does this look right?" back-and-forth this session,
-resolved by reading the raw CSV values directly rather than trusting the
-plot's appearance alone).
+## Equipment state at handoff -- check before assuming
+
+Unchanged from RADIOROC 39's own handoff, since nothing physical happened
+this session either: SiPM bias PSU channel 3 was left ON at RADIOROC 39's
+handoff, but was confirmed OFF (along with channel 1) at the start of
+RADIOROC 40 -- don't assume either state, check PSU directly. Signal
+generator: mode left as burst/single-shot external-triggering, output
+off. Board: USB-connected, unpowered. IO1 FPGA mux index: was found
+drifted to `0` (not `5`) partway through RADIOROC 39 -- check
+`read_fpga_io_mux()` rather than assume it's still `5`.
 
 ## This session's job
 
-1. **Finalize Step 3**: agree an actual operating threshold DAC with the
-   operator (550-600 was suggested, not finalized) and record the
-   reasoning.
-2. **Run Step 5 through `HoldScanWindow`** for rehearsal completeness,
-   using the trigger configuration Priority 0 actually settled on.
-3. **Build Step 6's saved-calibration-record artifact** — even a minimal
-   one (a JSON file referencing the completed sub-scans' output
-   directories plus the chosen threshold/gain/hold values, saved
-   alongside subsequent acquisition runs) would close a real, named gap
-   rather than leaving it as a manual checklist indefinitely. Keep it
-   bounded — a record, not a new subsystem.
-4. **Then move toward the actual Priority 4 rehearsal**: a complete
-   calibration → acquisition → stop → reopen/export pass, with the
-   operator continuing to stand in for the student per their own
-   decision to do so. Case (c) (Priority 0's remaining item) was
-   explicitly skipped by the operator's own decision to keep moving
-   toward the MVP deadline — don't reopen it without them raising it.
+1. **Run Step 5 through `HoldScanWindow`** for rehearsal completeness
+   (now that it lives on its own Acquisition-adjacent Calibration tab, not
+   affected by the sidebar change), using the trigger configuration
+   Priority 0 actually settled on. RADIOROC 39's earlier same-day CLI
+   hold-scan result (peak ~530-550 ns, channel 4, Simple trigger) is
+   evidence, not a substitute for the GUI rehearsal.
+2. **Write the real Step 6 record**: once Step 5 has a real output
+   directory, run `scripts/radioroc_save_calibration_record.py` for real,
+   pointing `--sub-scan` at the actual Step 1/2/4/5 output directories,
+   `--threshold-dac 575` with the recorded margin reasoning, and the
+   Step 4 per-channel plateau values. Confirm it validates cleanly (all
+   sub-scans `completed`, `board_identity` agreeing) against real data,
+   not just the unit tests' fakes.
+3. **Then move toward the actual Priority 4 rehearsal**: a complete
+   calibration -> acquisition -> stop -> reopen/export pass, with the
+   operator continuing to stand in for the student per their own decision
+   to do so. Case (c) (Priority 0's remaining item) was explicitly skipped
+   by the operator's own decision to keep moving toward the MVP deadline --
+   don't reopen it without them raising it.
+4. Optional, low-priority, flagged not required: decide whether
+   `AutocalibrationResult` should grow its own `persistence_errors` field
+   to match its sibling jobs' manifest-write-failure contract (currently
+   raises instead; both real callers already handle that safely). Not
+   worth doing under deadline pressure unless it's blocking something
+   else -- it was flagged, not queued.
 
 ## Standing discipline (unchanged, all still applies)
 
 Offline tests and fake transports only unless the operator is present and
-explicitly authorizes a specific hardware action, per-action — a grant
+explicitly authorizes a specific hardware action, per-action -- a grant
 from an earlier conversation does not carry over. Never run
 `radioroc_env_check.py` as an offline check. Run `tools/check_development.py`
 under `.conda-radioroc` after every meaningful change (~3 minutes;
 background it and poll rather than assuming a short timeout means
-failure). A self-created venv without the `[gui]` extra will silently
-skip every GUI test and look green when it isn't (RADIOROC 36).
+failure; redirect to a file and check the file's own exit code rather than
+piping through `tail`, which masks a non-zero exit -- this actually
+happened in RADIOROC 40 and hid a real failure on the first attempt).
+A self-created venv without the `[gui]` extra will silently skip every GUI
+test and look green when it isn't (RADIOROC 36).
 
-**When a live result looks wrong, verify against raw data before
-concluding anything** — this session's own back-and-forth (generator
-gated, truncated DAC range, "is the floor really zero") was resolved every
-time by reading the actual saved CSV/manifest rather than trusting a
-summary or a plot's appearance, including once when the operator's own
-sharp instinct ("the floor is really 0 no?") turned out to be a
-reasonable question worth actually checking (it wasn't zero — real,
-varying, Poisson-consistent counts) rather than dismissing it.
+**When delegating bounded work to a worker agent, review the actual diff
+and re-run the real acceptance check yourself before accepting its
+report** -- proven twice over in RADIOROC 40: one worker's own claimed
+environment-gap explanation was wrong (the real bug only surfaced once the
+lead ran `tools/check_development.py` directly), and a separate defect-hunt
+finding was only trustworthy because the lead independently reproduced it
+(and reproduced its absence-of-fix) rather than taking the report at face
+value. When agents run concurrently in the same working tree, wait for
+each to fully hand back before running the combined suite or committing --
+a check run started while another agent is still mid-edit can produce a
+misleading result.
 
-Multiple Claude Code sessions share this working directory (confirmed via
-peer messaging in an earlier RADIOROC 39 entry). Confirm no other session
-is mid-hardware-action before touching the board or bench instruments.
+Multiple Claude Code sessions share this working directory. Confirm no
+other session is mid-hardware-action before touching the board or bench
+instruments.
 
 `main` has the M3 milestone (PR #1, squash-merged). Feature work continues
 on `feat/daq-results-gui`. `gh` is installed and authenticated for CI
-checks after any push (`gh run list --branch <branch>`).
+checks after any push (`gh run list --branch <branch>`). Nothing has been
+pushed this session -- only committed locally.
 
 Per the directive's own instruction: track each MVP item as implemented,
 offline-verified, physically verified, or blocked, with concrete evidence
@@ -128,6 +152,6 @@ the session-numbering convention.
 Broad Windows screen-by-screen parity, unrelated trigger combinations,
 cosmetic refinements, and general macOS/Debian/Ubuntu release work remain
 explicitly deferred by the directive until after this checkpoint. None of
-F01–F17/M0–M5 are deleted by this reprioritization. F15/A7585 remains
+F01-F17/M0-M5 are deleted by this reprioritization. F15/A7585 remains
 permanently out of scope. Priority 0's case (c) is deferred by the
-operator's own explicit decision this session, not resolved — see above.
+operator's own explicit decision, not resolved.

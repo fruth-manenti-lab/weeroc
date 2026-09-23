@@ -133,6 +133,67 @@ then independently verified before touching anything:
 combined with RADIOROC 40's earlier Step 3/Step 6 work and the Priority 3/
 test-coverage work below.
 
+## RADIOROC 40 (continued) — Priority 3 timestamp question resolved (no gap); closed real failure-mode test-coverage gaps
+
+Delegated two bounded, offline, directive-sanctioned tasks in parallel;
+reviewed both results (diffs read directly, reasoning independently
+spot-checked against the actual manifest-writing code) before accepting.
+
+**Priority 3, resolved for the four calibration-scan jobs (threshold/
+hold-scan/S-curve/autocalibration): no `batch_received_at`-equivalent gap
+exists, and none was added.** RADIOROC 39's acquisition-path fix closed a
+real gap because `AcquisitionJob` writes accepted *physical events*
+(per-channel HG/LG amplitudes) whose host-receipt time is otherwise
+unrecoverable across a multi-batch run -- exactly the "event association"
+and "distinguish host receipt from physical-event timestamps" language in
+the directive's Priority 3. Threshold/hold-scan/S-curve/autocalibration
+are categorically different: each produces one aggregate rate or mean
+value per swept DAC/hold point, not an accepted event with an amplitude to
+associate with anything -- there is no event identity to timestamp, and
+the swept variable plus the CSV's own row order already fully order the
+points. Each of these jobs already has run-level `created_at`/
+`finished_at`/`elapsed_seconds` in its manifest (confirmed by reading
+`threshold.py`/`hold_scan.py` directly), and `persist()` durably writes the
+manifest after every point, so run duration is known and coarse-grained
+progress is auditable. This closes the item RADIOROC 39 flagged as "worth
+a quick check": checked, no gap found, no code changed.
+
+**Priority 4's own explicitly-sanctioned offline work** ("Exercise
+cancellation, storage failure, connection loss, and cleanup failures with
+fake transports/offline tests"): audited all 5 job modules
+(threshold/hold_scan/scurve/acquisition/autocalibration) across those four
+failure modes. Threshold/hold_scan/scurve were already fully covered.
+Closed five genuine, non-redundant gaps:
+- `acquisition`: cleanup failure landing *after* an otherwise fully-
+  successful run must flip status to `"failed"`, not hide the cleanup
+  error behind a `"completed"` report; a manifest-write (not CSV-write)
+  failure must surface via `persistence_errors` and leave the on-disk
+  manifest at its last truthful state.
+- `autocalibration`: a failed restore of the reference channel's probed-
+  away calibration DAC must flag `reference_restored = False` with a
+  warning, not be silently presented as a fully-restored run; a transport
+  disconnect mid-sub-scan must surface as `status="disconnected"` with
+  completed sub-runs recorded truthfully, not folded into a false overall
+  success; a manifest-write failure must propagate visibly (it does, via
+  both existing callers' blanket exception handling) and must not leave
+  the transport's session lock held for a later run.
+- **Flagged, not fixed (correctly out of this task's scope)**:
+  `AutocalibrationJob`'s own top-level manifest writer has no
+  persist()-retry-catch fallback for a second consecutive write failure,
+  unlike every sibling job's `persist()`-in-`finally` pattern -- it raises
+  instead of returning a structured `Result` with `persistence_errors`.
+  Verified this is not currently a silent-success bug (both
+  `ConnectionWorker._run_autocalibration` and
+  `scripts/radioroc_autocalibrate.py` already turn the raise into a
+  visible fault), but it's an API inconsistency worth attention if
+  `AutocalibrationResult` ever grows its own `persistence_errors` field to
+  match its siblings. Not changed this session -- a shared-contract change
+  needs the lead's own deliberate decision, not a test-audit's incidental
+  side effect.
+
+461/461 offline tests pass under `.conda-radioroc` (`tools/check_development.py`),
+run clean and combined with every other change from this session.
+
 ## RADIOROC 39 (continued) — Priority 2 rehearsal: operator ran the calibration procedure through the GUI, found and fixed two real plotting bugs
 
 Same day, same bench (SiPMs still biased from earlier). Per the

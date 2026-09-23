@@ -287,6 +287,44 @@ class AcquisitionJobTests(unittest.TestCase):
         self.assertEqual(self.manifest()["device_state"], "unknown")
         self.assertIn("adc timeout", self.manifest()["error"])
 
+    def test_cleanup_failure_after_success_is_failed(self):
+        # FPGA address 22 is written exactly twice in a normal run: once by
+        # configure_adc_external_hold's own setup (before the batch loop),
+        # once by cleanup's restore -- unlike address 21, which
+        # configure_adc_external_hold itself writes multiple times. Failing
+        # only the second occurrence isolates the cleanup-only restore,
+        # after every batch has already completed successfully.
+        write = self.device.write_word
+        calls = {"count": 0}
+
+        def fail_restore(address, value):
+            if address == 22:
+                calls["count"] += 1
+                if calls["count"] == 2:
+                    raise TransportIOError("cleanup only")
+            return write(address, value)
+
+        with patch.object(self.device, "write_word", side_effect=fail_restore):
+            result = self.run_job()
+        self.assertEqual((result.status, result.points, result.cleanup_status), ("failed", 2, "failed"))
+        self.assertEqual(self.manifest()["status"], "failed")
+
+    def test_manifest_failure_keeps_previous_manifest_and_reports_unsaved_status(self):
+        original = AcquisitionRunWriter.update
+
+        def update(writer, manifest):
+            if manifest["completed_points"]:
+                raise OSError("manifest disk full")
+            original(writer, manifest)
+
+        with patch.object(AcquisitionRunWriter, "update", new=update):
+            result = self.run_job()
+        self.assertEqual(result.status, "failed")
+        self.assertTrue(result.persistence_errors)
+        self.assertEqual(self.manifest()["status"], "running")
+        self.assertEqual(len(rows(result.csv_path)), 2)
+        self.assertEqual(self.transport.asic, self.transport.original_asic)
+
     def test_data_write_failure_retains_prior_points(self):
         original = AcquisitionRunWriter.append_events
 
