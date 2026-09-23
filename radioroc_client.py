@@ -369,6 +369,16 @@ class HoldScanConfig:
         if len(set(self.channels)) != len(self.channels):
             raise ValueError("channels must be unique")
         validate_channel(self.trigger_channel)
+        if self.trigger_channel not in self.channels:
+            # application/hold_scan.py unconditionally unmasks trigger_channel
+            # (set_mask_for_channel) and only records HG/LG mean/stdev for
+            # channels in self.channels -- a trigger channel absent from
+            # channels would never have its own response curve recorded,
+            # defeating the point of a hold scan for that channel.
+            raise ValueError(
+                "trigger_channel must be one of channels, or its response curve will "
+                "never be recorded"
+            )
         validate_scan_range(self.hold_min, self.hold_max, self.hold_step, name="hold")
         if self.mode == "internal" and not (0 <= self.hold_min <= 255 and 0 <= self.hold_max <= 255):
             raise ValueError("internal hold code range must be within 0..255")
@@ -387,6 +397,16 @@ class HoldScanConfig:
         if not 0 <= self.trigger_source_2 <= 7:
             raise ValueError("trigger_source_2 must be in range 0..7")
         validate_channel(self.trigger_channel_2)
+        if (self.trigger_type == 1 and self.trigger_source == 3 and self.trigger_source_2 == 3
+                and self.trigger_channel_2 not in self.channels):
+            # Mirrors application/hold_scan.py's own gating condition for a
+            # genuine 2-distinct-channel individual coincidence -- the one case
+            # where trigger_channel_2 names a second real trigger channel whose
+            # response curve this scan is meant to characterize.
+            raise ValueError(
+                "trigger_channel_2 must be one of channels for a 2-channel individual "
+                "coincidence trigger, or its response curve will never be recorded"
+            )
         if self.trigger_source_2 == 3 and self.peak_sensing:
             raise ValueError(
                 "trigger_source_2 == 3 (a second individual coincidence channel) and "

@@ -63,13 +63,20 @@ as three separate commits:
    defaults to 5) got a hardware-correct trigger but silently lost that
    second channel's amplitude from every accepted event. Fixed with two
    narrowly-scoped, evidence-tied validation checks; regression tests
-   added. **Deliberately not extended to `HoldScanConfig`**, which has the
-   same-shaped `trigger_channel`/`trigger_channel_2`/`channels` fields but
-   wasn't audited this session -- see this session's job item 5 below.
+   added.
+8. **Confirmed and fixed the identical bug in `HoldScanConfig`** as a
+   direct follow-up (same investigation thread): `application/hold_scan.py`
+   has the exact same unconditional-unmask + channels-only-write shape, so
+   a hold scan's trigger channel absent from `channels` would never have
+   its own response curve recorded -- arguably worse there, since
+   characterizing the triggering channel's timing response is the whole
+   point of a hold scan. Latent API/CLI-level gap only; `HoldScanWindow`'s
+   own GUI defaults were already safe and don't currently expose
+   `trigger_channel_2` at all.
 
 461/461 offline tests pass under `.conda-radioroc` (`tools/check_development.py`),
 confirmed clean after every change, run as one combined suite before each
-commit. All four commits are already on `feat/daq-results-gui`, nothing
+commit. All five commits are already on `feat/daq-results-gui`, nothing
 pushed.
 
 **Every delegated result this session was independently verified before
@@ -118,13 +125,6 @@ drifted to `0` (not `5`) partway through RADIOROC 39 -- check
    raises instead; both real callers already handle that safely). Not
    worth doing under deadline pressure unless it's blocking something
    else -- it was flagged, not queued.
-5. **Check `HoldScanConfig` for the same trigger-channel/channels gap**
-   just fixed in `AcquisitionConfig`: does `HoldScanJob`'s writer path
-   also only record data for channels in `self.channels`, and would a
-   `trigger_channel`/`trigger_channel_2` outside that set similarly lose
-   data silently? Read `application/hold_scan.py`'s actual writer code
-   before assuming either way (the field shapes are identical, but the
-   semantics of what gets recorded per hold-delay point may not be).
 
 ## Standing discipline (unchanged, all still applies)
 

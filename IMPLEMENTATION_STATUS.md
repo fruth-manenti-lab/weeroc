@@ -1,5 +1,31 @@
 # Implementation status
 
+## RADIOROC 40 (continued) — Same trigger-channel/channels gap confirmed and fixed in `HoldScanConfig`
+
+Direct follow-up to the `AcquisitionConfig` fix immediately below (same
+investigation thread, not new scope): read `application/hold_scan.py`'s
+actual writer code rather than assume either way, per that entry's own
+flagged next step. Confirmed the identical shape of bug: `set_mask_for_
+channel(scan.trigger_channel, ...)` runs unconditionally, the same
+`trigger_type==1 and trigger_source==3 and trigger_source_2==3` gate
+unmasks both named channels for a genuine coincidence, and the per-hold-
+value row is built `for channel in scan.channels` -- a `trigger_channel`/
+`trigger_channel_2` absent from `channels` would never have its own
+HG/LG mean/stdev response curve recorded at all, which is arguably worse
+here than for Acquisition: a hold scan's entire purpose is characterizing
+the triggering channel's own timing response.
+
+`HoldScanWindow`'s own GUI defaults (`channel_select=(4, 5)`,
+`trigger_channel=4`) were already safe -- this was a latent API/CLI-level
+gap, not a currently-reachable GUI default, and the GUI doesn't currently
+expose `trigger_channel_2`/`trigger_source_2` fields at all (only reachable
+by direct `HoldScanConfig` construction). Fixed with the same two checks,
+same reasoning, in `HoldScanConfig.validate()`. Two matching regression
+subTest cases added to the existing `test_invalid_configuration_has_no_
+hardware_or_files` in `tests/test_hold_scan_jobs.py`.
+
+461/461 offline tests pass under `.conda-radioroc` (`tools/check_development.py`).
+
 ## RADIOROC 40 (continued) — Found and fixed a real silent per-event data-loss bug: trigger channel(s) not required to be among saved channels
 
 A second delegated defect-hunt pass (scoped to the GUI panel/window files
