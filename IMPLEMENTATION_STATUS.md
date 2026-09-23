@@ -1,5 +1,47 @@
 # Implementation status
 
+## RADIOROC 38 (continued) — Real, systemic plot-usability bug found from a live screenshot: legend placement and log-scale readability
+
+Same conversation, right at handoff. The operator screenshotted the
+just-landed spectra plot with Log Y enabled and flagged it directly: the
+y-axis's log tick labels overlap into an unreadable `10^0`/`10^1` cluster,
+and the channel legend box sits directly on top of the plot's own title
+text ("SIMULATION · finished · 500 events on disk") instead of somewhere
+that doesn't collide with it. The operator also reported, from prior use,
+that S-curve and other plots' legends visibly "jump around" between
+redraws -- confirming this isn't a one-off rendering glitch in the new
+feature.
+
+**Root cause confirmed, not guessed**: `grep -n "axes.legend(fontsize" src/
+radioroc/gui/*.py` shows the identical call --
+`self.axes.legend(fontsize=8)`, no `loc=` argument -- in **all four**
+plotting windows: `acquisition_window.py`, `autocalibration_window.py`,
+`scurve_window.py`, `hold_scan_window.py`. With no fixed location,
+matplotlib's `"best"` auto-placement algorithm re-decides the legend's
+position on every redraw based on the current data's shape, which is
+exactly what produces both the reported jumping (S-curve, redrawn live
+during a scan, with changing data on every point) and this screenshot's
+title collision (auto-placement has no awareness of where the title text
+sits, only of the data). This is a real, systemic, previously-unnoticed
+usability defect across the whole app, not specific to the new spectra
+feature -- it was only caught now because a live screenshot with Log Y
+enabled happened to make it obviously unreadable.
+
+**Not fixed in this entry** -- closing the conversation per the operator's
+own request for fresh context on Priority 0. Recorded here with enough
+specificity that the next session doesn't have to re-diagnose it: fix
+needs (a) a fixed `loc` for `legend()` in all four files (e.g. anchored
+outside the axes, or a corner unlikely to collide with typical data/title
+placement -- verify against real data shapes, not just a guess), (b)
+checking log-scale tick label formatting/spacing/rotation at this
+project's actual target screen resolution rather than a generic dev
+monitor, and (c) a broader look at whether the current plot-window layouts
+budget enough space for the plot itself at the resolution the student's
+own machine will actually use -- the `PLINT_STUDENT_MVP_DIRECTIVE.md`'s own
+acceptance criteria for Priority 1 explicitly requires "a real visual
+check confirms the screen is usable," and this finding is direct evidence
+that check has not yet actually passed.
+
 ## RADIOROC 38 (continued) — Received `PLINT_STUDENT_MVP_DIRECTIVE.md`; shifting this week's priority to a student-usable MVP
 
 Same conversation, immediately after the spectra-rendering work below.

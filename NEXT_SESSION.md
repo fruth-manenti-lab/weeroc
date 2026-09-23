@@ -121,6 +121,23 @@ authorization at the board, same as always.
   doesn't show individual events), and explicitly re-checking (not
   assuming) that the current CSV/manifest schema satisfies M2's raw/scaled
   encoding and units requirements for *this* experiment's needs.
+  **Real usability bug found from a live screenshot, not yet fixed** — see
+  the fuller RADIOROC 38 entry in `IMPLEMENTATION_STATUS.md`: all four
+  plotting windows (`acquisition_window.py`, `autocalibration_window.py`,
+  `scurve_window.py`, `hold_scan_window.py`) call `axes.legend(fontsize=8)`
+  with no fixed `loc`, so matplotlib's auto-placement re-decides the
+  legend's position on every redraw — confirmed to be exactly what causes
+  both the operator-reported "legend jumps around" behavior on live S-curve
+  redraws and a title/legend collision the operator directly screenshotted
+  on the new spectra plot, which also showed unreadable overlapping
+  `10^0`/`10^1` tick labels with Log Y enabled. Fix needs a fixed `loc` in
+  all four files (verified against real data shapes, not guessed), a check
+  of log-scale tick formatting at this project's actual target screen
+  resolution, and a broader look at whether the plot windows' current
+  layouts give the plot itself enough space at that resolution. This is
+  direct evidence against the directive's own Priority 1 acceptance
+  criterion ("a real visual check confirms the screen is usable") — treat
+  it as a concrete, bounded, high-priority fix, not a vague polish item.
 - **Priority 2**: an end-to-end calibration procedure for the student
   (pedestals/noise per channel, dead/noisy/saturated identification,
   relative gain characterization, threshold alignment, hold/conversion
