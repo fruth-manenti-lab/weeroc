@@ -1,5 +1,76 @@
 # Implementation status
 
+## RADIOROC 38 (continued) — Received `PLINT_STUDENT_MVP_DIRECTIVE.md`; shifting this week's priority to a student-usable MVP
+
+Same conversation, immediately after the spectra-rendering work below.
+Operator asked to check `PLINT_STUDENT_MVP_DIRECTIVE.md` (new file at repo
+root, dated 2026-09-23, arrived via a separate read-only review of this
+session's work) for this week's priorities, update the status docs
+accordingly, then start a fresh chat for the next bounded task.
+
+**Read the directive in full before acting -- do not treat this summary as
+a substitute for it.** It is a narrower delivery checkpoint within
+`CROSS_PLATFORM_REBUILD_PLAN.md`, explicitly not a replacement plan and not
+permission to weaken architecture, scientific-data requirements, or the
+plan's final acceptance gates. The experiment: one plastic scintillator
+("the plint") with 4-8 SiPMs, students calibrating channels then collecting
+data with a provisional trigger of **any two selected channels above
+threshold within a coincidence window**, retaining all selected channels'
+amplitudes (including below-threshold ones) for later hit-position/rate
+analysis. The directive is explicit that two SiPMs seeing the same light
+pulse does not by itself establish a muon -- label outputs as accepted
+events/accepted-event rate, not muon flux, until separate evidence exists.
+
+**Priority 0, and the reason it comes first:** the directive flags a real,
+previously-unexamined uncertainty -- does the current F11/F12 hardware/
+firmware configuration actually support "two *distinct* selected channels
+within a window," or does its existing "N triggers in a window" semantics
+also accept repeated pulses on *one* channel (which would silently produce
+a completely different, wrong physics result if assumed equivalent)? This
+was never audited against this specific requirement in any prior session;
+`AcquisitionConfig`'s `trigger_type`/`trigger_source`/`adc_window_ns`/
+`adc_nb_trig` fields exist and were carried through F12, but F12's own
+review (RADIOROC 35) only confirmed they plumb through to the existing
+`configure_adc_external_hold` primitive correctly -- it never asked whether
+that primitive's *semantics* match a two-distinct-channel coincidence
+requirement. The directive is explicit: "Simulated behavior alone cannot
+close this item" -- this needs vendor `.pyc` evidence plus a controlled
+physical demonstration with a specified 5-case test plan (single channel
+repeated pulses; two channels in-window; two channels out-of-window; an
+excluded channel; known distinguishable amplitudes confirming event/channel
+association including sub-threshold channels).
+
+**This was deliberately not started in this conversation.** The directive
+itself asks for a fresh chat for this work (this session is ending here by
+the operator's own request, for fresh context budget on what is a genuinely
+open-ended investigation), and starting it with only a few messages of
+context remaining would risk exactly the kind of rushed, under-verified
+register/firmware conclusion the directive explicitly warns against ("do
+not guess register writes to meet the deadline"). `NEXT_SESSION.md` is
+rewritten to hand this off as the clear first bounded task, with every
+piece of relevant existing context (F11/F12's current implementation,
+where the vendor `.pyc` evidence lives, what RADIOROC 35/36 already
+established and did not establish) linked from there.
+
+**Reconciling with the backlog this session was already carrying**: the
+T1/T2/TQ enable-bit blocker (RADIOROC 30/34) and F11's "not yet explicitly
+validated" note (RADIOROC 37) both fold directly into this same Priority 0
+investigation rather than remaining separate items -- T1/T2/TQ specifically
+becomes relevant only if the chosen student trigger workflow actually needs
+per-channel enable control the directive's Priority 2 flags this
+explicitly ("blockers if the chosen workflow needs them," not
+unconditionally). The Windows-comparison/M5 gap noted in RADIOROC 36 is
+reframed, not dropped: the directive keeps "targeted Windows comparisons
+needed to resolve the experiment's hardware semantics" as high priority
+while deferring broad screen-by-screen parity work.
+
+**No hardware was touched, no other session's app was launched or closed,
+and no operator authorization was inferred from the directive itself** --
+it explicitly says it grants none of that. A `radioroc.gui` instance this
+same conversation launched earlier (for the visual checks below) was still
+running when this entry was written; whether to leave it running or close
+it was left for the operator to say, not assumed either way.
+
 ## RADIOROC 38 (continued) — Landed and live-visual-checked F13's spectra/histogram rendering
 
 Same conversation, after the visual check above. Operator asked to

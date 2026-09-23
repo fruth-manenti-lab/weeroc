@@ -1,124 +1,163 @@
-# RADIOROC 39 — Build F13's spectra/histogram rendering, or start the Windows-comparison groundwork
+# RADIOROC 39 — Priority 0: audit F11/F12's coincidence-trigger semantics against the plint's 2-channel requirement
 
-Continuing on `feat/daq-results-gui` (a fresh branch off `main`, which now
-has the M3 milestone merged — see below). Working tree clean once this
-handoff is committed. Read `AGENTS.md` first for delegation, recording, and
-offline-testing discipline; the standing per-action hardware-authorization
-rule applies as always (a grant given in one conversation is for that
-conversation only — don't assume it forward to a new chat).
+**Read `PLINT_STUDENT_MVP_DIRECTIVE.md` in full before anything else.** It
+sets this week's priorities and is not summarized completely below. Also
+read `AGENTS.md` and this file in full, and skim `IMPLEMENTATION_STATUS.md`'s
+RADIOROC 38 entries (both of them — search for "RADIOROC 38", there are two)
+before acting. Older status entries may be superseded; verify current
+source before treating a historical gap as live — this exact mistake
+happened once already this week (RADIOROC 36 repeated a stale RADIOROC 24
+note about the connection shell without checking; it had been fixed by
+RADIOROC 28). The standing per-action hardware-authorization rule applies
+as always: a grant given in one conversation is for that conversation
+only. The directive itself grants no hardware authorization, and does not
+authorize launching/closing another session's apps or interfering with an
+active operator — coordinate any bench work through the operator directly.
 
-## What RADIOROC 34-37 did
+Continuing on `feat/daq-results-gui`. Working tree clean once this handoff
+is committed.
 
-See `IMPLEMENTATION_STATUS.md`'s RADIOROC 35, 36 and 37 entries for the
-full account (all three are long — read them in full, not just this
-summary).
+## What the last few sessions did
 
-**RADIOROC 34/35**: live-visual-check of the GUI; reviewed a real
-operator-run hardware `AutocalibrationJob` test; re-confirmed the T1/T2/TQ
-enable-bit blocker; closed the `check_installed_package.py --gui`
-routine-checks blind spot; **landed F12** (`AcquisitionJob`); recovered the
-real vendor acquisition file format from `adc.pyc` disassembly.
+**RADIOROC 34-37** (see their own `IMPLEMENTATION_STATUS.md` entries):
+landed F12 (`AcquisitionJob`), F13 Phase A (`read_acquisition_run`,
+`read_vendor_acquisition_file`), recovered the real vendor acquisition file
+format from `adc.pyc` disassembly, corrected a false claim about M3's
+shared-connection gate, squash-merged the M3 milestone to `main` via PR #1,
+and cut `feat/daq-results-gui` for the next stage.
 
-**RADIOROC 36**: corrected a false claim about M3's shared-connection gate
-(it's been met since RADIOROC 28 — a stale grep hit was repeated without
-checking current source; caught by the operator); **landed F13 Phase A**
-(`read_acquisition_run`, `read_vendor_acquisition_file`), finding and fixing
-one more real bug in review (an append-mode channel-set edge case that
-silently destroyed the current segment's data); gave a rough plan-completion
-estimate on request (~35-40% overall, M0 ~50%/M1 ~85%/M2 ~85%/M3 100%/M4
-~15-55% depending on the bar used/M5 ~5%).
+**RADIOROC 38** (this conversation, in order):
+1. Live-visual-checked the `AcquisitionWindow` skeleton with the operator
+   physically present — confirmed it works correctly end-to-end (connect,
+   configure, run, cancel, live batch summary, reopen).
+2. Delegated, reviewed, and landed **F13's spectra/histogram rendering**:
+   a matplotlib histogram of per-channel HG/LG values, channel visibility
+   checkboxes, bins/log-scale controls, live updates (throttled disk
+   re-read of `events.csv`, not a second in-memory buffer), and vendor-file
+   import for comparison. Independently verified 447/447 under
+   `.conda-radioroc`, then live-visual-checked with the operator watching —
+   a real Gaussian histogram populated correctly during a live simulation
+   run.
+3. **Received `PLINT_STUDENT_MVP_DIRECTIVE.md`** reprioritizing this week
+   around a concrete student-usable MVP (see that file — read it first).
+   This handoff exists to carry that reprioritization into a fresh
+   conversation, per the directive's and operator's own request, rather
+   than starting Priority 0's investigation on a nearly-exhausted context
+   window.
 
-**RADIOROC 37** (operator squash-merged `feat/desktop-hardware-threshold`
-into `main` via PR #1 after confirming M3's gate was genuinely met — 92
-commits, +29257/-978 lines, `main` hadn't moved since 2026-06-29):
-1. New branch `feat/daq-results-gui` cut from the updated `main` for the
-   next stage of work, per the operator's explicit request.
-2. **Landed an `AcquisitionWindow` GUI skeleton** for F13: connect (via the
-   same shared `ConnectionWorker` shell every window uses), configure an
-   `AcquisitionConfig`, preview/run/cancel, a live batches-completed
-   progress bar plus a compact per-channel count/min/max/mean summary of
-   the most recent batch, and "Open saved run" via the already-landed
-   `read_acquisition_run`. Deliberately excludes spectra/histogram
-   rendering, bins/scales controls, and vendor-file import/export UI — those
-   need visual iteration this session (built in the last ~30 minutes before
-   the operator left for a train, then reviewed/merged after) wasn't
-   positioned to do blind.
-   Delegated with a contract built from a careful read of
-   `threshold_worker.py`/`connection_worker.py`'s threshold-specific state/
-   `threshold_window.py`'s dual-mode split, then reviewed line-by-line: the
-   ~130-line `connection_worker.py` addition was checked field-for-field
-   against `_run_threshold`/`_threshold_fault`/`run_threshold` and confirmed
-   an exact, correct mirror; ran a real end-to-end smoke test beyond the
-   delegated agent's own unit tests (constructed the window offscreen, ran a
-   3-batch simulation to completion, reopened the saved run through a fresh
-   window instance) to confirm the whole path works together, not just in
-   isolated unit tests. One pre-existing quirk noted but not touched (an
-   output-directory-relabeling asymmetry that already exists identically in
-   `ThresholdWindow` — not a regression, out of scope for this task).
-   440/440 independently verified under `.conda-radioroc`, before and after
-   merging.
+**F13's GUI is now functionally complete for its originally scoped slice**
+(connect/configure/run/cancel/reopen, live batch summary, spectra
+rendering, vendor-file comparison) but has never touched real hardware.
 
-**F13's GUI is a skeleton, not complete.** The data layer (Phase A) and the
-connect/run/cancel/reopen skeleton (this entry) are both done and reviewed;
-spectra/histogram rendering, bins/scales controls, live-plot-during-run, and
-vendor-file import/export UI are the next slice.
+## This session's job: Priority 0 from the directive
 
-## What's explicitly still missing
+Read the directive's "Priority 0" section closely — this summary is not a
+substitute. In short: the plint experiment needs **two distinct selected
+channels above threshold within a coincidence window** as its trigger. It
+is genuinely unknown whether the current firmware/vendor-app's trigger
+configuration (`trigger_type`/`trigger_source`/`adc_window_ns`/
+`adc_nb_trig` — the same fields `AcquisitionConfig`, already landed in F12,
+exposes) actually implements *that*, or whether its "N triggers in a
+window" semantics would also accept **repeated pulses on one channel**,
+which would silently be a completely different (and wrong) physics result
+if assumed equivalent without checking.
 
-1. **F13's spectra/histogram rendering** on top of the now-landed
-   `AcquisitionWindow` skeleton: a matplotlib canvas showing HG/LG channel
-   spectra (mirror `ScurveWindow`'s/`ThresholdWindow`'s existing plotting
-   pattern — `canvas`/`axes`/live-update-during-run), separate HG/LG
-   event/acquisition views, channel selection/visibility/clear, bins/scale
-   controls, and vendor-file import (reading a real vendor
-   `readable_adc_acq.txt` via the already-landed `read_vendor_acquisition_file`
-   for a Windows-comparison view — no writer, per RADIOROC 36's research).
-   This is genuinely GUI-layout work that benefits from a live visual check
-   the way RADIOROC 34's did — consider getting a screenshot reviewed by the
-   operator before or shortly after building it, rather than iterating fully
-   blind through another unattended stretch.
-2. **`ProbesMasksPanel` still has no hardware read-back** — open in
-   `CROSS_PLATFORM_REBUILD_PLAN.md`'s F04 backlog, unchanged.
-3. **T1/T2/TQ *enable* bits still unimplemented** (address 65, subaddress
-   7) — carried over from RADIOROC 30, re-confirmed blocked in RADIOROC 34.
-   Needs either a genuinely new evidence source or a narrow
-   authorized-operator hardware test: write one candidate bit pattern,
-   observe which physical threshold/channel responds. Do not guess and ship
-   a write for this byte.
-4. **F11 is largely covered by F12's `AcquisitionConfig`** (trigger_type/
-   trigger_source/adc_window_ns/adc_nb_trig are the same primitives F11
-   asks for), but hasn't been explicitly validated as "done" against F11's
-   own row in `CROSS_PLATFORM_REBUILD_PLAN.md` §3 — worth a deliberate
-   check rather than assuming.
-5. **No real Windows-comparison work has started at all** (M5, and the
-   strict reading of M4's own gate). Everything vendor-derived so far is
-   static `.pyc` disassembly, never a live side-by-side run against the
-   actual Windows app. This is the single biggest gap in the rough
-   plan-completion estimate given in RADIOROC 36 — worth discussing with
-   the operator what equipment/access this actually needs before treating
-   it as a normal "pick with judgment" backlog item.
-6. All of M5's other scope (performance, packaging/release) hasn't begun.
-   See `CROSS_PLATFORM_REBUILD_PLAN.md` §3/§4 for the full list.
-7. **Minor, not urgent:** the CI run's own annotations flag
-   `actions/checkout@v4`/`actions/setup-python@v5` as targeting a
-   deprecated Node.js version.
+**Where to start, concretely:**
+1. `radioroc_client.py`'s `configure_adc_external_hold`/`acquire_adc_batch`
+   and their `trigger_type`/`trigger_source` parameters are the current
+   plumbing (already used by `HoldScanJob` and `AcquisitionJob` — read
+   both `application/acquisition.py` and `application/hold_scan.py` for how
+   they're actually invoked today). Establish precisely what each vendor
+   trigger-type/source code value means at the hardware level.
+2. Use the local vendor evidence first, per `AGENTS.md`'s standing
+   instruction: `local_artifacts/extracted/RadiorocUI_2_2_0_5.exe_extracted/`
+   — the `adc.pyc` module (used already in RADIOROC 35/36 to recover the
+   acquisition file format and register byte layout) is the most likely
+   place trigger-type/source dropdown values and their real semantics are
+   defined or labeled; `generated_notes/*.txt` may already have partial
+   disassembly from a prior session — check before re-deriving from
+   scratch. The vendor PDF user guide
+   (`local_artifacts/downloads/Radioroc2 User Guide - 2_1_0_6(0125).pdf`)
+   and `app_pics/*.png` screenshots are the other two evidence sources
+   `AGENTS.md` names.
+3. Determine specifically: does any documented/observed trigger-source
+   value correspond to "OR of N *specific, distinct* channels above
+   threshold," as opposed to "N total threshold crossings counted from
+   anywhere, including repeatedly from one channel"? Do not assume the
+   existing default (`trigger_source=3`, the F12/hold_scan default) has
+   ever been checked against this distinction — it hasn't.
+4. Design (do not yet run without operator authorization) the directive's
+   specified 5-case bounded test: (a) one channel, repeated pulses alone;
+   (b) two distinct channels inside the window; (c) two channels outside
+   the window with appropriate timing margin; (d) an excluded channel plus
+   representative pairs across the selected set; (e) known distinguishable
+   amplitudes on multiple channels, confirming event/channel association
+   including channels that stayed below threshold. Specify expected
+   accept/reject outcomes and timing tolerances *before* proposing to
+   measure anything — per the directive, do not interpret uncontrolled
+   dark-count activity as proof of coincidence semantics.
+5. If the board/firmware cannot implement true multi-channel coincidence
+   as configured, say so plainly with the evidence, and propose concrete
+   alternatives (a different supported trigger mode; external coincidence
+   hardware; a documented offline-cuts scheme with its rate/dead-time
+   caveats made explicit) for the operator to choose between — do not
+   silently substitute one of these or guess a register write to hit the
+   deadline.
 
-## Suggested next task (pick with judgment, same as always)
+**Acceptance for this item** (directive's own words): "a documented
+supported trigger/readout contract plus a controlled physical
+demonstration. Simulated behavior alone cannot close this item." Offline
+research and evidence-gathering can and should proceed without the
+operator; the physical demonstration needs their explicit per-action
+authorization at the board, same as always.
 
-1. **Build F13's spectra rendering** (item 1) if there's appetite for
-   another vertical slice — the skeleton underneath it is now settled and
-   reviewed. Strongly consider a screenshot check-in given this is the
-   part of F13 most likely to need visual iteration to get right.
-2. **If the operator is present with the board and wants to resolve
-   T1/T2/TQ (item 3)**, the narrow hardware test described there is the
-   only path left to unblock it.
-3. Raising item 5 (Windows-comparison groundwork) with the operator is
-   worth doing regardless of what else gets picked — it's the largest
-   remaining unknown in the plan's own completion picture, and likely
-   needs something (a Windows machine, a licensed copy of the vendor app,
-   lab time) that isn't just "more delegated coding work."
+## Other directive priorities (read the directive for full detail)
 
-## Standing discipline (unchanged)
+- **Priority 1** (mostly done): channel-labelled HG/LG spectra, practical
+  channel selection/plot controls, responsive progress/cancellation, saved
+  run reopening — all landed in RADIOROC 37/38's `AcquisitionWindow` work.
+  Still open per the directive: an "individual-event amplitude view"
+  distinct from the histogram (not built — the histogram aggregates, it
+  doesn't show individual events), and explicitly re-checking (not
+  assuming) that the current CSV/manifest schema satisfies M2's raw/scaled
+  encoding and units requirements for *this* experiment's needs.
+- **Priority 2**: an end-to-end calibration procedure for the student
+  (pedestals/noise per channel, dead/noisy/saturated identification,
+  relative gain characterization, threshold alignment, hold/conversion
+  timing suitable for the actual trigger setup once Priority 0 resolves
+  it, saved/attributable calibration). T1/T2/TQ enable-bit uncertainty
+  (RADIOROC 30/34, still unresolved) and `ProbesMasksPanel`'s missing
+  hardware read-back are named blockers *if* the chosen workflow needs
+  them — check that dependency explicitly rather than assuming either way.
+- **Priority 3**: run provenance and data-trustworthiness requirements —
+  read closely, this has specific, concrete requirements (event IDs unique
+  within a run including appended segments, distinguishing host-receipt
+  from physical-event timestamps, retaining below-threshold amplitudes for
+  all selected channels, not applying irreversible cuts in saved data).
+- **Priority 4**: stabilization and an actual rehearsal with the student
+  on the student's machine — the final gate, not a starting point.
+
+Do not treat any of Priority 1-4 as blocked on Priority 0 being fully
+resolved before starting — the directive says Priority 0's investigation
+"should proceed alongside completion of the current F13 plotting slice,
+without duplicate editors or conflicting changes to shared contracts." F13
+plotting is now done, so the natural next offline-safe work (Priority 1's
+individual-event view, or Priority 3's provenance review) can proceed in
+parallel with Priority 0's evidence-gathering, as long as it doesn't touch
+the same files Priority 0's investigation might need to change
+(`radioroc_client.py`'s trigger primitives, `AcquisitionConfig`).
+
+## Deferred, not dropped
+
+Broad Windows screen-by-screen parity, unrelated trigger combinations,
+cosmetic refinements, and general macOS/Debian/Ubuntu release work are
+explicitly deferred by the directive until after this checkpoint —
+targeted Windows comparisons needed for Priority 0 remain high priority.
+F15/A7585 remains permanently out of scope. None of F01-F17/M0-M5 are
+deleted by this reprioritization; this is a checkpoint within the existing
+plan, not a replacement for it.
+
+## Standing discipline (unchanged, all still applies)
 
 Offline tests and fake transports only unless the operator is present and
 explicitly authorizes a specific hardware action, per-action. Never run
@@ -126,45 +165,43 @@ explicitly authorizes a specific hardware action, per-action. Never run
 under `.conda-radioroc` (the project's actual GUI-capable environment) after
 every meaningful change — wrap it in a hard `timeout` and confirm the
 process itself exits. A self-created venv without the `[gui]` extra will
-silently skip every GUI test and look green when it isn't — this has now
-happened once already (RADIOROC 36). A7585 (F15) is permanently out of
-scope. Delegate bounded, well-specified implementation/test work to
-subagents per `AGENTS.md`; keep shared contracts, uncertain hardware/
-register reasoning, and integration for the lead. When delegating to an
-isolated worktree, review the actual diff line-by-line against the
-contract before merging, and go beyond the delegated agent's own unit
-tests with at least one real end-to-end smoke test of your own — every
-delegated task so far this stretch (F12, F13 Phase A, `AcquisitionWindow`)
-found something worth fixing or confirming this way, not by trusting the
-subagent's own passing test count alone.
+silently skip every GUI test and look green when it isn't — this has
+happened once already (RADIOROC 36). Delegate bounded, well-specified
+implementation/test work to subagents per `AGENTS.md`; keep shared
+contracts, uncertain hardware/register reasoning, and integration for the
+lead. When delegating to an isolated worktree, review the actual diff
+line-by-line against the contract before merging, and go beyond the
+delegated agent's own unit tests with at least one real end-to-end smoke
+test of your own — every delegated task this week (F12, F13 Phase A,
+`AcquisitionWindow`, spectra rendering) found something worth fixing or
+confirming this way, not by trusting the subagent's own passing test count
+alone.
 
-`main` now has the M3 milestone (PR #1, squash-merged). New feature work
-continues on `feat/daq-results-gui`; when this branch's own scope feels
-like a complete stage, the same PR-then-branch pattern from RADIOROC 37
-is the model to repeat — raise the timing with the operator rather than
-deciding alone.
+`main` has the M3 milestone (PR #1, squash-merged). Feature work continues
+on `feat/daq-results-gui`; when this branch's scope feels like a complete
+stage, the same PR-then-branch pattern from RADIOROC 37 is the model to
+repeat — raise the timing with the operator rather than deciding alone.
 
 `gh` is installed and authenticated on this machine — use it
 (`gh run list --branch <branch>`, `gh run view <id>`, `gh run view --log-failed`)
-to check CI status directly after any push, instead of asking the operator
-to check the Actions UI manually. Watch for the occasional stale/transient
-`gh run list` result — re-list with a larger `--limit` if the top row looks
-implausible, rather than trusting a single query.
+to check CI status directly after any push. Watch for the occasional
+stale/transient `gh run list` result — re-list with a larger `--limit` if
+the top row looks implausible.
 
-**Before pushing anything** (not just after a packaging change, per
-`AGENTS.md`'s existing "verify an installed wheel" rule): actually
-reproduce CI's *environment*, not just its commands. Build a from-scratch
-venv with only the exact extras a given CI step installs, confirm the
-thing that's supposed to be absent (e.g. `import PySide6`) genuinely fails
-in it, then run the real command there. `.conda-radioroc` or any other
-long-lived dev environment with every extra already installed cannot catch
-a missing-extra-only failure no matter how many times it's used. When a
-local repro does fail, root-cause it before assuming your own current
-changes caused it — reproducing against an earlier commit in an isolated
-`git worktree` (cheap, doesn't disturb the working tree) is what
-distinguished "pre-existing bug" from "something I just broke" in a past
-session. And never state a CI run "probably passed" as a substitute for
-checking — say what you actually verified and what you didn't.
+**Before pushing anything** (per `AGENTS.md`'s "verify an installed wheel"
+rule): actually reproduce CI's *environment*, not just its commands.
+`.conda-radioroc` or any other long-lived dev environment with every extra
+already installed cannot catch a missing-extra-only failure. Root-cause a
+local repro failure before assuming your own current changes caused it —
+an isolated `git worktree` against an earlier commit is cheap and doesn't
+disturb the working tree. Never state a CI run "probably passed" — say
+what you actually verified.
 
-Record what you did, what's next, and any real findings in
-`IMPLEMENTATION_STATUS.md` and a fresh `NEXT_SESSION.md` before you stop.
+Per the directive's own instruction: track each MVP item as implemented,
+offline-verified, physically verified, or blocked, with concrete evidence
+and the next action. Separate software completion from equipment/operator
+dependencies. Reassess feasibility immediately after this investigation —
+do not promise delivery from a test count or code-volume estimate. Record
+actual checks and remaining limitations in a fresh `IMPLEMENTATION_STATUS.md`
+entry and `NEXT_SESSION.md`, retaining the session-numbering convention,
+rather than copying aspirational acceptance claims into the log.
