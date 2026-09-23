@@ -47,10 +47,14 @@ entry for the complete evidence trail; in short:
 ### 1. Resolve external single-shot triggering on this TGF4162 unit
 
 `CLKSRC` is confirmed supported on this firmware (`CLKSRC?` returned
-`INT` without error, unlike any `BST*` command). Try `CLKSRC EXT` as a
-possible alternate mechanism for gating the generator's output on the
-FPGA's synchro-trigger line, since burst-mode commands aren't available.
-If that doesn't pan out, ask the operator directly whether the earlier
+`INT` without error, unlike any `BST*` command) but a quick solo attempt
+at `CLKSRC EXT` was inconclusive: the write returned no error (`*ESR?` 0),
+but an immediate `CLKSRC?` still reported `INT` — no confirmed state
+change, and not investigated further to avoid open-ended SCPI probing
+without the operator present. Worth a proper look (does it need an actual
+clock signal present first? does the front panel show anything different
+after the write, even if the query doesn't?) but treat as unresolved, not
+as a dead end already ruled out. If that doesn't pan out, ask the operator directly whether the earlier
 "known-good" burst setup was documented from a different bench/unit —
 their answer resolves this faster than more blind SCPI probing. The
 Aim-TTi TGF4000 Series manual (Issue 3) is saved for reference; fetch
