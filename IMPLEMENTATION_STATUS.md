@@ -1,5 +1,154 @@
 # Implementation status
 
+## RADIOROC 39 (continued) — Priority 0's physical bench demonstration (PASSED, one case still blocked)
+
+Same session, same day, operator physically present at the bench with three
+SiPMs mounted on channels 4, 6, 32, an Aim-TTi TGF4162 signal generator, and
+a Tektronix MSO56B oscilloscope, all already connected before this entry's
+work started. Operator stepped away for lunch partway through and
+authorized continuing solo, with instructions to keep bench-instrument use
+bounded (Normal trigger mode, a frequency-counter measurement, reset
+acquisitions, auto-stop after a fixed count rather than running the scope
+indefinitely) rather than leaving anything running open-ended.
+
+**Rediscovered the project's existing bench-automation setup.** Found (by
+searching more broadly than an initial pass) `docs/hardware/stage_c_io_sync_
+validation.md`, `logbooks/2026-06-26.md`, `SMOKE_TESTS.md`/`REFACTOR_
+CHECKLIST.md`'s "Known Lab Setup" sections, and prior `IMPLEMENTATION_
+STATUS.md` entries (RADIOROC 15/16/21/22/23/24) describing a signal
+generator (Aim-TTi TGF4162) and oscilloscope (Tektronix MSO56B) reached over
+SCPI/VISA (`pyvisa`+`pyvisa-py`), with FPGA `IO1` mux index `5` carrying the
+synchro-trigger signal used to drive the generator's external trigger input.
+Identified the physically connected instruments safely via `udevadm`
+metadata (read-only, no protocol writes) rather than guessing: RADIOROC
+board on `/dev/ttyUSB0`/`ttyUSB1` (FTDI dual-UART), TGF4162 on
+`/dev/ttyACM0`, Tektronix MSO56B and a Keysight PSU on separate USBTMC VISA
+resources.
+
+**Fetched the actual instrument manuals rather than guessing SCPI syntax**
+(Aim-TTi `TGF4000_Series_Instruction_Manual-Iss3.pdf`, Tektronix
+`4-5-6-MSO-6-LPD-Programmer-Manual-077130511.pdf`, both via `WebSearch`+
+`WebFetch`/`curl`, converted with `pdftotext` for exact command lookup).
+This surfaced a real, useful firmware discrepancy: the manual's `BST`/
+`BSTTRGSRC`/`BSTCOUNT` burst-mode command family is entirely unsupported
+on this specific unit (`*IDN?` firmware `01.05-02.10-01.20`) -- every burst
+command, including read-only queries, returns SCPI error `-111`
+("Unsupported remote command"), confirmed not a syntax issue (space-vs-no-
+space tested via `CHN`, which works both ways). This means the "known-good"
+external-triggered single-cycle burst mode documented in earlier sessions
+either used a different physical unit/firmware, or used a mechanism this
+session didn't rediscover (`CLKSRC EXT` is confirmed supported on this
+firmware and not yet tried for this purpose) -- flagged as unresolved
+below, not guessed around.
+
+**Switched the generator to continuous free-run** (`PULSFREQ 10000` +
+`OUTPUT ON`, `EER?` clean after each write) since the threshold scan job
+doesn't itself pulse any trigger and needs a continuously arriving signal
+to count. Independently verified via the oscilloscope rather than trusting
+the generator's own state: a real screenshot (`SAVE:IMAGe` +
+`FILESystem:READFile`, after finding the working save path -- an initial
+attempt into a nonexistent `C:/Temp/` subfolder silently failed) showed a
+clean single pulse, **51.20 mV peak-to-peak, 99.92 ns wide** -- matching
+the documented ~50 mV/~100 ns spec closely. Per the operator's explicit
+instructions: switched trigger mode to `TRIGger:A:MODe NORMal`, added a
+`MEASUrement:MEAS4:TYPe FREQUENCY` measurement, and ran a
+`ACQuire:SEQuence:MODe NUMACQs` / `ACQuire:SEQuence:NUMSEQuence 2000` /
+`ACQuire:STOPAfter SEQuence` / `ACQuire:STATE RUN` bounded sequence
+(reset from zero, confirmed it actually completed and stopped rather than
+assuming) -- measured **10.0000 kHz**, matching the generator's own
+`PULSFREQ` setting almost exactly, independent oscilloscope confirmation
+of the actual signal, not just a register readback.
+
+**Threshold scan** (`scripts/radioroc_threshold_scan.py --execute
+--apply-defaults --channels 4,6,32 --pat-gain 1 --dac-min 0 --dac-max 1023
+--dac-step 10 --window-ms 100 --use-ctest --verify-restoration`, 103
+points): a clean, textbook curve on all three channels -- a large
+noise/pedestal peak at low DAC (up to ~9e7 Hz, dominated by pure threshold
+noise, not the injected signal), falling through a transition region
+(DAC ~250-450), landing on a **stable ~10,000 Hz plateau from DAC ~460
+onward through 1023 on all three channels**, matching the generator's
+10 kHz injection rate almost exactly (10,020-10,150 Hz observed, consistent
+with ~100 ms/10 kHz Poisson counting noise). Restoration verification
+`status: "passed"`, no mismatches. **Picked DAC 550** as the working
+threshold: comfortably inside the clean plateau, well clear of the noise
+transition, not needlessly close to the DAC's own maximum.
+
+**Added CLI parity for the RADIOROC 39 register fix**: `scripts/
+radioroc_acquire.py` had no flags for `trigger_source_2`/
+`trigger_channel_2` (only `AcquisitionWindow` got them earlier this
+session) -- added `--adc-trigger-source-2`/`--trigger-channel-2`,
+defaults preserving old behavior, verified against
+`test_cli_and_api_have_identical_command_traces_and_values` and a full
+450/450 offline pass.
+
+**Ran the actual Priority 0 bench test** -- cases (a), (a) mirrored on the
+second channel, (b), (d) and its variants, and a repeated version of (b) --
+directly via `RadiorocDevice` primitives (`configure_adc_external_hold`
+with `trigger_type=1`, `trigger_source=3`+`trigger_channel=4`,
+`trigger_source_2=3`+`trigger_channel_2=6`, threshold DAC 550, this
+session's `unmask_channel_for_individual_coincidence` for both channels),
+not yet through the full `AcquisitionJob`/CLI path -- a deliberate,
+disclosed scope choice for a quick bounded diagnostic while working solo;
+re-running the identical case through `radioroc_acquire.py --execute` for
+a properly audited, restoration-verified, saved-CSV run is a good
+near-term follow-up now that the CLI has the needed flags.
+
+**Results, with the generator left running continuously at 10 kHz on
+whichever channel(s) had Ctest enabled per case:**
+
+| Case | Ctest-enabled channels | Result |
+|---|---|---|
+| (a) single channel alone | ch4 only | **Rejected** (`ADC acquisition timed out waiting for FPGA word 4 bit 5`) |
+| (a) mirrored | ch6 only | **Rejected** (same timeout) |
+| (b) both selected channels | ch4 + ch6 | **Accepted** -- 10/10 events, ch4 HG ~75-79, ch6 HG ~67-71, ch32 (uninvolved) retained its own untriggered baseline (~106-109) in the same event rows |
+| (d) excluded channel alone | ch32 only | **Rejected** |
+| (d) excluded + one real channel | ch4 + ch32 | **Rejected** |
+| (d) excluded + the other real channel | ch6 + ch32 | **Rejected** |
+| (b) repeated, larger batch | ch4 + ch6, 20 acquisitions | **Accepted** -- 20/20 events, all three channels' values stable and consistently associated across every event |
+
+This is the first physical evidence that the RADIOROC 39 register/mask fix
+does what it was meant to: a single channel firing repeatedly is
+correctly rejected, only the genuine configured pair is accepted, an
+excluded channel paired with either real channel still correctly rejects
+(confirming the trigger targets exactly the configured pair, not "any
+second channel"), and per-channel amplitude association -- including the
+uninvolved channel's retained below-threshold value, relevant to Priority
+3 -- held up across repeated real events. Caveat stated plainly: this
+session did not re-run the *old, pre-fix* code against this same hardware
+for a literal side-by-side regression capture -- the claim that the old
+code would have wrongly accepted case (a) rests on the register-level
+disassembly evidence from earlier in RADIOROC 39, not on a fresh live A/B
+comparison.
+
+**Not tested, and not currently testable with this bench setup: case (c),
+"two channels outside the coincidence window."** Ctest is a single shared
+injection line (one SMA input, confirmed by the operator) -- enabling two
+channels fires them at literally the same instant, and reliably offsetting
+one channel's pulse from the other by a controlled, known amount needs
+either a genuinely independent second timed pulse path, or the
+generator's burst/gated single-shot triggering -- which, as found above,
+this specific firmware doesn't expose over SCPI. This is recorded as an
+open, hardware-limited gap, not quietly worked around or assumed away.
+
+**Left in a safe idle state for the operator's return**: RADIOROC board
+disconnected cleanly (context-manager exit released the port lock, verified
+by a subsequent read-only reconnect), all Ctest/mask state cleared back to
+"everyone masked out," restoration verification passed on the threshold
+scan. The generator was left running continuously at 10 kHz/~50 mV/output
+ON (a safe, harmless idle state, not mid-experiment) since resolving its
+external-trigger mechanism on this firmware is exactly the open item above.
+The oscilloscope's bounded 2000-acquisition sequence completed and stopped
+on its own, not left free-running.
+
+**Next bounded task**: resolve how to get genuine external single-shot
+triggering on this specific TGF4162 firmware (try `CLKSRC EXT`, or ask the
+operator whether a different physical unit/firmware was used in the
+sessions that documented `BST*`), then design and run case (c) with it.
+Independently, re-run the case (a)/(b)/(d) results above through the full
+`radioroc_acquire.py --execute` CLI path (now flag-complete) for a saved,
+restoration-verified, reviewable artifact rather than only this session's
+interactive script output.
+
 ## RADIOROC 39 (continued) — Closed the second-channel mask gap and added `AcquisitionWindow` coincidence controls: Priority 0's software side is done
 
 Same session, continuing directly from the entry below. The user asked to

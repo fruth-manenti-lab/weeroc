@@ -156,7 +156,11 @@ def build_parser(preset: dict[str, object] | None = None, preset_path: Path | No
     parser.add_argument("--t2", action="store_true", help="Use T2 threshold instead of T1")
     parser.add_argument("--no-mask", action="store_true", help="Do not isolate the trigger channel with masks")
     parser.add_argument("--adc-trigger-type", type=int, help="Vendor ADC trigger type code")
-    parser.add_argument("--adc-trigger-source", type=int, help="Vendor ADC trigger source code")
+    parser.add_argument("--adc-trigger-source", type=int, help="Vendor ADC first coincidence-input code (T1 slot)")
+    parser.add_argument("--adc-trigger-source-2", type=int,
+                         help="Vendor ADC second coincidence-input code (T2 slot)")
+    parser.add_argument("--trigger-channel-2", type=int,
+                         help="Second coincidence channel, used when --adc-trigger-source-2 selects Individual (3)")
     parser.add_argument("--adc-window-ns", type=int, help="ADC coincidence/window width")
     parser.add_argument("--adc-nb-trig", type=int, help="ADC time-window trigger count")
     parser.add_argument("--rstn-manual", action="store_true", help="Set vendor ADC reset-n manual bit")
@@ -207,6 +211,10 @@ def main() -> int:
         args.adc_trigger_type = 0
     if args.adc_trigger_source is None:
         args.adc_trigger_source = 3
+    if args.adc_trigger_source_2 is None:
+        args.adc_trigger_source_2 = 0
+    if args.trigger_channel_2 is None:
+        args.trigger_channel_2 = 0
     if args.adc_window_ns is None:
         args.adc_window_ns = 50
     if args.adc_nb_trig is None:
@@ -250,6 +258,8 @@ def main() -> int:
         use_mask=not args.no_mask,
         trigger_type=args.adc_trigger_type,
         trigger_source=args.adc_trigger_source,
+        trigger_source_2=args.adc_trigger_source_2,
+        trigger_channel_2=args.trigger_channel_2,
         adc_window_ns=args.adc_window_ns,
         adc_nb_trig=args.adc_nb_trig,
         rstn_manual=args.rstn_manual,
