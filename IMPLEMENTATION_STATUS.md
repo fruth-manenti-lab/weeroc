@@ -69,6 +69,70 @@ real and open:
 
 455/455 offline tests pass under `.conda-radioroc` (`tools/check_development.py`).
 
+## RADIOROC 40 (continued) — Promoted Acquisition to its own sidebar page; found and fixed a real close-hang race
+
+Direct operator request (while still remote, still offline): Acquisition
+should be a separate top-level tab, positioned ahead of ("to the left of")
+Calibration, not buried as Calibration's fifth sub-tab -- collecting data
+is a distinct phase from calibrating, per `PLINT_STUDENT_MVP_DIRECTIVE.md`'s
+own target workflow ("calibrate ... then configure coincidence ...
+collect"). `src/radioroc/gui/main_window.py`: sidebar is now ASIC config. /
+Acquisition / Calibration (was two items); Calibration's `calibration_tabs`
+now has four sub-tabs, not five. Updated `tests/test_main_window.py` to
+match (replaced the "fifth calibration tab" assertion with one asserting
+Acquisition is its own sidebar page and is absent from `calibration_tabs`;
+extended the sidebar-switching test to all three pages). Real visual
+check, not just passing tests: rendered the actual window offscreen
+(`QT_QPA_PLATFORM=offscreen`) at all three sidebar rows and inspected the
+resulting screenshots -- Acquisition renders as a full standalone page,
+Calibration's tab bar now shows exactly Threshold scan / Hold scan /
+S-curve / Autocalibration.
+
+**Found and fixed a real, severe "frozen UI that prevents stopping" bug**
+in the same shared-connection-worker path the directive names as needing
+scrutiny, via a delegated read-only defect-hunt review (bounded to the
+directive's own named MVP-bug categories, not a generic style pass) that I
+then independently verified before touching anything:
+
+- **Defect**: `ConnectionWorker` has a documented, tested contract
+  (`test_new_job_fault_during_shutdown_stays_alive_for_explicit_retry` in
+  `tests/test_connection_worker.py`) that if a running hardware job faults
+  while a shutdown request is already queued behind it, the shutdown is
+  deliberately dropped -- state lands on `"faulted"`, the worker stays
+  alive, and the caller *must* call `shutdown()` again to actually finish
+  closing. This is intentional: it keeps an unresolved device fault
+  visible instead of silently closing over it, matching the directive's
+  "unresolved device-state faults must remain visible" requirement.
+  `MainWindow.closeEvent` called `worker.shutdown()` exactly once, gated by
+  a one-shot latch that never resets, and never retried -- so a hardware
+  fault landing at exactly the moment a student closes the app (e.g. a USB
+  hiccup during a run's mandatory restoration-verification read) left the
+  window unclosable via any UI action, forever, with no error dialog and
+  no way out short of force-killing the process.
+- **Verified, not just trusted**: reproduced the hang directly (fake
+  `ConnectionWorker` + the same `BlockingCounterFaultTransport` fault-
+  injection fake `test_connection_worker.py` already uses, driven through
+  the real `MainWindow`/`ThresholdWindow` hardware-run path), confirmed it
+  actually hangs (`worker.snapshot().state` stuck at `"faulted"`, never
+  reaching `"stopped"`, even after seconds of normal event-loop pumping),
+  then confirmed the fix resolves it and that reverting the fix reproduces
+  the exact same hang again (`AssertionError: 'faulted' != 'stopped'`).
+- **Fix**: `_finish_close_if_idle` (the poll loop `closeEvent` already
+  starts while waiting to actually close) now retries `worker.shutdown()`
+  whenever it observes `state == "faulted"`, matching the documented
+  retry contract. Scoped narrowly: this poll loop only ever runs while an
+  actual close is already in progress (`_closing` already latched), so an
+  unrelated fault during ordinary operation still stays visible and
+  blocks further runs, untouched -- this does not paper over faults in
+  general, only unblocks a close that's already been requested.
+- New regression test:
+  `test_close_recovers_when_a_hardware_job_faults_racing_the_shutdown` in
+  `tests/test_main_window.py`.
+
+461/461 offline tests pass under `.conda-radioroc` (`tools/check_development.py`),
+combined with RADIOROC 40's earlier Step 3/Step 6 work and the Priority 3/
+test-coverage work below.
+
 ## RADIOROC 39 (continued) — Priority 2 rehearsal: operator ran the calibration procedure through the GUI, found and fixed two real plotting bugs
 
 Same day, same bench (SiPMs still biased from earlier). Per the
