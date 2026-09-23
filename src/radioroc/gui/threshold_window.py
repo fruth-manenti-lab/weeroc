@@ -180,6 +180,11 @@ class ThresholdWindow(QMainWindow):
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
+        plot_controls = QHBoxLayout()
+        self.log_y = QCheckBox("Log Y")
+        plot_controls.addWidget(self.log_y)
+        plot_controls.addStretch(1)
+        right_layout.addLayout(plot_controls)
         self.figure = Figure(figsize=(6, 4), layout="constrained")
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.axes = self.figure.add_subplot(111)
@@ -237,6 +242,9 @@ class ThresholdWindow(QMainWindow):
                          "Channels to scan and plot. Click to choose which channels.")
         self.hint.attach(self.channel_select.select_all_button, "Select every channel.")
         self.hint.attach(self.channel_select.select_none_button, "Deselect every channel.")
+        self.hint.attach(self.log_y, "Plot the trigger-rate axis (Y) on a log scale. Threshold "
+                          "scans span many orders of magnitude -- a real signal plateau can be "
+                          "under 0.1% of the noise peak and looks like flat zero on a linear axis.")
         self.hint.attach(self.dac_min, "First threshold DAC code in the sweep.")
         self.hint.attach(self.dac_max, "Last threshold DAC code in the sweep.")
         self.hint.attach(self.dac_step, "Step size between sweep points.")
@@ -283,6 +291,7 @@ class ThresholdWindow(QMainWindow):
                               "configuration fields above to the connected hardware.")
         self._mode_changed()
         self._plot((), "Simulation — no data yet")
+        self.log_y.toggled.connect(lambda: self._plot(self._last_rows, self._last_title))
 
     # -- connection_worker: a plain attribute in "injected" mode, or a
     # mirror of the internal ConnectionPanel's worker otherwise, so both
@@ -695,10 +704,17 @@ class ThresholdWindow(QMainWindow):
                 self.close()
 
     def _plot(self, rows, title):
+        self._last_rows, self._last_title = rows, title
         self.axes.clear()
         self.axes.set_title(title, fontsize=11)
         self.axes.set_xlabel("Threshold DAC code")
         self.axes.set_ylabel("Trigger rate (Hz)")
+        # Threshold rates span many orders of magnitude (a noise-dominated
+        # peak near DAC 0 versus a real injected/dark-count plateau that can
+        # sit under 0.1% of that peak) -- on a linear axis the plateau is
+        # visually indistinguishable from zero, which is exactly the region
+        # a student needs to read a clean operating threshold from.
+        self.axes.set_yscale("log" if self.log_y.isChecked() else "linear")
         self.axes.grid(True, alpha=0.2)
         if rows:
             for channel in (name for name in rows[0] if name != "DAC"):
