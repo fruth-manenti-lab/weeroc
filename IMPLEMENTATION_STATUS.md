@@ -1,5 +1,86 @@
 # Implementation status
 
+## RADIOROC 39 (continued) — Priority 2 rehearsal: operator ran the calibration procedure through the GUI, found and fixed two real plotting bugs
+
+Same day, same bench (SiPMs still biased from earlier). Per the
+operator's own suggestion, they stood in for the student and ran
+`docs/plint_calibration_procedure.md`'s Steps 1/2/4 themselves through the
+actual GUI, with the lead walking through each field and independently
+verifying every result from the saved run data afterward (not just
+trusting the on-screen "looks alright") -- a real Priority 4 rehearsal
+data point, not just a Priority 2 exercise.
+
+**Step 1 (pedestal/noise/dead-channel ID)**, `ThresholdWindow`, channels
+4/6/32, DAC 0-1023 step 20, Ctest off: completed cleanly (52/52 points,
+cleanup restored, verification passed). Independently re-plotted and
+reviewed: all three channels show a real noise peak and a clean floor by
+DAC ~460-480, no channel excluded.
+
+**Step 2 (threshold alignment)**, `AutocalibrationWindow`: operator's
+first Preview had the Discriminator combo on T2, not T1 -- caught before
+running, not after. Corrected run completed cleanly (all four sub-scans:
+step1_zero/step1_full/step2/final, each independently confirmed
+`status: completed`, `cleanup: restored`). Independently computed each
+channel's 50%-crossing DAC from the final verification scan's own CSV
+(not trusted from a summary): ch4 ~178-180, ch6/ch32 ~176-178 -- aligned
+within about 2-4 DAC codes.
+
+**Step 4 (relative gain characterization)** hit real trouble, worked
+through live rather than glossed over:
+1. First attempt (Ctest on, generator still in single-shot mode from
+   earlier debugging) produced a curve identical in shape to a pure
+   dark-noise scan -- correctly diagnosed live as "no signal was actually
+   injected" (the generator was gated, waiting for a trigger nothing was
+   sending) rather than accepted as a gain result.
+2. Operator switched the generator back to continuous mode, but re-scanned
+   only DAC 0-250 after seeing "mostly zeros" -- pointed out live that
+   0-250 is still entirely inside the noise peak; the informative region
+   is the high-DAC plateau (400+), which a 0-250 scan cannot reach.
+3. Full-range rerun succeeded: a clean, real ~10-11 kHz plateau from DAC
+   ~440 through 1020, confirmed by reading the raw CSV values directly
+   (10130, 10540, 10280, 11060, 12420 Hz etc. -- genuinely varying,
+   Poisson-consistent measured counts, not a suspiciously constant number,
+   which is what ruled out "log-scale zero-clamping artifact" as an
+   explanation when the operator raised it). Channels 4/6/32 all show
+   closely matching plateau values -- no relative-gain outlier.
+
+**Two real GUI bugs found live during this rehearsal, both fixed and
+committed the same session:**
+- `ThresholdWindow`'s embedded plot used a plain connected-line style
+  where the standalone `scripts/plot_threshold_scan.py --steps` (and the
+  project's own 2026-06-26 logbook convention) already established that
+  threshold-scan data should render as a staircase, since it's a genuine
+  step function (one measured rate per discrete DAC code, no real
+  in-between value) -- not previously ported to the GUI. Fixed
+  (`drawstyle="steps-post"`).
+- `ThresholdWindow` had no log-scale option at all. Threshold-rate data
+  spans up to 8 orders of magnitude; on the resulting linear axis, Step
+  4's genuine ~10 kHz signal plateau is under 0.02% of the ~10^8 Hz noise
+  peak and renders as visually indistinguishable from a flat zero -- this
+  is exactly what led the operator to (reasonably) suspect the data was
+  wrong when it wasn't. Added a "Log Y" checkbox matching
+  `AcquisitionWindow`'s existing convention; independently rendered the
+  real window offscreen with the actual Step 4 data, before and after
+  toggling, to confirm.
+
+Both fixes: 450/450 offline tests pass each time
+(`tools/check_development.py`).
+
+**Step 3** (pick an operating threshold) and **Step 6** (save an
+attributable record) are decisions/documentation, not GUI actions --
+not finalized this session; see `NEXT_SESSION.md`. **Step 5** (hold/
+conversion timing) was not re-run through the GUI this session; the
+earlier same-day hold-scan result (peak ~530-550 ns) stands but wasn't
+rehearsed via `HoldScanWindow` specifically.
+
+**Equipment left at end of day**: SiPM bias (PSU CH3, 29.5 V) still ON.
+Signal generator: **mode left as burst/single-shot external-triggering,
+output turned off** -- a deliberate choice (burst mode was hard-won this
+session, given SCPI doesn't expose it on this unit's firmware; continuous
+mode is one trivial, already-documented command to restore if a future
+session wants more threshold/gain-style scans instead). Board disconnected
+cleanly.
+
 ## RADIOROC 39 (continued) — Priority 3: closed the missing host-receipt-timestamp gap
 
 Same session, offline (no hardware touched), while the operator was away
