@@ -1,5 +1,131 @@
 # Implementation status
 
+## RADIOROC 39 (continued) — Case (c) attempted with real external single-shot triggering: got the mechanism working, hit a new, unexplained anomaly, deliberately stopped rather than force a result
+
+Same day, continuing directly from the entry below (read it first — this one
+assumes that context). Operator resolved the earlier open question
+themselves: the "known-good" burst-mode setup from RADIOROC 15/16/22/23
+was configured **on the generator's front panel**, not over SCPI — so the
+`BST*` command family being unsupported on this firmware's remote
+interface was real, but a red herring for getting single-shot triggering
+working at all.
+
+**Got genuine external single-shot triggering confirmed working, cleanly,
+independently verified:**
+- IO1's FPGA mux index had drifted to `0` (not `5`) since the earlier
+  continuous-mode work this session — fixed (`write_fpga_io_mux(io1=5)`)
+  before anything else, or none of this would have worked regardless of
+  the generator's own state.
+- With the generator front-panel-configured for external-triggered
+  single-cycle burst: confirmed **zero acquisitions over 5 seconds while
+  idle** (genuinely gated, not free-running), then fired exactly one
+  `pulse_synchro_trigger` and confirmed **exactly one** scope acquisition
+  resulted. A screenshot at that point showed a clean single pulse,
+  28.00 mV peak-to-peak, 100.3 ns wide -- correctly gated, but at roughly
+  half the amplitude of the continuous-mode signal this session's DAC 550
+  threshold was calibrated against (the operator identified why: the scope
+  and the board are both fed through a CAEN fan-in/fan-out module's
+  output, which has its own insertion loss). Operator increased the
+  generator from 500 mV to 1 V; a fresh screenshot then showed 52.40 mV
+  peak-to-peak, 100.5 ns -- matching the continuous-mode calibration
+  point closely.
+
+**Hit a new, genuinely unexplained problem, distinct from the earlier
+firmware/BST question, and did not paper over it.** With single-shot
+triggering electrically confirmed clean and the amplitude corrected, the
+*same* coincidence configuration that this session's earlier
+`coincidence_test.py` run validated repeatedly and reliably under
+continuous-mode signal conditions (`trigger_type=1`, both slots
+"Individual" on channels 4/6, threshold DAC 550, `hold_delay_ns=530`) --
+now, in single-shot mode, produced results backwards from every
+expectation, reproducibly across independent rewrites of the test:
+
+- A trivial **positive control** (Ctest enabled on both channels
+  simultaneously, one externally-triggered pulse -- the shared line means
+  zero relative delay, this must accept if the logic works at all) came
+  back **rejected**, every time, across three independently rewritten
+  test scripts.
+- The genuine **case (c)** setup (channel 4 alone, then channel 6 alone
+  roughly 150 ms later -- vastly outside the 50 ns window, this must
+  reject) came back **accepted**, every time.
+
+Three specific hypotheses were tested and each was ruled out before
+stopping, rather than accepted on a hunch:
+
+1. **A stale, previously-set ready flag.** Confirmed real in one run
+   (`ready` read `True` before anything in that script had fired a
+   pulse) -- but also confirmed *not* the explanation for the
+   backwards pattern: a dedicated check showed the arm sequence
+   (replicating `acquire_adc_batch`'s own word-2/word-21 reset) reliably
+   clears the ready bit to `False` immediately after arming, before any
+   pulse, in a clean run.
+2. **Hold/conversion timing mismatched for this signal path.** Ruled out
+   directly: a bounded hold-delay scan (`scripts/radioroc_hold_scan.py`,
+   channel 4 alone, Simple trigger, the same external single-shot
+   triggering, 17 points from 100-900 ns) showed a clean, unambiguous
+   peak at `hold_delay_ns` 500-550 (HG 461-533 against a ~105 pedestal
+   baseline at every other point) -- confirming 530 ns, the value already
+   in use, correctly samples this exact pulse's peak. Not the cause.
+3. **A bug in this session's own hand-rolled arm/read replacement for
+   `acquire_adc_batch`.** Ruled out by rewriting the test to use the
+   library's own already-proven `acquire_adc_batch` directly (via a
+   background thread for the pulse timing choreography, arming and
+   reading through the real, tested code path) -- identical backwards
+   result. Also ruled out reusing a stale `configure_adc_external_hold`
+   call across attempts by rewriting to call it fresh immediately before
+   every single attempt -- no change.
+
+**Deliberately stopped rather than force a conclusion.** With the
+operator's explicit agreement, given deadline pressure: this is left as a
+genuinely open, reproducible anomaly specific to single-shot external
+triggering, not resolved and not worked around. It does not call the
+continuous-mode result from the entry below into question -- that result
+was independently reproduced multiple times under conditions (repeated,
+long-duration signal presence) different enough from this single-shot
+anomaly that both can be true simultaneously: the coincidence *logic* is
+confirmed correct given a sustained, repeated real signal; something about
+how it responds to one isolated, precisely time-known external-triggered
+event is not yet understood.
+
+One live, undeveloped hypothesis worth recording for whoever picks this
+up: continuous mode gives the trigger logic many (thousands of) chances
+per test, so a per-attempt reliability issue could hide behind that
+repetition and only surface when there is exactly one chance. This was
+not tested (e.g., by repeating the single-shot positive control many
+times to see if it *ever* accepts, or checking whether the ready flag
+truly stays latched/high rather than being edge-sensitive and easy to
+miss on a 10 ms polling interval) -- a natural next step, not a
+conclusion.
+
+**Discussed and declined switching to LED illumination as a diagnostic**
+(operant's SiPMs would respond through the real signal chain instead of
+Ctest's direct capacitive injection, which might behave differently at
+the peak-detector). Clarified for the operator that this doesn't remove
+the need for controllable per-channel timing for case (c) itself --
+toggling channel mask/Ctest-enable between two sequential single pulses
+(exactly what this session already tried) is the right test design
+regardless of injection method; LED was only ever a way to test whether
+Ctest's specific pulse shape was implicated in the positive-control
+failure, not a shortcut around needing two time-separated events. Skipped
+for now given the deadline, not ruled out as a future diagnostic.
+
+**Left in a safe idle state**: Ctest disabled and masks cleared on all
+three channels, board disconnected cleanly. IO1's FPGA mux index is now
+correctly at `5` (was found drifted to `0` this session -- worth checking
+at the start of any future session touching this signal path rather than
+assuming it's still set).
+
+**Status for Priority 0, precisely**: the register/mask fix is
+demonstrated correct under continuous, repeated real-signal conditions
+(the entry below) -- accept/reject/exclusion/association all held up
+across 20+ repeated real events. External single-shot triggering is now
+confirmed achievable electrically (front panel, not SCPI). Whether the
+*same* coincidence logic responds correctly to a single, isolated,
+precisely-timed external event -- which is what a real muon-coincidence
+measurement will actually look like -- is genuinely unknown and flagged
+as the most important remaining open question before this can be called
+fully closed, not a formality.
+
 ## RADIOROC 39 (continued) — Priority 0's physical bench demonstration (PASSED, one case still blocked)
 
 Same session, same day, operator physically present at the bench with three
