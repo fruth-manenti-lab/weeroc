@@ -1,5 +1,55 @@
 # Implementation status
 
+## Independent plint MVP sanity review — 24 September 2026 (Astra)
+
+Reviewed `feat/daq-results-gui` at `4435584`, at the operator's request,
+including tests, a visible GUI exercise, and authorized equipment checks.
+This is an independent review alongside Claude's numbered development sessions;
+their existing session titles and `NEXT_SESSION.md` were left intact.
+Full findings, exact code locations, and prioritized acceptance work are in
+`docs/MVP_SANITY_REVIEW_2026-09-24.md`.
+
+**Checks:** the initial sandbox run completed 461 tests with three timeout
+failures (main-window completion and two process-lock subcases), then remained
+alive; only the audit's processes were stopped. The isolated process-lock test
+passed outside the sandbox. A full host-environment rerun with writable
+`MPLCONFIGDIR` and offscreen Qt passed **461/461, no skips**, plus **18 CLI help
+checks**, exit 0 (unit tests: 178.845 s). No source/packaging changes were made.
+
+Opened the actual GUI on the lab's 1024×768 display and exercised eight-channel
+simulation, completion, reopening, gain/log plotting controls, and cancellation.
+Completion/cancellation retained data and reported restored cleanup. Confirmed
+that 15 physical events are wrongly labelled 120 events, and the spectrum
+collapses into a thin strip at this display size. A synthetic 100,000-event,
+eight-channel live refresh took 6.12 s on the GUI thread, peak process RSS
+~397 MiB: the growing CSV is reparsed and retained despite the bounded mailbox.
+
+Independent offline reproductions also confirmed same-channel self-coincidence
+is accepted, cancellation after autocalibration corrections is not fault-gated
+despite incomplete final verification, partial calibration writes are omitted
+from `calibration_after`, append replaces earlier segment provenance, and the
+calibration-record reader cannot accept the top-level autocalibration filename.
+The procedure's gain step describes a missing Ctest panel action and amplitude
+measurements while the recorded rehearsal used rate plateaus; hold-scan GUI
+also lacks the second coincidence slot required by its written procedure.
+The implemented fixed-pair trigger does not establish any-two-of-4–8 semantics.
+
+**Equipment limits:** no competing RADIOROC app or serial owner was observed.
+The GUI worker's one status-only connection to `/dev/ttyUSB0` failed visibly
+with a malformed response and closed. Read-only PSU queries confirmed all three
+Keysight EDU36311A outputs OFF, consistent with the last handoff. No voltage,
+current limit, output-enable, bias or generator setting was changed; no hardware
+scan was attempted. Both audit GUI instances closed and serial ports were released.
+This does not establish powered-board failure or validate physical coincidence.
+
+Evidence/scripts/screenshots/logs are preserved, ignored, under
+`radioroc_runs/astra_mvp_audit_20260924/`. **Next bounded work:** resolve the
+fixed-pair versus any-pair requirement, fix calibration cancellation/provenance
+and the procedure/UI mismatches, then fix event counts and bounded plotting
+before the powered student/endurance rehearsal. See the review for reproductions
+and distinctions between verified bugs, conditional append risk, and pending
+physical validation. Passing the current suite is not student-MVP acceptance.
+
 ## RADIOROC 40 (continued) — Same trigger-channel/channels gap confirmed and fixed in `HoldScanConfig`
 
 Direct follow-up to the `AcquisitionConfig` fix immediately below (same
