@@ -1,5 +1,31 @@
-"""Threshold controls and presentation; measurement belongs to the shared job."""
+"""Acquisition controls and presentation; measurement belongs to the shared job.
 
+Mirrors ``radioroc.gui.threshold_window.ThresholdWindow``'s dual-mode shape
+(owned ``ConnectionPanel``/``AcquisitionWorker`` in standalone mode, shared
+injected ``connection_worker`` in embedded mode) field-for-field wherever the
+two workflows share a shape. It deliberately differs in one place: threshold
+plots a full DAC-vs-rate curve because every "point" is one scalar per DAC
+code, but one acquisition "point" event is a whole batch's raw per-channel
+sample lists (see ``radioroc.application.acquisition_worker``), so this
+window keeps the compact live batches-completed/total progress bar plus a
+per-channel count/min/max/mean summary of the most recent batch, and adds a
+histogram of the raw per-channel HG/LG values alongside it.
+
+The acquisition mailbox deliberately never retains raw per-event samples in
+memory (see ``summarize_acquisition_event``/``MAX_RETAINED_BATCHES``) --
+only the bounded batch summary above, because every raw sample is already
+durably written to the run's own ``events.csv`` by the job. Spectra
+rendering therefore does not add a second in-memory raw-sample buffer to
+route around that: it periodically re-reads the run's own ``events.csv``
+from disk (see ``_read_live_events``/``_refresh_live_spectra`` below) and
+re-renders the histogram from the file, throttled to roughly once per
+second (``_LIVE_REFRESH_EVERY_TICKS`` poll ticks) rather than on every
+100ms timer tick, so a long run doesn't spend all its time re-parsing a
+growing CSV. The same histogram also renders a previously saved run
+(``open_saved``) or an imported vendor-format file (``import_vendor_file``).
+"""
+
+import csv
 from datetime import datetime
 import json
 from pathlib import Path
@@ -13,17 +39,26 @@ from PySide6.QtWidgets import (
 )
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+from matplotlib.ticker import NullFormatter
 
-from radioroc_client import ThresholdScanConfig
+from radioroc_client import AcquisitionConfig
+from radioroc.application.acquisition import AcquisitionJob, AcquisitionJobConfig
+from radioroc.application.acquisition_worker import AcquisitionWorker
 from radioroc.application.connection_worker import ConnectionWorker
-from radioroc.application.threshold import ThresholdJob, ThresholdJobConfig
-from radioroc.application.threshold_worker import ThresholdWorker
-from radioroc.data.threshold_reader import read_threshold_run
+from radioroc.data.acquisition_reader import read_acquisition_run
+from radioroc.data.vendor_acquisition import read_vendor_acquisition_file
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
 from radioroc.gui.channel_select import ChannelSelectGrid
 from radioroc.gui.connection_panel import ConnectionPanel
 from radioroc.gui.hint_bar import HintBar
-from radioroc.transport.threshold_simulator import ThresholdSimulationConfig
+from radioroc.transport.acquisition_simulator import AcquisitionSimulationConfig
+
+# The filename `AcquisitionRunWriter`/`AcquisitionJob` write events to inside
+# a run's `out_dir` (see `radioroc/data/acquisition.py`'s `self.csv_path` and
+# `radioroc/application/acquisition.py`'s `AcquisitionResult.csv_path`).
+# `radioroc.data.acquisition_reader` knows this same name internally but
+# does not export it, so it is repeated here rather than imported.
+_EVENTS_CSV_NAME = "events.csv"
 
 
 def _integer(low, high, value):
@@ -46,15 +81,72 @@ def _new_directory(execution_mode="simulation"):
     return str(Path.cwd() / "radioroc_runs" / execution_mode / name)
 
 
-class ThresholdWindow(QMainWindow):
+def _format_batch_summary(mode, row):
+    """Render one `summarize_acquisition_event`-shaped row for display.
+
+    `row` is a ``(key, value)`` tuple sequence with one ``"batch"`` entry
+    plus ``{name}_count``/``{name}_min``/``{name}_max``/``{name}_mean``
+    quadruples per channel/gain (e.g. ``ch4_hg``, ``ch4_lg``).
+    """
+    values = dict(row)
+    batch = values.pop("batch", None)
+    groups: dict[str, dict[str, object]] = {}
+    for key, value in values.items():
+        name, _, stat = key.rpartition("_")
+        groups.setdefault(name, {})[stat] = value
+    lines = [f"{mode} · most recent batch: {batch}"]
+    for name in sorted(groups):
+        stats = groups[name]
+        count = stats.get("count", 0)
+        if count:
+            lines.append(f"  {name}: n={count}  min={stats['min']:.1f}  "
+                         f"max={stats['max']:.1f}  mean={stats['mean']:.1f}")
+        else:
+            lines.append(f"  {name}: n=0")
+    return "\n".join(lines)
+
+
+def _read_live_events(path):
+    """Re-read a run's ``events.csv`` for display, tolerating a concurrent writer.
+
+    Deliberately lighter than ``read_acquisition_run``: this is called on a
+    throttled timer while a run may still be appending to the file (a torn
+    last line is expected, not an error), and a per-tick display refresh has
+    no use for that reader's manifest cross-validation -- only ``channel``/
+    ``hg``/``lg`` are needed to render a histogram. Unparseable rows
+    (including a partially flushed final line) are skipped rather than
+    truncating the whole read, since the writer may still be mid-append.
+    """
+    rows = []
+    try:
+        with path.open(newline="", encoding="utf-8") as stream:
+            for row in csv.DictReader(stream):
+                try:
+                    rows.append({
+                        "channel": int(row["channel"]),
+                        "hg": float(row["hg"]),
+                        "lg": float(row["lg"]),
+                    })
+                except (KeyError, TypeError, ValueError):
+                    continue
+    except OSError:
+        return ()
+    return tuple(rows)
+
+
+class AcquisitionWindow(QMainWindow):
     _CONNECTION_BUSY = {"discovering", "connecting", "reading", "disconnecting", "scanning",
                         "configuring"}
     _CONNECTION_LOCKS_MODE = _CONNECTION_BUSY | {"connected", "close_failed", "faulted"}
+    # Poll ticks (the 100ms timer driving `poll_worker`) between live
+    # spectra disk re-reads -- 10 ticks is roughly once per second, so a
+    # long run spends its time on the job, not re-parsing a growing CSV.
+    _LIVE_REFRESH_EVERY_TICKS = 10
 
-    def __init__(self, *, worker_factory=ThresholdWorker,
+    def __init__(self, *, worker_factory=AcquisitionWorker,
                  connection_worker_factory=ConnectionWorker, connection_worker=None):
         super().__init__()
-        self.setWindowTitle("RADIOROC · Threshold workflow")
+        self.setWindowTitle("RADIOROC · Acquisition workflow")
         self.resize(1180, 820)
         self.worker_factory = worker_factory
         self.worker = None
@@ -67,11 +159,16 @@ class ThresholdWindow(QMainWindow):
         self._last_rows = ()
         self._active_directory = None
         self._hardware_running = False
+        self._live_csv_path = None
+        self._live_refresh_tick = 0
+        self._spectra_rows = ()
+        self._spectra_title = "No data yet"
+        self.spectra_channel_checks = {}
 
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        title = QLabel("RADIOROC  |  Threshold workflow")
+        title = QLabel("RADIOROC  |  Acquisition workflow")
         title.setStyleSheet("font-size: 22px; font-weight: 600; padding: 8px 0")
         layout.addWidget(title)
         self.banner = QLabel()
@@ -101,7 +198,7 @@ class ThresholdWindow(QMainWindow):
             self.connection_group = self._connection_panel.connection_group
             self.port_select = self._connection_panel.port_select
             self.baud = self._connection_panel.baud
-            self.timeout_s = self._connection_panel.timeout_s
+            self.timeout_s_connection = self._connection_panel.timeout_s
             self.refresh_button = self._connection_panel.refresh_button
             self.connect_button = self._connection_panel.connect_button
             self.read_status_button = self._connection_panel.read_status_button
@@ -132,32 +229,64 @@ class ThresholdWindow(QMainWindow):
             self.connection_label.setWordWrap(True)
             form.addRow("Connection", self.connection_label)
 
-        self.channel_select = ChannelSelectGrid(initial_channels=(4, 5))
-        self.dac_min = _integer(0, 1023, 0)
-        self.dac_max = _integer(0, 1023, 1000)
-        self.dac_step = _integer(1, 1024, 25)
-        self.window_ms = _decimal(0.001, 3600000, 50)
-        self.averages = _integer(1, 100000, 1)
+        self.channel_select = ChannelSelectGrid(initial_channels=(4,))
+        self.trigger_channel = _integer(0, 63, 4)
+        self.threshold_dac = _integer(0, 1023, 0)
+        self.threshold_dac.setSpecialValueText("Keep current")
+        self.hold_delay_ns = _integer(0, 100000, 530)
+        self.hold_delay_ns.setSingleStep(5)
+        self.conversion_delay_ns = _integer(0, 100000, 400)
+        self.conversion_delay_ns.setSingleStep(40)
+        self.acquisitions_per_batch = _integer(1, 255, 50)
+        self.batches = _integer(1, 1000000, 10)
+        self.timeout_s = _decimal(0.001, 3600, 5.0)
+        self.trigger_preamp_gain = _integer(0, 63, 0)
+        self.trigger_preamp_gain.setSpecialValueText("Keep current")
+        self.high_gain_code = _integer(0, 15, 0)
+        self.high_gain_code.setSpecialValueText("Keep current")
+        self.low_gain_code = _integer(0, 15, 0)
+        self.low_gain_code.setSpecialValueText("Keep current")
         self.discriminator = QComboBox()
         self.discriminator.addItems(["T1", "T2"])
-        self.gain = _integer(0, 63, 0)
-        self.gain.setSpecialValueText("Keep current")
+        # Vendor ADC DAQ tab combo items, recovered from radioroc2UI.pyc/
+        # adc.pyc disassembly (IMPLEMENTATION_STATUS.md RADIOROC 39). Trigger
+        # channel/mode fields below are always visible rather than mirroring
+        # the vendor app's show/hide-by-mode behavior, to keep this first
+        # cut simple; irrelevant fields for a given trigger type are simply
+        # unused by AcquisitionConfig.validate().
+        self.trigger_type = QComboBox()
+        self.trigger_type.addItems(["Simple trigger", "2 channels coincidence", "Time window"])
+        self.trigger_source = QComboBox()
+        self.trigger_source.addItems(["NORT1", "NORT2", "NORTQ", "Individual trigger", "OR64 (FPGA)"])
+        self.trigger_source.setCurrentIndex(3)
+        self.trigger_source_2 = QComboBox()
+        self.trigger_source_2.addItems(["NORT1", "NORT2", "NORTQ", "Individual trigger", "OR64 (FPGA)"])
+        self.trigger_channel_2 = _integer(0, 63, 5)
+        self.adc_window_ns = _integer(0, 10000, 50)
+        self.adc_window_ns.setSingleStep(5)
+        self.adc_nb_trig = _integer(0, 63, 1)
         form.addRow(self.channel_select)
-        for label, field in [("First DAC", self.dac_min), ("Last DAC", self.dac_max),
-                             ("DAC step", self.dac_step), ("Counter window (ms)", self.window_ms),
-                             ("Averages", self.averages), ("Discriminator", self.discriminator),
-                             ("Trigger gain code", self.gain)]:
+        for label, field in [("Trigger type", self.trigger_type),
+                             ("Trigger channel (T1 slot)", self.trigger_channel),
+                             ("Trigger source (T1 slot)", self.trigger_source),
+                             ("Trigger channel (T2 slot)", self.trigger_channel_2),
+                             ("Trigger source (T2 slot)", self.trigger_source_2),
+                             ("Coincidence/time window (ns)", self.adc_window_ns),
+                             ("Time-window trigger count", self.adc_nb_trig),
+                             ("Threshold DAC", self.threshold_dac),
+                             ("Hold delay (ns)", self.hold_delay_ns),
+                             ("Conversion delay (ns)", self.conversion_delay_ns),
+                             ("Acquisitions per batch", self.acquisitions_per_batch),
+                             ("Batches", self.batches),
+                             ("Timeout (s)", self.timeout_s),
+                             ("Trigger preamp gain code", self.trigger_preamp_gain),
+                             ("High-gain shaper code", self.high_gain_code),
+                             ("Low-gain shaper code", self.low_gain_code),
+                             ("Discriminator", self.discriminator)]:
             form.addRow(label, field)
         self.mask = QCheckBox("Mask other channels")
         self.mask.setChecked(True)
-        self.ctest = QCheckBox("Enable Ctest")
-        self.initialize = QCheckBox("Initialize FPGA (persists)")
-        self.defaults = QCheckBox("Apply defaults (persists)")
-        for field in (self.mask, self.ctest, self.initialize, self.defaults):
-            form.addRow(field)
-        self.config_path = QLineEdit()
-        self.config_path.setPlaceholderText("Packaged defaults")
-        form.addRow("ASIC CSV (optional)", self.config_path)
+        form.addRow(self.mask)
         self.output = QLineEdit(_new_directory("hardware" if self.mode.currentIndex() == 1 else "simulation"))
         self.output.setMinimumWidth(220)
         form.addRow("New run directory", self.output)
@@ -165,34 +294,65 @@ class ThresholdWindow(QMainWindow):
         self.new_output.clicked.connect(self.choose_output)
         form.addRow(self.new_output)
 
-        self.sim_group = QGroupBox("Deterministic synthetic curve")
+        self.sim_group = QGroupBox("Deterministic synthetic ADC response")
         sim_form = QFormLayout(self.sim_group)
         sim_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        self.midpoint = _decimal(0, 1023, 500)
-        self.width = _decimal(0.001, 1024, 30)
-        self.plateau = _decimal(0, 1e9, 100000)
-        self.spacing = _decimal(-1023, 1023, 3)
-        for label, field in [("Midpoint (DAC)", self.midpoint), ("Width (DAC)", self.width),
-                             ("Plateau (Hz)", self.plateau), ("Channel spacing (DAC)", self.spacing)]:
+        self.hg_mean = _decimal(0, 65535, 800.0)
+        self.hg_stdev = _decimal(0, 65535, 40.0)
+        self.lg_mean = _decimal(0, 65535, 120.0)
+        self.lg_stdev = _decimal(0, 65535, 15.0)
+        self.spacing = _decimal(-65535, 65535, 0.0)
+        for label, field in [("High-gain mean (counts)", self.hg_mean),
+                             ("High-gain std dev (counts)", self.hg_stdev),
+                             ("Low-gain mean (counts)", self.lg_mean),
+                             ("Low-gain std dev (counts)", self.lg_stdev),
+                             ("Channel spacing (counts)", self.spacing)]:
             sim_form.addRow(label, field)
         form.addRow(self.sim_group)
         split.addWidget(scroll)
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
-        plot_controls = QHBoxLayout()
-        self.log_y = QCheckBox("Log Y")
-        plot_controls.addWidget(self.log_y)
-        plot_controls.addStretch(1)
-        right_layout.addLayout(plot_controls)
+
+        self.spectra_group = QGroupBox("Spectra display")
+        spectra_layout = QVBoxLayout(self.spectra_group)
+        spectra_controls = QHBoxLayout()
+        spectra_controls.addWidget(QLabel("Gain:"))
+        self.spectra_gain = QComboBox()
+        self.spectra_gain.addItems(["High gain (HG)", "Low gain (LG)"])
+        spectra_controls.addWidget(self.spectra_gain)
+        spectra_controls.addWidget(QLabel("Bins:"))
+        self.spectra_bins = _integer(2, 500, 50)
+        spectra_controls.addWidget(self.spectra_bins)
+        self.spectra_log_y = QCheckBox("Log Y")
+        spectra_controls.addWidget(self.spectra_log_y)
+        self.spectra_clear_button = QPushButton("Clear plot")
+        spectra_controls.addWidget(self.spectra_clear_button)
+        self.import_vendor_button = QPushButton("Import vendor file…")
+        spectra_controls.addWidget(self.import_vendor_button)
+        spectra_controls.addStretch(1)
+        spectra_layout.addLayout(spectra_controls)
+        self.spectra_channels_widget = QWidget()
+        self.spectra_channels_layout = QHBoxLayout(self.spectra_channels_widget)
+        self.spectra_channels_layout.setContentsMargins(0, 0, 0, 0)
+        spectra_layout.addWidget(self.spectra_channels_widget)
+        right_layout.addWidget(self.spectra_group)
+
         self.figure = Figure(figsize=(6, 4), layout="constrained")
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.axes = self.figure.add_subplot(111)
         right_layout.addWidget(self.canvas, 3)
+
+        self.batch_summary = QPlainTextEdit()
+        self.batch_summary.setReadOnly(True)
+        self.batch_summary.setPlaceholderText(
+            "The most recent batch's per-channel event count/min/max/mean "
+            "appears here while a run is in progress.")
+        right_layout.addWidget(self.batch_summary, 1)
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
         self.details.setPlaceholderText("Preview, run provenance and cleanup details appear here.")
-        right_layout.addWidget(self.details, 2)
+        right_layout.addWidget(self.details, 1)
         split.addWidget(right)
         split.setSizes([410, 750])
 
@@ -201,7 +361,7 @@ class ThresholdWindow(QMainWindow):
         self.run_button = QPushButton("Run simulation")
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setEnabled(False)
-        self.reopen_button = QPushButton("Open saved result…")
+        self.reopen_button = QPushButton("Open saved run…")
         for button in (self.preview_button, self.run_button, self.cancel_button, self.reopen_button):
             buttons.addWidget(button)
         layout.addLayout(buttons)
@@ -214,6 +374,11 @@ class ThresholdWindow(QMainWindow):
         self.run_button.clicked.connect(self.start_run)
         self.cancel_button.clicked.connect(self.cancel_run)
         self.reopen_button.clicked.connect(self.choose_saved)
+        self.spectra_gain.currentIndexChanged.connect(self._refresh_spectra)
+        self.spectra_bins.valueChanged.connect(self._refresh_spectra)
+        self.spectra_log_y.toggled.connect(self._refresh_spectra)
+        self.spectra_clear_button.clicked.connect(self.clear_spectra)
+        self.import_vendor_button.clicked.connect(self.choose_vendor_file)
         self.mode.currentIndexChanged.connect(self._mode_changed)
         self.timer = QTimer(self)
         self.timer.setInterval(100)
@@ -233,51 +398,56 @@ class ThresholdWindow(QMainWindow):
             self._refresh_connection_label()
         self.hint = HintBar(
             self.statusBar(),
-            "Threshold scan: sweeps the discriminator threshold DAC and records the "
-            "trigger rate at each point, to find the noise floor and set a clean "
-            "working threshold. Hover a control to see what it does.")
-        self.hint.attach(self.mode, "Simulation previews a synthetic curve with no "
-                          "board attached; Hardware connection runs on the real ASIC/FPGA.")
+            "Acquisition: collects repeated ADC batches at one fixed hold/"
+            "timing operating point and saves every raw event to disk. "
+            "Hover a control to see what it does.")
+        self.hint.attach(self.mode, "Simulation previews a synthetic fixed-point ADC "
+                          "response with no board attached; Hardware connection runs on "
+                          "the real ASIC/FPGA.")
         self.hint.attach(self.channel_select.toggle_button,
-                         "Channels to scan and plot. Click to choose which channels.")
+                         "Channels to save. Click to choose which channels.")
         self.hint.attach(self.channel_select.select_all_button, "Select every channel.")
         self.hint.attach(self.channel_select.select_none_button, "Deselect every channel.")
-        self.hint.attach(self.log_y, "Plot the trigger-rate axis (Y) on a log scale. Threshold "
-                          "scans span many orders of magnitude -- a real signal plateau can be "
-                          "under 0.1% of the noise peak and looks like flat zero on a linear axis.")
-        self.hint.attach(self.dac_min, "First threshold DAC code in the sweep.")
-        self.hint.attach(self.dac_max, "Last threshold DAC code in the sweep.")
-        self.hint.attach(self.dac_step, "Step size between sweep points.")
-        self.hint.attach(self.window_ms, "How long to count trigger edges at each DAC "
-                          "point, in milliseconds.")
-        self.hint.attach(self.averages, "Number of counting windows to average per point.")
-        self.hint.attach(self.discriminator, "Which ASIC discriminator output (T1/T2) to "
-                          "measure the trigger rate of.")
-        self.hint.attach(self.gain, "Override the trigger-path preamp gain code before "
-                          "scanning; leave at 'Keep current' to leave it alone.")
-        self.hint.attach(self.mask, "Mask every channel except the ones being scanned, "
-                          "so only their signals are read out.")
-        self.hint.attach(self.ctest, "Enable Ctest: routes the ASIC's internal test-charge "
-                          "injector into the selected channel(s), producing a repeatable "
-                          "calibration pulse without needing an external pulse generator.")
-        self.hint.attach(self.initialize, "Re-initialize the FPGA before running. This is a "
-                          "persistent board change, not just a scan setting -- leave it off "
-                          "unless you specifically need to reset FPGA state.")
-        self.hint.attach(self.defaults, "Apply the ASIC's packaged default register values "
-                          "before running. This is a persistent board change -- leave it off "
-                          "to keep whatever configuration is already on the ASIC.")
-        self.hint.attach(self.config_path, "Optional ASIC register CSV to load instead of "
-                          "the packaged defaults.")
+        self.hint.attach(self.trigger_channel, "Channel used for the ADC trigger setup.")
+        self.hint.attach(self.threshold_dac, "Optional T1/T2 threshold DAC to set before "
+                          "running; leave at 'Keep current' to leave it alone.")
+        self.hint.attach(self.hold_delay_ns, "External hold delay in nanoseconds, "
+                          "divisible by 5.")
+        self.hint.attach(self.conversion_delay_ns, "ADC conversion delay in nanoseconds, "
+                          "divisible by 40.")
+        self.hint.attach(self.acquisitions_per_batch, "Requested ADC acquisitions per batch.")
+        self.hint.attach(self.batches, "Number of acquisition batches to run.")
+        self.hint.attach(self.timeout_s, "Per-batch ADC timeout, in seconds.")
+        self.hint.attach(self.trigger_preamp_gain, "Optional trigger-path preamp gain code "
+                          "to set before running; leave at 'Keep current' to leave it alone.")
+        self.hint.attach(self.high_gain_code, "Optional high-gain shaper code to set before "
+                          "running; leave at 'Keep current' to leave it alone.")
+        self.hint.attach(self.low_gain_code, "Optional low-gain shaper code to set before "
+                          "running; leave at 'Keep current' to leave it alone.")
+        self.hint.attach(self.discriminator, "Which ASIC discriminator (T1/T2) the "
+                          "threshold DAC and trigger apply to.")
+        self.hint.attach(self.mask, "Mask every channel except the trigger channel, "
+                          "so only its signal is read out.")
         self.hint.attach(self.output, "Directory the run's data and metadata will be saved to.")
         self.hint.attach(self.new_output, "Choose a different parent directory for the run "
                           "output above.")
-        self.hint.attach(self.preview_button, "Preview the sweep/simulation settings without "
-                          "recording a run to disk.")
-        self.hint.attach(self.run_button, "Start the threshold scan and record its result to "
+        self.hint.attach(self.preview_button, "Preview the acquisition/simulation settings "
+                          "without recording a run to disk.")
+        self.hint.attach(self.run_button, "Start the acquisition and record its result to "
                           "the run directory above.")
         self.hint.attach(self.cancel_button, "Cancel the run currently in progress.")
-        self.hint.attach(self.reopen_button, "Open a previously saved threshold-scan run to "
-                          "view its plot and data again.")
+        self.hint.attach(self.reopen_button, "Open a previously saved acquisition run to "
+                          "view its status and data again.")
+        self.hint.attach(self.spectra_gain, "Which gain's values the histogram below "
+                          "plots -- high gain (HG) or low gain (LG).")
+        self.hint.attach(self.spectra_bins, "Number of histogram bins.")
+        self.hint.attach(self.spectra_log_y, "Plot the histogram's counts axis (Y) on a "
+                          "log scale instead of linear.")
+        self.hint.attach(self.spectra_clear_button, "Clear the histogram display. This does "
+                          "not delete any saved data -- it only resets what's shown here.")
+        self.hint.attach(self.import_vendor_button, "Load a real vendor-collected "
+                          "readable_adc_acq.txt file and plot its HG/LG values here, for "
+                          "comparison with this app's own runs.")
         if self._connection_panel is not None:
             self.hint.attach(self.port_select, "USB serial port candidate to connect to.")
             self.hint.attach(self.refresh_button, "Re-scan for USB port candidates.")
@@ -290,8 +460,8 @@ class ThresholdWindow(QMainWindow):
             self.hint.attach(self.channel_config_apply_button, "Apply the channel "
                               "configuration fields above to the connected hardware.")
         self._mode_changed()
-        self._plot((), "Simulation — no data yet")
-        self.log_y.toggled.connect(lambda: self._plot(self._last_rows, self._last_title))
+        self._set_spectra_channels(())
+        self._refresh_spectra()
 
     # -- connection_worker: a plain attribute in "injected" mode, or a
     # mirror of the internal ConnectionPanel's worker otherwise, so both
@@ -326,21 +496,19 @@ class ThresholdWindow(QMainWindow):
         simulation = self.mode.currentIndex() == 0
         self._show_mode_banner()
         if not simulation and previous_mode != self._accepted_mode:
-            self.initialize.setChecked(False)
-            self.defaults.setChecked(False)
             if "radioroc_runs" in Path(self.output.text()).parts:
                 self.output.setText(_new_directory("hardware"))
-        self.run_button.setText("Run simulation" if simulation else "Run hardware threshold")
+        self.run_button.setText("Run simulation" if simulation else "Run hardware acquisition")
         self.sim_group.setEnabled(simulation and self.worker is None)
         self._update_connection_controls()
 
     def _show_mode_banner(self):
         self.banner.setText(
-            "SIMULATION · Synthetic counts, not measured lab data. No board connection."
+            "SIMULATION · Synthetic ADC response, not measured lab data. No board connection."
             if self.mode.currentIndex() == 0 else
-            "HARDWARE · USB candidates are unverified. FPGA initialization and apply-defaults "
-            "are off by default; masking/Ctest/gain are temporary scan settings. Restoration readback "
-            "verification is mandatory. Initialization and defaults are persistent changes.")
+            "HARDWARE · USB candidates are unverified. Masking/gain/threshold overrides are "
+            "temporary scan settings, restored after the run. Restoration readback "
+            "verification is mandatory.")
 
     def _show_run_banner(self, mode, directory):
         self.banner.setText(
@@ -444,7 +612,7 @@ class ThresholdWindow(QMainWindow):
         if worker is None:
             return
         # A persistent worker can stop immediately after a shutdown queued
-        # behind a scan.  Consume its terminal threshold snapshot before
+        # behind a scan.  Consume its terminal acquisition snapshot before
         # dropping the owner and losing the partial-result/fault summary.
         if self._hardware_running:
             self.poll_worker()
@@ -510,27 +678,39 @@ class ThresholdWindow(QMainWindow):
         output = self.output.text().strip()
         if not output:
             raise ValueError("choose a new run directory")
-        scan = ThresholdScanConfig(
-            channels, dac_min=self.dac_min.value(), dac_max=self.dac_max.value(),
-            dac_step=self.dac_step.value(), trigger_window_ms=self.window_ms.value(),
-            averages=self.averages.value(), t1=self.discriminator.currentIndex() == 0,
-            use_mask=self.mask.isChecked(), use_ctest=self.ctest.isChecked(),
-            trigger_preamp_gain=self.gain.value() or None, out_dir=Path(output).expanduser(),
+        acquisition = AcquisitionConfig(
+            channels, trigger_channel=self.trigger_channel.value(),
+            threshold_dac=self.threshold_dac.value() or None,
+            hold_delay_ns=self.hold_delay_ns.value(),
+            conversion_delay_ns=self.conversion_delay_ns.value(),
+            acquisitions_per_batch=self.acquisitions_per_batch.value(),
+            batches=self.batches.value(), timeout_s=self.timeout_s.value(),
+            trigger_preamp_gain=self.trigger_preamp_gain.value() or None,
+            high_gain_code=self.high_gain_code.value() or None,
+            low_gain_code=self.low_gain_code.value() or None,
+            t1=self.discriminator.currentIndex() == 0, use_mask=self.mask.isChecked(),
+            trigger_type=self.trigger_type.currentIndex(),
+            trigger_source=self.trigger_source.currentIndex(),
+            trigger_source_2=self.trigger_source_2.currentIndex(),
+            trigger_channel_2=self.trigger_channel_2.value(),
+            adc_window_ns=self.adc_window_ns.value(),
+            adc_nb_trig=self.adc_nb_trig.value(),
+            out_dir=Path(output).expanduser(),
         )
-        config = self.config_path.text().strip()
-        return ThresholdJobConfig(scan, Path(config).expanduser() if config else None,
-                                  self.initialize.isChecked(), self.defaults.isChecked())
+        return AcquisitionJobConfig(acquisition)
 
     def simulation(self):
-        settings = ThresholdSimulationConfig(midpoint=self.midpoint.value(), width=self.width.value(),
-                                             plateau_hz=self.plateau.value(), channel_spacing=self.spacing.value())
+        settings = AcquisitionSimulationConfig(
+            hg_mean=self.hg_mean.value(), hg_stdev=self.hg_stdev.value(),
+            lg_mean=self.lg_mean.value(), lg_stdev=self.lg_stdev.value(),
+            channel_spacing=self.spacing.value())
         settings.validate()
         return settings
 
     def preview(self):
         try:
             operation = self.operation()
-            data = ThresholdJob.preview(operation)
+            data = AcquisitionJob.preview(operation)
             simulation = self.mode.currentIndex() == 0
             data["selected_mode"] = "simulation" if simulation else "hardware"
             if simulation:
@@ -542,13 +722,13 @@ class ThresholdWindow(QMainWindow):
                     "port": candidate.port if candidate is not None else None,
                     "connection_state": (self.connection_worker.snapshot().state
                                          if self.connection_worker is not None else "idle"),
-                    "threshold_run_available": (self.connection_worker is not None and
-                                                self.connection_worker.snapshot().state == "connected" and
-                                                not getattr(self.connection_worker.snapshot(), "fault", None)),
+                    "acquisition_run_available": (self.connection_worker is not None and
+                                                  self.connection_worker.snapshot().state == "connected" and
+                                                  not getattr(self.connection_worker.snapshot(), "fault", None)),
                     "restoration_verification": "mandatory",
                 }
             self.details.setPlainText(json.dumps(data, indent=2))
-            self.status.setText(f"Preview valid · {data['total_points']} DAC points · no output created")
+            self.status.setText(f"Preview valid · {data['total_points']} batches · no output created")
             return operation
         except Exception as exc:
             self.status.setText(f"Preview failed: {exc}")
@@ -567,28 +747,30 @@ class ThresholdWindow(QMainWindow):
                 return
             try:
                 self._last_rows = ()
-                self._active_directory = Path(operation.scan.out_dir)
+                self._active_directory = Path(operation.acquisition.out_dir)
                 self.progress.setValue(0)
                 self._show_run_banner("HARDWARE", self._active_directory)
-                self._plot((), "HARDWARE · running threshold rates")
+                self.batch_summary.clear()
+                self._start_live_spectra(operation.acquisition.channels, "HARDWARE")
                 self._hardware_running = True
                 self._set_running(True)
                 self.status.setText("Hardware · preparing · mandatory restoration verification")
-                worker.run_threshold(operation)
+                worker.run_acquisition(operation)
                 self.timer.start()
             except Exception as exc:
                 self._hardware_running = False
                 self._set_running(False)
-                self.status.setText(f"Could not start hardware scan: {exc}")
+                self.status.setText(f"Could not start hardware acquisition: {exc}")
             return
         try:
             worker = self.worker_factory(operation, self.simulation())
             self._last_rows = ()
-            self._active_directory = Path(operation.scan.out_dir)
+            self._active_directory = Path(operation.acquisition.out_dir)
             self._mode_changed()
             self.progress.setValue(0)
             self._show_run_banner("SIMULATION", self._active_directory)
-            self._plot((), "SIMULATION · running")
+            self.batch_summary.clear()
+            self._start_live_spectra(operation.acquisition.channels, "SIMULATION")
             self.worker = worker
             self._set_running(True)
             self.status.setText("Simulation · preparing")
@@ -603,6 +785,7 @@ class ThresholdWindow(QMainWindow):
         self.controls.setEnabled(not running)
         self.preview_button.setEnabled(not running)
         self.reopen_button.setEnabled(not running)
+        self.import_vendor_button.setEnabled(not running)
         self.run_button.setEnabled(not running and ((self.mode.currentIndex() == 0) or
                                    (self.connection_worker is not None and
                                     self.connection_worker.snapshot().state == "connected" and
@@ -614,7 +797,7 @@ class ThresholdWindow(QMainWindow):
             self.worker.cancel()
         elif self.connection_worker is not None:
             try:
-                self.connection_worker.cancel_threshold()
+                self.connection_worker.cancel_acquisition()
             except Exception:
                 return
         else:
@@ -632,16 +815,15 @@ class ThresholdWindow(QMainWindow):
             mode = "SIMULATION"
             alive = self.worker.is_alive
         elif self.connection_worker is not None and self._hardware_running:
-            snapshot = self.connection_worker.threshold_snapshot()
+            snapshot = self.connection_worker.acquisition_snapshot()
             mode = "HARDWARE"
             # ConnectionWorker stays alive for review/retry after the one job.
             alive = snapshot.outcome is None
         else:
             return
-        if snapshot.rows != self._last_rows:
+        if snapshot.rows and snapshot.rows != self._last_rows:
             self._last_rows = snapshot.rows
-            title = "SIMULATION · synthetic threshold rates" if mode == "SIMULATION" else "HARDWARE · live threshold rates"
-            self._plot(tuple(dict(row) for row in snapshot.rows), title)
+            self.batch_summary.setPlainText(_format_batch_summary(mode, snapshot.rows[-1]))
         if snapshot.event:
             event = snapshot.event
             self.progress.setRange(0, event.total_points)
@@ -650,8 +832,14 @@ class ThresholdWindow(QMainWindow):
                 state = event.status
                 if mode == "SIMULATION" and state in {"completed", "cancelled", "failed", "disconnected"}:
                     state = "closing session"
-                self.status.setText(f"{mode.title()} · {state} · {event.completed_points}/{event.total_points} points")
-        if snapshot.outcome is None or alive:
+                self.status.setText(f"{mode.title()} · {state} · "
+                                    f"{event.completed_points}/{event.total_points} batches")
+        still_running = snapshot.outcome is None or alive
+        if still_running:
+            self._live_refresh_tick += 1
+            if self._live_refresh_tick >= self._LIVE_REFRESH_EVERY_TICKS:
+                self._live_refresh_tick = 0
+                self._refresh_live_spectra(mode, running=True)
             return
         if self.worker is not None:
             self.worker.join()
@@ -659,6 +847,7 @@ class ThresholdWindow(QMainWindow):
         self.timer.stop()
         self._set_running(False)
         self._hardware_running = False
+        self._refresh_live_spectra(mode, running=False)
         outcome = snapshot.outcome
         result = outcome.result
         hardware_fault = (getattr(self.connection_worker.snapshot(), "fault", None)
@@ -671,15 +860,15 @@ class ThresholdWindow(QMainWindow):
             terminal = "failed" if (outcome.close_error or hardware_fault) else result.status
             verification = getattr(result, "verification", None)
             verification_summary = (verification.as_dict() if hasattr(verification, "as_dict") else verification)
-            self.status.setText(f"{mode} · {terminal} · {result.points} points / {result.attempts} windows · "
+            self.status.setText(f"{mode} · {terminal} · {result.points} batches · "
                                 f"cleanup: {result.cleanup_status}")
             summary = {"status": terminal, "execution_mode": result.execution_mode,
                        "directory": str(self._active_directory), "points": result.points,
-                       "attempts": result.attempts, "cleanup": result.cleanup_status,
+                       "cleanup": result.cleanup_status,
                        "verification": verification_summary,
                        "problems": problems, "warnings": result.warnings,
                        "display_events_coalesced": snapshot.coalesced_events,
-                       "saved_data": "All completed windows and points are saved independently of display updates."}
+                       "saved_data": "All completed batches and events are saved independently of display updates."}
             self.details.setPlainText(json.dumps(summary, indent=2))
         else:
             self.status.setText(f"{mode.title()} did not acquire data: " + "; ".join(problems))
@@ -703,25 +892,118 @@ class ThresholdWindow(QMainWindow):
             else:
                 self.close()
 
-    def _plot(self, rows, title):
-        self._last_rows, self._last_title = rows, title
+    # -- spectra: histogram of raw per-channel HG/LG values, from either a
+    # live run's own events.csv (re-read on a throttled timer, never from an
+    # in-memory raw-sample buffer -- see the module docstring), a saved
+    # run's rows, or an imported vendor file. ---------------------------
+
+    def _start_live_spectra(self, channels, mode):
+        self._live_csv_path = self._active_directory / _EVENTS_CSV_NAME
+        self._live_refresh_tick = 0
+        self._set_spectra_channels(channels)
+        self._spectra_rows = ()
+        self._spectra_title = f"{mode} · running · waiting for the first batch"
+        self._refresh_spectra()
+
+    def _refresh_live_spectra(self, mode, running):
+        path = self._live_csv_path
+        if path is None or not path.exists():
+            return
+        rows = _read_live_events(path)
+        self._spectra_rows = rows
+        state = "running" if running else "finished"
+        self._spectra_title = f"{mode} · {state} · {len(rows)} events on disk"
+        self._refresh_spectra()
+
+    def _set_spectra_channels(self, channels):
+        while self.spectra_channels_layout.count():
+            item = self.spectra_channels_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+        self.spectra_channel_checks = {}
+        for channel in sorted(channels):
+            box = QCheckBox(f"ch{channel}")
+            box.setChecked(True)
+            box.setToolTip(f"Show/hide channel {channel} in the histogram below.")
+            box.toggled.connect(self._refresh_spectra)
+            self.spectra_channels_layout.addWidget(box)
+            self.spectra_channel_checks[channel] = box
+        self.spectra_channels_layout.addStretch(1)
+
+    def _refresh_spectra(self):
+        self._render_spectra(self._spectra_rows, self._spectra_title)
+
+    def _render_spectra(self, rows, title):
         self.axes.clear()
         self.axes.set_title(title, fontsize=11)
-        self.axes.set_xlabel("Threshold DAC code")
-        self.axes.set_ylabel("Trigger rate (Hz)")
-        # Threshold rates span many orders of magnitude (a noise-dominated
-        # peak near DAC 0 versus a real injected/dark-count plateau that can
-        # sit under 0.1% of that peak) -- on a linear axis the plateau is
-        # visually indistinguishable from zero, which is exactly the region
-        # a student needs to read a clean operating threshold from.
-        self.axes.set_yscale("log" if self.log_y.isChecked() else "linear")
+        gain_field = "hg" if self.spectra_gain.currentIndex() == 0 else "lg"
+        gain_label = "HG" if gain_field == "hg" else "LG"
+        self.axes.set_xlabel(f"{gain_label} (ADC counts)")
+        self.axes.set_ylabel("Counts")
+        self.axes.set_yscale("log" if self.spectra_log_y.isChecked() else "linear")
+        # Log scale: matplotlib auto-labels minor ticks (2x10^0, 3x10^0, ...)
+        # whenever the data spans less than ~1 decade, which crowds into an
+        # unreadable cluster on this window's compact plot area. Major
+        # decade ticks (10^0, 10^1, ...) stay labelled; only the minor
+        # in-between labels are suppressed.
+        self.axes.yaxis.set_minor_formatter(NullFormatter())
         self.axes.grid(True, alpha=0.2)
-        if rows:
-            for channel in (name for name in rows[0] if name != "DAC"):
-                self.axes.plot([row["DAC"] for row in rows], [row[channel] for row in rows],
-                               marker=".", linewidth=1.5, label=channel, drawstyle="steps-post")
-            self.axes.legend()
+        bins = self.spectra_bins.value()
+        selected = [channel for channel, box in sorted(self.spectra_channel_checks.items())
+                   if box.isChecked()]
+        plotted = False
+        if rows and selected:
+            by_channel: dict[int, list[float]] = {}
+            for row in rows:
+                by_channel.setdefault(row["channel"], []).append(row[gain_field])
+            for channel in selected:
+                values = by_channel.get(channel)
+                if values:
+                    self.axes.hist(values, bins=bins, alpha=0.55, label=f"ch{channel}")
+                    plotted = True
+        if plotted:
+            # Fixed outside-axes placement instead of loc="best": "best"
+            # re-picks a position from the current data shape on every
+            # redraw, which visibly jumps around during a live run and can
+            # land the legend box on top of the title above it.
+            self.axes.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0),
+                             borderaxespad=0.0)
         self.canvas.draw_idle()
+
+    def clear_spectra(self):
+        self._spectra_rows = ()
+        self._spectra_title = "Cleared — no data displayed (saved data is untouched)"
+        self._refresh_spectra()
+
+    def choose_vendor_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import vendor acquisition file", "",
+            "Vendor readable ADC files (*.txt);;All files (*)")
+        if path:
+            self.import_vendor_file(Path(path))
+
+    def import_vendor_file(self, path):
+        if self.worker is not None or self._hardware_running:
+            return
+        try:
+            vendor = read_vendor_acquisition_file(Path(path))
+            channels = sorted({row["channel"] for row in vendor.rows})
+            self.banner.setText(f"VENDOR FILE · {path}")
+            self._set_spectra_channels(channels)
+            self._spectra_rows = vendor.rows
+            self._spectra_title = f"VENDOR FILE · {Path(path).name} · {len(vendor.rows)} rows"
+            self._refresh_spectra()
+            status = f"Imported vendor file · {len(vendor.rows)} rows · channels {channels}"
+            self.status.setText(status + (" · " + "; ".join(vendor.warnings) if vendor.warnings else ""))
+            self.details.setPlainText(json.dumps({
+                "vendor_file": str(path), "row_count": len(vendor.rows),
+                "channels": channels, "setup_text": vendor.setup_text,
+                "warnings": vendor.warnings,
+            }, indent=2))
+        except Exception as exc:
+            self.status.setText(f"Cannot import vendor file: {exc}")
 
     def choose_output(self):
         label = "simulation" if self.mode.currentIndex() == 0 else "hardware"
@@ -730,8 +1012,8 @@ class ThresholdWindow(QMainWindow):
             self.output.setText(str(Path(directory) / Path(_new_directory()).name))
 
     def choose_saved(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Open threshold result", "",
-                                             "Threshold results (metadata.json thresholdscan.csv);;CSV (*.csv)")
+        path, _ = QFileDialog.getOpenFileName(self, "Open acquisition run", "",
+                                             "Acquisition runs (metadata.json events.csv);;CSV (*.csv)")
         if path:
             self.open_saved(Path(path))
 
@@ -739,15 +1021,33 @@ class ThresholdWindow(QMainWindow):
         if self.worker is not None or self._hardware_running:
             return
         try:
-            saved = read_threshold_run(Path(path))
+            saved = read_acquisition_run(Path(path))
             label = saved.execution_mode.upper()
-            self.banner.setText(f"SAVED RESULT · {label} · {saved.status} · {saved.directory}")
-            self._plot(saved.rows, f"{label} · {saved.status} · {len(saved.rows)} saved points")
-            status = f"{label} · {saved.status} · {len(saved.rows)} points"
+            self.banner.setText(f"SAVED RUN · {label} · {saved.status} · {saved.directory}")
+            manifest_batches = None
+            if saved.manifest:
+                manifest_batches = saved.manifest.get("operation", {}).get("acquisition", {}).get("batches")
+            status = (f"{label} · {saved.status} · {len(saved.current_segment_rows)} events in this "
+                     f"run's segment ({len(saved.rows)} total in file) · channels {saved.channels}")
             self.status.setText(status + (" · " + "; ".join(saved.warnings) if saved.warnings else ""))
-            self.details.setPlainText(json.dumps({"warnings": saved.warnings, "manifest": saved.manifest}, indent=2))
-            self.progress.setRange(0, max(1, saved.manifest.get("total_points", len(saved.rows))))
-            self.progress.setValue(len(saved.rows))
+            self.details.setPlainText(json.dumps({
+                "status": saved.status, "execution_mode": saved.execution_mode,
+                "channels": saved.channels, "row_count": len(saved.rows),
+                "current_segment_row_count": len(saved.current_segment_rows),
+                "warnings": saved.warnings, "manifest": saved.manifest,
+            }, indent=2))
+            completed = (saved.manifest.get("completed_points") if saved.manifest else None) or 0
+            self.progress.setRange(0, max(1, manifest_batches or completed or 1))
+            self.progress.setValue(completed)
+            self.batch_summary.clear()
+            # This run's own segment (not the whole, possibly multi-run
+            # append-mode CSV history) matches the manifest's declared
+            # channels -- see read_acquisition_run's module docstring.
+            self._set_spectra_channels(saved.channels)
+            self._spectra_rows = saved.current_segment_rows
+            self._spectra_title = (f"{label} · {saved.status} · "
+                                   f"{len(saved.current_segment_rows)} events in this run's segment")
+            self._refresh_spectra()
         except Exception as exc:
             self.status.setText(f"Cannot open result: {exc}")
 
@@ -771,7 +1071,7 @@ class ThresholdWindow(QMainWindow):
         elif self._connection_panel is None and self._hardware_running and self.connection_worker is not None:
             # A connection_worker injected from outside is not this window's
             # to shut down (another page may still be using it) -- just
-            # wait for the in-flight scan this window started to reach a
+            # wait for the in-flight run this window started to reach a
             # terminal snapshot, same as the SIMULATION close-wait path.
             event.ignore()
             self._closing = True

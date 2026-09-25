@@ -179,6 +179,15 @@ class AcquisitionJob:
         })
         if mode == "simulation" and hasattr(device.transport, "simulation_metadata"):
             manifest["simulation"] = deepcopy(device.transport.simulation_metadata)
+        # Host-receipt time per batch, not a physical-event timestamp the
+        # hardware doesn't supply (PLINT_STUDENT_MVP_DIRECTIVE.md Priority 3).
+        # setdefault, not a plain assignment, so a caller-supplied prior
+        # manifest's entries aren't clobbered -- though per this job's
+        # existing append convention (completed_points and others reset per
+        # segment too, see test_append_mode_continues_batch_numbering_
+        # without_truncating), an appended segment's manifest reflects only
+        # that segment's own batches, same as everything else in it.
+        manifest.setdefault("batch_received_at", [])
         writer = AcquisitionRunWriter(Path(acquisition.out_dir), manifest, append=append)
         result.metadata_path = writer.metadata_path
         fpga = {}
@@ -257,6 +266,15 @@ class AcquisitionJob:
             device.prepare_trigger_masks(t1=acquisition.t1, use_mask=acquisition.use_mask, use_ctest=False)
             if acquisition.use_mask:
                 device.set_mask_for_channel(acquisition.trigger_channel, t1=acquisition.t1, enabled=True)
+                # Genuine 2-distinct-channel coincidence (both coincidence-input
+                # slots set to "Individual trigger"): unmask both named channels
+                # at all three discriminator levels rather than guessing which
+                # one "Individual trigger" taps -- see
+                # RadiorocDevice.unmask_channel_for_individual_coincidence.
+                if acquisition.trigger_type == 1 and acquisition.trigger_source == 3 \
+                        and acquisition.trigger_source_2 == 3:
+                    device.unmask_channel_for_individual_coincidence(acquisition.trigger_channel)
+                    device.unmask_channel_for_individual_coincidence(acquisition.trigger_channel_2)
             if acquisition.threshold_dac is not None:
                 device.set_threshold_dac(acquisition.threshold_dac, t1=acquisition.t1)
             result.status = "running"
@@ -270,13 +288,15 @@ class AcquisitionJob:
                 conversion_delay_ns=acquisition.conversion_delay_ns, nb_acq=acquisition.acquisitions_per_batch,
                 trigger_type=acquisition.trigger_type, trigger_source=acquisition.trigger_source,
                 rstn_manual=acquisition.rstn_manual, ext_trig=False, peak_sensing=acquisition.peak_sensing,
-                adc_window_ns=acquisition.adc_window_ns, adc_nb_trig=acquisition.adc_nb_trig)
+                adc_window_ns=acquisition.adc_window_ns, adc_nb_trig=acquisition.adc_nb_trig,
+                trigger_source_2=acquisition.trigger_source_2, trigger_channel_2=acquisition.trigger_channel_2)
             for batch_offset in range(acquisition.batches):
                 token.checkpoint()
                 batch = acquisition.start_batch + batch_offset
                 high_gain, low_gain = device.acquire_adc_batch(
                     nb_acq=acquisition.acquisitions_per_batch, timeout_s=acquisition.timeout_s,
                     synchro_trigger=acquisition.synchro_trigger)
+                manifest["batch_received_at"].append({"batch": batch, "received_at": _now()})
                 token.checkpoint()
                 event_rows = []
                 for channel in acquisition.channels:

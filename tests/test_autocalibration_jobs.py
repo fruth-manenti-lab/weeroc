@@ -11,9 +11,10 @@ from unittest.mock import patch
 
 from radioroc_client import RadiorocDevice, parse_bits
 from radioroc.application.autocalibration import (
-    AutocalibrationJob, AutocalibrationJobConfig,
+    AutocalibrationJob, AutocalibrationJobConfig, _TopLevelManifestWriter,
 )
-from radioroc.application.jobs import CancellationToken, JobBusyError
+from radioroc.application.jobs import CancellationToken, JobBusyError, session_lock
+from radioroc.transport.errors import TransportIOError
 from scripts import radioroc_autocalibrate as cli
 from test_scurve_jobs import ScurveTransport
 
@@ -115,6 +116,89 @@ class AutocalibrationJobTests(unittest.TestCase):
         result = self.run_job(verify_restoration=True)
         self.assertEqual(result.status, "completed")
         self.assertTrue(result.reference_restored)
+
+    def test_reference_channel_restore_failure_is_flagged_not_silently_succeeded(self):
+        # The reference channel's calibration DAC is probed to 0, then 63,
+        # then restored to its original value in step 1's own finally block
+        # (see test_reference_channel_calibration_dac_restored_even_if_step2_fails
+        # for the cancellation path through the same finally). This fails
+        # only that third call -- the restore itself -- while leaving every
+        # other channel/value combination (including step 3's later,
+        # unrelated correction write for this same channel) untouched.
+        original_set = self.device.set_calibration_dac_for_channel
+        reference_channel = self.config.channels[0]
+        calls = {"n": 0}
+
+        def fail_restore(channel, *, t1, value):
+            if channel == reference_channel:
+                calls["n"] += 1
+                if calls["n"] == 3:
+                    raise TransportIOError("restore failed")
+            return original_set(channel, t1=t1, value=value)
+
+        with patch.object(self.device, "set_calibration_dac_for_channel", side_effect=fail_restore):
+            result = self.run_job(verify_restoration=True)
+        # A failed restore of the *probed-away* calibration DAC is a
+        # cleanup-only fault: it must not be presented as a successful,
+        # fully-restored run (reference_restored must go visibly false),
+        # but it also must not be conflated with the scan itself failing --
+        # step 2/3/final all still ran and produced real results.
+        self.assertEqual(result.status, "completed")
+        self.assertFalse(result.reference_restored)
+        self.assertTrue(any("restore" in warning for warning in result.warnings),
+                        result.warnings)
+        self.assertEqual(result.calibration_after, {4: 42, 5: 22})
+
+    def test_manifest_write_failure_surfaces_and_releases_session_lock(self):
+        # AutocalibrationJob's own top-level manifest writer has no
+        # persist()-retry fallback for a second consecutive write failure,
+        # unlike every sibling job (Threshold/HoldScan/Scurve/Acquisition),
+        # which all catch a failed retry and report it via
+        # `result.persistence_errors` instead of raising. Here the failure
+        # instead propagates out of `AutocalibrationJob.run()` itself.
+        # Both existing callers already treat that as a fault rather than a
+        # false success (ConnectionWorker._run_autocalibration's blanket
+        # `except Exception`, and radioroc_autocalibrate.py's own top-level
+        # `except Exception` -> "ERROR: ..."), so this is not a silent data
+        # loss in practice -- but confirm the fault is genuinely visible
+        # (never swallowed into a "completed" result) and that the
+        # transport's session lock is still released for a later run, not
+        # left held forever by the raise.
+        original_update = _TopLevelManifestWriter.update
+        calls = {"n": 0}
+
+        def fail_update(writer, manifest):
+            calls["n"] += 1
+            if calls["n"] >= 2:
+                raise OSError("disk full")
+            return original_update(writer, manifest)
+
+        with patch.object(_TopLevelManifestWriter, "update", new=fail_update):
+            with self.assertRaises(OSError):
+                self.run_job()
+
+        lock = session_lock(self.transport)
+        self.assertTrue(lock.acquire(blocking=False),
+                        "session lock was left held after a storage failure")
+        lock.release()
+
+    def test_disconnect_mid_transition_scan_reports_partial_sub_runs(self):
+        # step1_zero + step1_full each read one point per DAC value (3 DAC
+        # values, reference channel only) = 6 scripted reads; the 7th read
+        # is step2's first (DAC 0, channel 4), which this fails.
+        original = TransportIOError("unplugged")
+        self.transport.fail_point_read = original
+        self.transport.fail_point_read_at = 6
+        result = self.run_job()
+        self.assertEqual(result.status, "disconnected")
+        self.assertIs(result.error, original)
+        # step2's own directory/manifest was created (recorded in sub_runs)
+        # even though the sub-scan itself did not complete; "final" never
+        # started.
+        self.assertEqual(set(result.sub_runs), {"step1_zero", "step1_full", "step2"})
+        sub_manifest = json.loads((result.sub_runs["step2"] / "metadata.json").read_text())
+        self.assertEqual(sub_manifest["status"], "disconnected")
+        self.assertEqual(self.manifest()["status"], "disconnected")
 
     def test_saved_run_reader_composes_the_four_sub_scans(self):
         from radioroc.data.autocalibration_reader import read_autocalibration_run

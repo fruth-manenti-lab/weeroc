@@ -91,6 +91,7 @@ class MainWindowTests(unittest.TestCase):
         self.assertIs(worker, window.hold_scan_window.connection_worker)
         self.assertIs(worker, window.scurve_window.connection_worker)
         self.assertIs(worker, window.autocalibration_window.connection_worker)
+        self.assertIs(worker, window.acquisition_window.connection_worker)
         self.assertIs(worker, window.channel_config_panel.connection_worker)
         self.assertIs(worker, window.main_panel.connection_worker)
 
@@ -98,6 +99,20 @@ class MainWindowTests(unittest.TestCase):
         window = self._make_window()
         self.assertIs(window.calibration_tabs.widget(3), window.autocalibration_window)
         self.assertEqual(window.calibration_tabs.tabText(3), "Autocalibration")
+
+    def test_acquisition_is_its_own_sidebar_page_left_of_calibration(self):
+        # Acquisition used to be the Calibration tab widget's fifth sub-tab;
+        # it is now a separate top-level sidebar page, ahead of Calibration,
+        # since collecting data is a distinct phase from calibrating (see
+        # PLINT_STUDENT_MVP_DIRECTIVE.md's target workflow).
+        window = self._make_window()
+        self.assertEqual(window.sidebar.count(), 3)
+        self.assertEqual(window.sidebar.item(0).text(), "ASIC config.")
+        self.assertEqual(window.sidebar.item(1).text(), "Acquisition")
+        self.assertEqual(window.sidebar.item(2).text(), "Calibration")
+        self.assertIs(window.pages.widget(1).layout().itemAt(0).widget(), window.acquisition_window)
+        for index in range(window.calibration_tabs.count()):
+            self.assertIsNot(window.calibration_tabs.widget(index), window.acquisition_window)
 
     def test_main_panel_is_the_first_asic_config_tab(self):
         window = self._make_window()
@@ -111,14 +126,14 @@ class MainWindowTests(unittest.TestCase):
     def test_scan_windows_have_no_embedded_connection_ui_when_shared(self):
         window = self._make_window()
         for scan_window in (window.threshold_window, window.hold_scan_window,
-                           window.scurve_window):
+                           window.scurve_window, window.acquisition_window):
             self.assertIsNone(scan_window._connection_panel)
             self.assertIsNone(scan_window._channel_config_panel)
 
     def test_scan_windows_default_to_hardware_mode(self):
         window = self._make_window()
         for scan_window in (window.threshold_window, window.hold_scan_window,
-                            window.scurve_window):
+                            window.scurve_window, window.acquisition_window):
             self.assertEqual(scan_window.mode.currentIndex(), 1)
             self.assertEqual(scan_window.mode.currentText(), "Hardware connection")
 
@@ -127,6 +142,8 @@ class MainWindowTests(unittest.TestCase):
         self.assertEqual(window.pages.currentIndex(), 0)
         window.sidebar.setCurrentRow(1)
         self.assertEqual(window.pages.currentIndex(), 1)
+        window.sidebar.setCurrentRow(2)
+        self.assertEqual(window.pages.currentIndex(), 2)
 
     def test_status_strip_reflects_worker_state(self):
         window = self._make_window()
@@ -153,10 +170,12 @@ class MainWindowTests(unittest.TestCase):
         # button gating would otherwise stay stuck at its just-constructed
         # "not connected" reading forever.
         window = self._make_window()
-        # threshold/hold-scan/S-curve each have their own Simulation/Hardware
-        # mode combo box; Autocalibration is hardware-only and has none, so
-        # it is exercised alongside the others but not mode-toggled.
-        scan_windows = (window.threshold_window, window.hold_scan_window, window.scurve_window)
+        # threshold/hold-scan/S-curve/acquisition each have their own
+        # Simulation/Hardware mode combo box; Autocalibration is
+        # hardware-only and has none, so it is exercised alongside the
+        # others but not mode-toggled.
+        scan_windows = (window.threshold_window, window.hold_scan_window, window.scurve_window,
+                        window.acquisition_window)
         all_scan_windows = scan_windows + (window.autocalibration_window,)
         for scan_window in scan_windows:
             scan_window.mode.setCurrentIndex(1)  # Hardware connection
@@ -203,7 +222,8 @@ class MainWindowTests(unittest.TestCase):
         self.assertEqual(worker.snapshot().state, "connected")
         window.connection_panel.poll()
 
-        scan_windows = (window.threshold_window, window.hold_scan_window, window.scurve_window)
+        scan_windows = (window.threshold_window, window.hold_scan_window, window.scurve_window,
+                       window.acquisition_window)
         for scan_window in scan_windows:
             scan_window.poll_connection_worker()
             self.assertTrue(scan_window.mode.isEnabled(),
@@ -326,6 +346,76 @@ class MainWindowTests(unittest.TestCase):
                 break
             time.sleep(0.01)
         self.assertEqual(worker.snapshot().state, "stopped")
+
+    def test_close_recovers_when_a_hardware_job_faults_racing_the_shutdown(self):
+        # A live-reproduced defect (RADIOROC 40/41's offline defect-hunt):
+        # ConnectionWorker deliberately holds its shutdown when a running
+        # job faults right as a shutdown is already queued behind it (see
+        # test_new_job_fault_during_shutdown_stays_alive_for_explicit_retry
+        # in tests/test_connection_worker.py) -- the documented contract is
+        # that the *caller* must retry shutdown() once more after seeing
+        # "faulted". Before this fix, MainWindow never did: an operator who
+        # closed the app at exactly the moment a hardware fault landed (e.g.
+        # a USB hiccup during a run's mandatory restoration-verification
+        # read) got a window that never closes via any UI action.
+        from tests.test_connection_worker import BlockingCounterFaultTransport, ThresholdSession
+
+        transport = BlockingCounterFaultTransport()
+
+        class _FaultingSessionWorker(ConnectionWorker):
+            def __init__(self):
+                super().__init__(discovery=lambda: (),
+                                 session_factory=lambda config: ThresholdSession(transport))
+
+        window = self._make_window(_FaultingSessionWorker)
+        worker = window.connection_panel.connection_worker
+        worker.connect(RadiorocConnectionConfig("fake-port", 115200, 0.5))
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and worker.snapshot().state != "connected":
+            _app().processEvents()
+            time.sleep(0.01)
+        self.assertEqual(worker.snapshot().state, "connected")
+        window.connection_panel.poll()
+
+        tw = window.threshold_window
+        tw.poll_connection_worker()
+        tw.mode.setCurrentIndex(1)  # Hardware connection
+        tw.channel_select.set_channels([4])
+        tw.dac_min.setValue(0)
+        tw.dac_max.setValue(0)
+        tw.dac_step.setValue(1)
+        tw.window_ms.setValue(1)
+        _app().processEvents()
+        self.assertTrue(tw.run_button.isEnabled())
+        tw.start_run()
+
+        # Let the scan actually reach (and block on) the counter read that
+        # BlockingCounterFaultTransport will fault once released -- not a
+        # sleep-and-hope, an explicit signal the fake transport sets.
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not transport.counter_read.is_set():
+            _app().processEvents()
+            time.sleep(0.01)
+        self.assertTrue(transport.counter_read.is_set(), "scan never reached the counter read")
+
+        # Close mid-run: this queues ConnectionWorker's shutdown behind the
+        # still-running job, exactly the race the held-shutdown contract
+        # exists for.
+        window.close()
+        _app().processEvents()
+        self.assertNotEqual(worker.snapshot().state, "stopped",
+                            "closed before the race could even happen")
+
+        # Now let the fault land while that shutdown is queued.
+        transport.release_counter.set()
+
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and worker.snapshot().state != "stopped":
+            _app().processEvents()
+            time.sleep(0.01)
+        self.assertEqual(worker.snapshot().state, "stopped",
+                         "window never recovered from a job fault racing its own shutdown "
+                         "(the required explicit shutdown() retry never happened)")
 
     def test_hint_bar_reports_into_the_window_status_bar(self):
         from PySide6.QtCore import QEvent

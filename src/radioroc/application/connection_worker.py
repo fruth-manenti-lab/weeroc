@@ -17,6 +17,11 @@ from radioroc.transport.config import RadiorocConnectionConfig
 from radioroc.transport.discovery import BoardPort, list_board_ports
 from radioroc.transport.serial import RadiorocSerial
 
+from .acquisition import AcquisitionJob, AcquisitionJobConfig
+from .acquisition_worker import (
+    MAX_RETAINED_BATCHES, AcquisitionWorkerOutcome, AcquisitionWorkerSnapshot,
+    summarize_acquisition_event,
+)
 from .autocalibration import AutocalibrationJob, AutocalibrationJobConfig
 from .channel_config import ChannelConfigOperation, apply_channel_config
 from .hold_scan import HoldScanJob, HoldScanJobConfig
@@ -100,6 +105,12 @@ class ConnectionWorker:
         self._autocalibration_unread = False
         self._autocalibration_coalesced = 0
         self._autocalibration_outcome = None
+        self._acquisition_token: CancellationToken | None = None
+        self._acquisition_event = None
+        self._acquisition_rows = []
+        self._acquisition_unread = False
+        self._acquisition_coalesced = 0
+        self._acquisition_outcome = None
         self._channel_config_outcome = None
         self._raw_registers_rows = None
         self._raw_register_write_result = None
@@ -161,6 +172,14 @@ class ConnectionWorker:
                 self._autocalibration_event, self._autocalibration_step,
                 tuple(self._autocalibration_rows), self._autocalibration_coalesced,
                 self._autocalibration_outcome))
+
+    def acquisition_snapshot(self):
+        with self._lock:
+            self._acquisition_unread = False
+            return deepcopy(AcquisitionWorkerSnapshot(self._acquisition_event,
+                                                       tuple(self._acquisition_rows),
+                                                       self._acquisition_coalesced,
+                                                       self._acquisition_outcome))
 
     def channel_config_snapshot(self):
         with self._lock:
@@ -322,6 +341,35 @@ class ConnectionWorker:
                 raise JobBusyError(f"cannot cancel_autocalibration while connection is {self._state}")
             self._autocalibration_token.cancel()
 
+    def run_acquisition(self, operation: AcquisitionJobConfig):
+        """Run one verified acquisition job on the persistent owned session."""
+        operation = deepcopy(operation)
+        AcquisitionJob.preview(operation)
+        with self._lock:
+            if not self._started:
+                raise RuntimeError("connection worker has not been started")
+            if (self._shutdown_queued or self._pending or self._state != "connected"
+                    or self._fault is not None or self._device is None):
+                raise JobBusyError(f"cannot run_acquisition while connection is {self._state}")
+            self._pending = True
+            self._state = "scanning"
+            self._error = None
+            self._close_error = None
+            self._acquisition_token = CancellationToken()
+            self._acquisition_event = None
+            self._acquisition_rows = []
+            self._acquisition_unread = False
+            self._acquisition_coalesced = 0
+            self._acquisition_outcome = None
+            self._commands.put(("run_acquisition", operation))
+
+    def cancel_acquisition(self):
+        """Request cooperative cancellation without touching the transport."""
+        with self._lock:
+            if self._state != "scanning" or self._acquisition_token is None:
+                raise JobBusyError(f"cannot cancel_acquisition while connection is {self._state}")
+            self._acquisition_token.cancel()
+
     def review_fault(self):
         """Clear a visible fault after the session has been released."""
         with self._lock:
@@ -354,6 +402,8 @@ class ConnectionWorker:
                 self._scurve_token.cancel()
             if self._autocalibration_token is not None:
                 self._autocalibration_token.cancel()
+            if self._acquisition_token is not None:
+                self._acquisition_token.cancel()
             self._commands.put(("shutdown", None))
 
     def _submit(self, command, argument, busy_state, allowed_states):
@@ -472,6 +522,22 @@ class ConnectionWorker:
                 else:
                     self._autocalibration_coalesced += 1
 
+    def _publish_acquisition(self, event):
+        with self._lock:
+            if self._acquisition_unread:
+                self._acquisition_coalesced += 1
+            self._acquisition_event = event
+            self._acquisition_unread = True
+            if event.kind == "point":
+                # Rolling window, not a hard cap: see acquisition_worker.py's
+                # MAX_RETAINED_BATCHES docstring -- `batches` has no fixed
+                # upper bound the way threshold's DAC axis does, so a live
+                # progress display should keep showing the most recent
+                # batches rather than freezing at the first N.
+                if len(self._acquisition_rows) >= MAX_RETAINED_BATCHES:
+                    self._acquisition_rows.pop(0)
+                self._acquisition_rows.append(summarize_acquisition_event(event))
+
     def _run(self):
         while True:
             command, argument = self._commands.get()
@@ -497,6 +563,8 @@ class ConnectionWorker:
                 self._run_scurve(argument)
             elif command == "run_autocalibration":
                 self._run_autocalibration(argument)
+            elif command == "run_acquisition":
+                self._run_acquisition(argument)
             elif command == "shutdown":
                 with self._lock:
                     hold = self._hold_shutdown_for_job_fault
@@ -665,6 +733,34 @@ class ConnectionWorker:
             problems.append("reference channel calibration DAC restoration was not confirmed")
         return "; ".join(problems) or None
 
+    @staticmethod
+    def _acquisition_fault(result, error):
+        problems = []
+        if error:
+            problems.append(error)
+        if result is None:
+            if not problems:
+                problems.append("acquisition job returned no result")
+            return "; ".join(problems)
+        expected_cancel = (result.status == "cancelled"
+                           and isinstance(result.error, JobCancelled))
+        if result.error is not None and not expected_cancel:
+            problems.append(f"{type(result.error).__name__}: {result.error}")
+        if result.status in {"failed", "disconnected"}:
+            problems.append(f"acquisition status: {result.status}")
+        if result.cleanup_status not in {"restored", "not_required"}:
+            problems.append(f"cleanup status: {result.cleanup_status}")
+        problems.extend(f"cleanup: {item}" for item in result.cleanup_errors)
+        problems.extend(f"persistence: {item}" for item in result.persistence_errors)
+        verification = result.verification
+        if not verification:
+            problems.append("restoration verification is absent")
+        elif verification.get("status") != "passed":
+            problems.append(
+                f"restoration verification {verification.get('status', 'absent')}"
+            )
+        return "; ".join(problems) or None
+
     def _run_hold_scan(self, operation):
         result = None
         error = None
@@ -763,6 +859,40 @@ class ConnectionWorker:
         with self._lock:
             self._autocalibration_outcome = outcome
             self._autocalibration_token = None
+            if fault:
+                if self._fault is None:
+                    self._fault = fault
+                elif fault not in self._fault:
+                    self._fault = f"{self._fault}; {fault}"
+                self._state = "faulted"
+                self._error = fault
+                self._close_error = None
+                if self._shutdown_queued:
+                    self._hold_shutdown_for_job_fault = True
+            else:
+                self._state = "connected"
+                self._error = None
+                self._close_error = None
+            self._pending = False
+
+    def _run_acquisition(self, operation):
+        result = None
+        error = None
+        with self._lock:
+            token = self._acquisition_token
+            device = self._device
+        try:
+            result = AcquisitionJob().run(
+                device, operation, cancellation=token,
+                on_event=self._publish_acquisition, verify_restoration=True,
+            )
+        except Exception as exc:
+            error = self._describe(exc)
+        outcome = AcquisitionWorkerOutcome(result, error, None)
+        fault = self._acquisition_fault(result, error)
+        with self._lock:
+            self._acquisition_outcome = outcome
+            self._acquisition_token = None
             if fault:
                 if self._fault is None:
                     self._fault = fault

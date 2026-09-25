@@ -3,6 +3,7 @@
 import contextlib
 import csv
 from dataclasses import replace
+from datetime import datetime
 import io
 import json
 from pathlib import Path
@@ -178,6 +179,13 @@ class AcquisitionJobTests(unittest.TestCase):
         self.assertEqual(manifest["execution_mode"], "simulation")
         self.assertEqual(manifest["firmware_status_word"], bits(5))
         self.assertEqual(manifest["cleanup"]["status"], "restored")
+        # Priority 3 (PLINT_STUDENT_MVP_DIRECTIVE.md): host-receipt time per
+        # batch, distinct from any physical-event timestamp the hardware
+        # doesn't supply.
+        received = manifest["batch_received_at"]
+        self.assertEqual([entry["batch"] for entry in received], [0, 1])
+        for entry in received:
+            datetime.fromisoformat(entry["received_at"])  # raises if malformed
 
     def test_cancel_after_point_preserves_partial_data(self):
         token = CancellationToken()
@@ -279,6 +287,44 @@ class AcquisitionJobTests(unittest.TestCase):
         self.assertEqual(self.manifest()["device_state"], "unknown")
         self.assertIn("adc timeout", self.manifest()["error"])
 
+    def test_cleanup_failure_after_success_is_failed(self):
+        # FPGA address 22 is written exactly twice in a normal run: once by
+        # configure_adc_external_hold's own setup (before the batch loop),
+        # once by cleanup's restore -- unlike address 21, which
+        # configure_adc_external_hold itself writes multiple times. Failing
+        # only the second occurrence isolates the cleanup-only restore,
+        # after every batch has already completed successfully.
+        write = self.device.write_word
+        calls = {"count": 0}
+
+        def fail_restore(address, value):
+            if address == 22:
+                calls["count"] += 1
+                if calls["count"] == 2:
+                    raise TransportIOError("cleanup only")
+            return write(address, value)
+
+        with patch.object(self.device, "write_word", side_effect=fail_restore):
+            result = self.run_job()
+        self.assertEqual((result.status, result.points, result.cleanup_status), ("failed", 2, "failed"))
+        self.assertEqual(self.manifest()["status"], "failed")
+
+    def test_manifest_failure_keeps_previous_manifest_and_reports_unsaved_status(self):
+        original = AcquisitionRunWriter.update
+
+        def update(writer, manifest):
+            if manifest["completed_points"]:
+                raise OSError("manifest disk full")
+            original(writer, manifest)
+
+        with patch.object(AcquisitionRunWriter, "update", new=update):
+            result = self.run_job()
+        self.assertEqual(result.status, "failed")
+        self.assertTrue(result.persistence_errors)
+        self.assertEqual(self.manifest()["status"], "running")
+        self.assertEqual(len(rows(result.csv_path)), 2)
+        self.assertEqual(self.transport.asic, self.transport.original_asic)
+
     def test_data_write_failure_retains_prior_points(self):
         original = AcquisitionRunWriter.append_events
 
@@ -306,7 +352,17 @@ class AcquisitionJobTests(unittest.TestCase):
     def test_invalid_configuration_has_no_hardware_or_files(self):
         for changes in ({"batches": 0}, {"acquisitions_per_batch": 0}, {"acquisitions_per_batch": 256},
                         {"adc_window_ns": 3}, {"timeout_s": 0}, {"trigger_channel": 999},
-                        {"channels": [70]}, {"hold_delay_ns": 3}, {"start_batch": -1}):
+                        {"channels": [70]}, {"hold_delay_ns": 3}, {"start_batch": -1},
+                        # A real bug found live (RADIOROC 40): a trigger channel
+                        # absent from `channels` used to pass validation, then
+                        # silently never got its amplitude written per accepted
+                        # event -- application/acquisition.py unconditionally
+                        # unmasks trigger_channel, and for a genuine 2-channel
+                        # coincidence (trigger_type=1, both sources=3) also
+                        # unmasks trigger_channel_2, but only ever writes rows
+                        # for channels in `channels`.
+                        {"trigger_channel": 7},  # channels=[4], trigger_channel not among them
+                        {"trigger_type": 1, "trigger_source_2": 3, "trigger_channel_2": 7}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 AcquisitionJob().run(self.device, AcquisitionJobConfig(replace(self.acquisition, **changes)))
         self.assertEqual(self.transport.trace, [])

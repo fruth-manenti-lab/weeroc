@@ -47,6 +47,10 @@ class ScanWindowDefaultModeTests(unittest.TestCase):
         from radioroc.gui.scurve_window import ScurveWindow
         self._assert_defaults_to_hardware(ScurveWindow())
 
+    def test_acquisition_window_defaults_to_hardware(self):
+        from radioroc.gui.acquisition_window import AcquisitionWindow
+        self._assert_defaults_to_hardware(AcquisitionWindow())
+
 
 if __name__ == "__main__":
     unittest.main()

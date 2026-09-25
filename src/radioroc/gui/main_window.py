@@ -1,10 +1,14 @@
-"""Shared shell: one connection/channel-config area plus a Calibration area.
+"""Shared shell: one connection/channel-config area, an Acquisition area, and
+a Calibration area.
 
 Mirrors the vendor app's actual shape (see ``local_artifacts/app_pics``): a
 persistent sidebar switches between top-level areas, ASIC config (connection +
-per-channel config) is one shared area rather than duplicated per workflow,
-and the scan workflows are sub-tabs of one "Calibration" area, not three
-independent top-level windows each owning their own connection.
+per-channel config) is one shared area rather than duplicated per workflow.
+Acquisition is its own top-level sidebar page, not a Calibration sub-tab --
+calibrating and collecting data are distinct phases of the student workflow
+(see ``PLINT_STUDENT_MVP_DIRECTIVE.md``'s target workflow: calibrate first,
+then collect). The remaining scan workflows are sub-tabs of one "Calibration"
+area, not independent top-level windows each owning their own connection.
 """
 
 from PySide6.QtCore import QTimer
@@ -13,6 +17,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QScrollArea, QStackedWidget, QTabWidget, QVBoxLayout, QWidget,
 )
 
+from .acquisition_window import AcquisitionWindow
 from .autocalibration_window import AutocalibrationWindow
 from .channel_config_panel import ChannelConfigPanel
 from .connection_panel import ConnectionPanel
@@ -51,7 +56,7 @@ def _scrollable(widget):
 
 
 class MainWindow(QMainWindow):
-    """Top-level shell: sidebar (ASIC config / Calibration) over one connection."""
+    """Top-level shell: sidebar (ASIC config / Acquisition / Calibration) over one connection."""
 
     def __init__(self, *, connection_worker_factory=None):
         super().__init__()
@@ -94,7 +99,7 @@ class MainWindow(QMainWindow):
             QListWidget::item {{ padding: 14px 10px; }}
             QListWidget::item:selected {{ background: {_SIDEBAR_SELECTED}; }}
         """)
-        for label in ("ASIC config.", "Calibration"):
+        for label in ("ASIC config.", "Acquisition", "Calibration"):
             QListWidgetItem(label, self.sidebar)
         body_layout.addWidget(self.sidebar)
 
@@ -172,8 +177,8 @@ class MainWindow(QMainWindow):
         self.hint = HintBar(
             self.statusBar(),
             "RADIOROC: manage the board connection and ASIC configuration here, "
-            "or switch to Calibration for the scan workflows. Hover a control to "
-            "see what it does.")
+            "switch to Acquisition to collect data, or Calibration for the scan "
+            "workflows. Hover a control to see what it does.")
         self.connection_panel.attach_hints(self.hint)
         self.main_panel.attach_hints(self.hint)
         self.channel_config_panel.attach_hints(self.hint)
@@ -182,7 +187,17 @@ class MainWindow(QMainWindow):
         self.probes_masks_panel.attach_hints(self.hint)
         self.raw_register_panel.attach_hints(self.hint)
 
-        # -- Calibration: the three scan workflows as sub-tabs ---------------
+        # -- Acquisition: its own top-level sidebar page, ahead of
+        # Calibration in the sidebar -- collecting data is a distinct phase
+        # from calibrating, not one more Calibration sub-tab. -----------------
+        acquisition_page = QWidget()
+        acquisition_layout = QVBoxLayout(acquisition_page)
+        acquisition_layout.setContentsMargins(0, 0, 0, 0)
+        self.acquisition_window = AcquisitionWindow(connection_worker=worker)
+        acquisition_layout.addWidget(self.acquisition_window)
+        self.pages.addWidget(acquisition_page)
+
+        # -- Calibration: the remaining scan workflows as sub-tabs -----------
         calibration_page = QWidget()
         calibration_layout = QVBoxLayout(calibration_page)
         calibration_layout.setContentsMargins(0, 0, 0, 0)
@@ -255,7 +270,7 @@ class MainWindow(QMainWindow):
 
     def _scan_windows(self):
         return (self.threshold_window, self.hold_scan_window, self.scurve_window,
-                self.autocalibration_window)
+                self.autocalibration_window, self.acquisition_window)
 
     def _busy(self):
         scanning = any(window.worker is not None for window in self._scan_windows())
@@ -265,8 +280,28 @@ class MainWindow(QMainWindow):
 
     def _finish_close_if_idle(self):
         worker = self.connection_panel.connection_worker
-        if worker is not None and worker.snapshot().state == "stopped":
-            self.connection_panel.forget_worker()
+        if worker is not None:
+            state = worker.snapshot().state
+            if state == "stopped":
+                self.connection_panel.forget_worker()
+            elif state == "faulted":
+                # ConnectionWorker's own documented contract: a job fault
+                # that races a queued shutdown holds the worker alive at
+                # "faulted" for exactly one required explicit retry (see
+                # test_new_job_fault_during_shutdown_stays_alive_for_explicit_retry
+                # in tests/test_connection_worker.py) -- without this, a
+                # hardware fault during a run's cleanup, timed against the
+                # user closing the app, left the window unclosable forever
+                # (RADIOROC 40/41's own defect-hunt found this live). Safe to
+                # retry every tick: shutdown() raises (caught) if one is
+                # already in flight, and this only runs while _closing is
+                # already true, never during ordinary operation -- an
+                # unrelated fault outside of an active close attempt still
+                # stays visible and blocks further runs, untouched.
+                try:
+                    worker.shutdown()
+                except Exception:
+                    pass
         if not self._busy():
             self._finish_timer.stop()
             self.close()

@@ -1,5 +1,1373 @@
 # Implementation status
 
+## Independent plint MVP sanity review — 24 September 2026 (Astra)
+
+Reviewed `feat/daq-results-gui` at `4435584`, at the operator's request,
+including tests, a visible GUI exercise, and authorized equipment checks.
+This is an independent review alongside Claude's numbered development sessions;
+their existing session titles and `NEXT_SESSION.md` were left intact.
+Full findings, exact code locations, and prioritized acceptance work are in
+`docs/MVP_SANITY_REVIEW_2026-09-24.md`.
+
+**Checks:** the initial sandbox run completed 461 tests with three timeout
+failures (main-window completion and two process-lock subcases), then remained
+alive; only the audit's processes were stopped. The isolated process-lock test
+passed outside the sandbox. A full host-environment rerun with writable
+`MPLCONFIGDIR` and offscreen Qt passed **461/461, no skips**, plus **18 CLI help
+checks**, exit 0 (unit tests: 178.845 s). No source/packaging changes were made.
+
+Opened the actual GUI on the lab's 1024×768 display and exercised eight-channel
+simulation, completion, reopening, gain/log plotting controls, and cancellation.
+Completion/cancellation retained data and reported restored cleanup. Confirmed
+that 15 physical events are wrongly labelled 120 events, and the spectrum
+collapses into a thin strip at this display size. A synthetic 100,000-event,
+eight-channel live refresh took 6.12 s on the GUI thread, peak process RSS
+~397 MiB: the growing CSV is reparsed and retained despite the bounded mailbox.
+
+Independent offline reproductions also confirmed same-channel self-coincidence
+is accepted, cancellation after autocalibration corrections is not fault-gated
+despite incomplete final verification, partial calibration writes are omitted
+from `calibration_after`, append replaces earlier segment provenance, and the
+calibration-record reader cannot accept the top-level autocalibration filename.
+The procedure's gain step describes a missing Ctest panel action and amplitude
+measurements while the recorded rehearsal used rate plateaus; hold-scan GUI
+also lacks the second coincidence slot required by its written procedure.
+The implemented fixed-pair trigger does not establish any-two-of-4–8 semantics.
+
+**Equipment limits:** no competing RADIOROC app or serial owner was observed.
+The GUI worker's one status-only connection to `/dev/ttyUSB0` failed visibly
+with a malformed response and closed. Read-only PSU queries confirmed all three
+Keysight EDU36311A outputs OFF, consistent with the last handoff. No voltage,
+current limit, output-enable, bias or generator setting was changed; no hardware
+scan was attempted. Both audit GUI instances closed and serial ports were released.
+This does not establish powered-board failure or validate physical coincidence.
+
+Evidence/scripts/screenshots/logs are preserved, ignored, under
+`radioroc_runs/astra_mvp_audit_20260924/`. **Next bounded work:** resolve the
+fixed-pair versus any-pair requirement, fix calibration cancellation/provenance
+and the procedure/UI mismatches, then fix event counts and bounded plotting
+before the powered student/endurance rehearsal. See the review for reproductions
+and distinctions between verified bugs, conditional append risk, and pending
+physical validation. Passing the current suite is not student-MVP acceptance.
+
+## RADIOROC 40 (continued) — Same trigger-channel/channels gap confirmed and fixed in `HoldScanConfig`
+
+Direct follow-up to the `AcquisitionConfig` fix immediately below (same
+investigation thread, not new scope): read `application/hold_scan.py`'s
+actual writer code rather than assume either way, per that entry's own
+flagged next step. Confirmed the identical shape of bug: `set_mask_for_
+channel(scan.trigger_channel, ...)` runs unconditionally, the same
+`trigger_type==1 and trigger_source==3 and trigger_source_2==3` gate
+unmasks both named channels for a genuine coincidence, and the per-hold-
+value row is built `for channel in scan.channels` -- a `trigger_channel`/
+`trigger_channel_2` absent from `channels` would never have its own
+HG/LG mean/stdev response curve recorded at all, which is arguably worse
+here than for Acquisition: a hold scan's entire purpose is characterizing
+the triggering channel's own timing response.
+
+`HoldScanWindow`'s own GUI defaults (`channel_select=(4, 5)`,
+`trigger_channel=4`) were already safe -- this was a latent API/CLI-level
+gap, not a currently-reachable GUI default, and the GUI doesn't currently
+expose `trigger_channel_2`/`trigger_source_2` fields at all (only reachable
+by direct `HoldScanConfig` construction). Fixed with the same two checks,
+same reasoning, in `HoldScanConfig.validate()`. Two matching regression
+subTest cases added to the existing `test_invalid_configuration_has_no_
+hardware_or_files` in `tests/test_hold_scan_jobs.py`.
+
+461/461 offline tests pass under `.conda-radioroc` (`tools/check_development.py`).
+
+## RADIOROC 40 (continued) — Found and fixed a real silent per-event data-loss bug: trigger channel(s) not required to be among saved channels
+
+A second delegated defect-hunt pass (scoped to the GUI panel/window files
+the first pass didn't cover: `channel_config_panel.py`, `connection_panel.py`,
+`threshold_calibration_panel.py`, `probes_masks_panel.py`,
+`raw_register_panel.py`, `input_dac_grid_panel.py`, `main_panel.py`,
+`hint_bar.py`, and the five scan windows) found one real, severe,
+independently-verified finding, ruled out several plausible-looking
+candidates (a structurally-identical close-hang pattern in the standalone
+scan windows' own `closeEvent`, confirmed unreachable through the real
+`MainWindow`-driven app; a `RawRegisterPanel` busy-state ambiguity,
+confirmed to be at worst a display-timing delay, not a wrong result), and
+reported nothing else -- an honest, mostly-empty second pass, not padded.
+
+**Defect** (severity: high -- silent per-event data loss, directly
+contradicts Priority 0/3's "each accepted event must retain the signal
+amplitudes on all selected SiPMs"): `AcquisitionConfig.validate()`
+(`radioroc_client.py`) never checked that `trigger_channel`/
+`trigger_channel_2` were members of `channels` (the channels whose
+amplitudes actually get saved). `AcquisitionWindow`'s own defaults already
+demonstrate the gap: `channel_select` defaults to `(4,)` while
+`trigger_channel_2` defaults to `5` -- a student who switches Trigger type
+to "2 channels coincidence" with Trigger channel/source = 4/Individual and
+Trigger channel 2/source 2 = 5/Individual, but leaves the channel-selection
+grid at its own default, gets a hardware run that correctly triggers on
+the real ch4-AND-ch5 coincidence (confirmed: `application/acquisition.py`
+unconditionally unmasks `trigger_channel`, and for a genuine 2-channel
+coincidence also unmasks `trigger_channel_2`) but then writes per-event
+rows only `for channel in acquisition.channels` -- channel 5's amplitude,
+despite being one of the two channels whose coincidence produced every
+accepted event, is silently absent from `events.csv`, with no warning
+anywhere. Exactly the scenario Priority 0's own test plan named ("acquisition
+of channels that did not cross threshold") and exactly what Priority 3
+requires retained.
+
+**Verified independently before fixing**: read the actual write path
+(`application/acquisition.py` lines ~267-309) and `AcquisitionConfig.
+validate()` directly, confirmed no cross-check existed anywhere in the
+stack, confirmed the existing coincidence-wiring test
+(`test_operation_wires_two_channel_coincidence_fields`) happens to always
+set matching channels so it could never have caught this.
+
+**Fix**: two narrowly-scoped checks added to `AcquisitionConfig.validate()`,
+each tied to an actual evidenced write/unmask condition, not a blanket
+rule invented past what's confirmed:
+- `trigger_channel` must always be in `channels` (matches
+  `set_mask_for_channel(acquisition.trigger_channel, ...)` running
+  unconditionally regardless of trigger_type).
+- `trigger_channel_2` must be in `channels` specifically when
+  `trigger_type == 1 and trigger_source == 3 and trigger_source_2 == 3`
+  (mirrors `application/acquisition.py`'s own exact gating condition for a
+  genuine 2-distinct-channel coincidence -- the one case where
+  `trigger_channel_2` names a second real trigger channel, per that
+  dataclass's own docstring).
+- Deliberately did **not** extend the same check to `HoldScanConfig`,
+  which has structurally similar `trigger_channel`/`trigger_channel_2`/
+  `channels` fields -- that job's writer code wasn't audited this
+  session, so applying the same rule there without evidence would be
+  guessing, not a verified fix; flagged for a future session (see
+  `NEXT_SESSION.md`), not silently left as an assumed-safe gap.
+- Two regression subTest cases added to the existing
+  `test_invalid_configuration_has_no_hardware_or_files` in
+  `tests/test_acquisition_jobs.py` (not a new test function -- this is
+  exactly the test that already owns "configurations that must be
+  rejected before any hardware/file access").
+
+461/461 offline tests pass under `.conda-radioroc` (`tools/check_development.py`).
+
+## RADIOROC 40 — Finalized Step 3, built Step 6's calibration-record artifact
+
+Operator was away from the bench (remote via AnyDesk; PSU channels 1/3 and
+the signal generator output confirmed off, board USB-connected but
+unpowered) -- offline-only session, no hardware actions. Note: `NEXT_SESSION.md`
+was titled "RADIOROC 44" at handoff, but every actual entry (including the
+one it said it continued from) is numbered RADIOROC 39, with nothing
+in between -- treating that as a numbering slip in the title, not a sign of
+missed sessions, and resuming at 40.
+
+**Step 3 (operating threshold) finalized**: read RADIOROC 39's actual saved
+CSVs rather than trust the prior summary. Step 1's pedestal scan
+(`radioroc_runs/hardware/20260923-151828-99b393ae/thresholdscan.csv`) shows
+residual counts of 10-20 Hz through DAC 480, essentially flat ~10 Hz by
+500-520 (not exactly zero at 460-480 as the prior summary's rounding
+suggested). Step 4's confirmed final gain scan
+(`.../20260923-165254-9de939d9/thresholdscan.csv`, matched by its exact cited
+plateau values) shows a real ~10-12 kHz Ctest-injected-pulse plateau from
+DAC ~425 onward. Per `docs/plint_calibration_procedure.md`'s own Step 3 rule
+(margin of +50-250 DAC codes above the clean floor, no hardcoded universal
+value), operator agreed **DAC 575** -- roughly +75-95 codes above the
+480-500 floor, well clear of noise, well below where the Ctest plateau
+starts. Recorded here as the chosen value and reasoning, not hardcoded in
+any source file.
+
+**Step 6 (saved calibration record) built**, closing the gap
+`docs/plint_calibration_procedure.md` and `NEXT_SESSION.md` had flagged as
+real and open:
+- `src/radioroc/data/calibration_record.py`: `save_calibration_record`/
+  `load_calibration_record`, schema_version 1, matching existing
+  `threshold_reader.py`-style conventions. Validates every referenced
+  sub-scan directory has a `metadata.json` with `status: "completed"`
+  (`ValueError` naming the step label otherwise) and that all referenced
+  sub-scans agree on `board_identity` (`ValueError` listing every
+  conflicting label=value otherwise) -- a real hardware-identity
+  consistency check, not cosmetic. `per_channel_relative_response` and all
+  calibration settings (threshold DAC/margin reasoning, hold/conversion
+  delay, gain codes, excluded channels) are caller-supplied and passed
+  through as-is; this module computes nothing.
+- `scripts/radioroc_save_calibration_record.py`: thin CLI to write one by
+  hand from the sub-scan output directories plus the operator's judgment
+  calls, matching the project's existing script conventions.
+- `tests/test_calibration_record.py`: 5 tests (happy-path round trip,
+  missing metadata, wrong status, conflicting board_identity, schema
+  rejection).
+- Delegated the implementation (bounded, offline, with explicit acceptance
+  checks) to a worker agent per this project's delegation preference, then
+  reviewed the result before accepting it -- and found one real bug: the
+  new CLI script imported `radioroc.data.calibration_record` with no
+  `src`-path bootstrap, unlike every other script under `scripts/`, which
+  gets that for free as a side effect of importing `radioroc_client.py`
+  first (its own guarded `sys.path.insert` onto `src/`). The worker's own
+  claim -- that `.conda-radioroc` lacking `pytest`/an installed `radioroc`
+  package was a pre-existing environment gap unrelated to its change --
+  was half right (true that nothing is installed there) but wrong in
+  conclusion: every other script already works around exactly that gap,
+  and the new one was the only one that didn't, which is exactly what
+  `tools/check_development.py`'s per-script `--help` check caught. Fixed
+  directly (small, well-scoped) by adding the same guarded bootstrap.
+  455/455 offline tests pass under `.conda-radioroc`
+  (`tools/check_development.py`), confirmed after the fix, not just
+  before it.
+- Not yet run for real: no actual `calibration_record.json` exists yet --
+  that needs Step 5 done first (hold delay is one of its fields) and the
+  operator physically present to point the CLI at the real Steps 1/2/4/5
+  output directories.
+
+455/455 offline tests pass under `.conda-radioroc` (`tools/check_development.py`).
+
+## RADIOROC 40 (continued) — Promoted Acquisition to its own sidebar page; found and fixed a real close-hang race
+
+Direct operator request (while still remote, still offline): Acquisition
+should be a separate top-level tab, positioned ahead of ("to the left of")
+Calibration, not buried as Calibration's fifth sub-tab -- collecting data
+is a distinct phase from calibrating, per `PLINT_STUDENT_MVP_DIRECTIVE.md`'s
+own target workflow ("calibrate ... then configure coincidence ...
+collect"). `src/radioroc/gui/main_window.py`: sidebar is now ASIC config. /
+Acquisition / Calibration (was two items); Calibration's `calibration_tabs`
+now has four sub-tabs, not five. Updated `tests/test_main_window.py` to
+match (replaced the "fifth calibration tab" assertion with one asserting
+Acquisition is its own sidebar page and is absent from `calibration_tabs`;
+extended the sidebar-switching test to all three pages). Real visual
+check, not just passing tests: rendered the actual window offscreen
+(`QT_QPA_PLATFORM=offscreen`) at all three sidebar rows and inspected the
+resulting screenshots -- Acquisition renders as a full standalone page,
+Calibration's tab bar now shows exactly Threshold scan / Hold scan /
+S-curve / Autocalibration.
+
+**Found and fixed a real, severe "frozen UI that prevents stopping" bug**
+in the same shared-connection-worker path the directive names as needing
+scrutiny, via a delegated read-only defect-hunt review (bounded to the
+directive's own named MVP-bug categories, not a generic style pass) that I
+then independently verified before touching anything:
+
+- **Defect**: `ConnectionWorker` has a documented, tested contract
+  (`test_new_job_fault_during_shutdown_stays_alive_for_explicit_retry` in
+  `tests/test_connection_worker.py`) that if a running hardware job faults
+  while a shutdown request is already queued behind it, the shutdown is
+  deliberately dropped -- state lands on `"faulted"`, the worker stays
+  alive, and the caller *must* call `shutdown()` again to actually finish
+  closing. This is intentional: it keeps an unresolved device fault
+  visible instead of silently closing over it, matching the directive's
+  "unresolved device-state faults must remain visible" requirement.
+  `MainWindow.closeEvent` called `worker.shutdown()` exactly once, gated by
+  a one-shot latch that never resets, and never retried -- so a hardware
+  fault landing at exactly the moment a student closes the app (e.g. a USB
+  hiccup during a run's mandatory restoration-verification read) left the
+  window unclosable via any UI action, forever, with no error dialog and
+  no way out short of force-killing the process.
+- **Verified, not just trusted**: reproduced the hang directly (fake
+  `ConnectionWorker` + the same `BlockingCounterFaultTransport` fault-
+  injection fake `test_connection_worker.py` already uses, driven through
+  the real `MainWindow`/`ThresholdWindow` hardware-run path), confirmed it
+  actually hangs (`worker.snapshot().state` stuck at `"faulted"`, never
+  reaching `"stopped"`, even after seconds of normal event-loop pumping),
+  then confirmed the fix resolves it and that reverting the fix reproduces
+  the exact same hang again (`AssertionError: 'faulted' != 'stopped'`).
+- **Fix**: `_finish_close_if_idle` (the poll loop `closeEvent` already
+  starts while waiting to actually close) now retries `worker.shutdown()`
+  whenever it observes `state == "faulted"`, matching the documented
+  retry contract. Scoped narrowly: this poll loop only ever runs while an
+  actual close is already in progress (`_closing` already latched), so an
+  unrelated fault during ordinary operation still stays visible and
+  blocks further runs, untouched -- this does not paper over faults in
+  general, only unblocks a close that's already been requested.
+- New regression test:
+  `test_close_recovers_when_a_hardware_job_faults_racing_the_shutdown` in
+  `tests/test_main_window.py`.
+
+461/461 offline tests pass under `.conda-radioroc` (`tools/check_development.py`),
+combined with RADIOROC 40's earlier Step 3/Step 6 work and the Priority 3/
+test-coverage work below.
+
+## RADIOROC 40 (continued) — Priority 3 timestamp question resolved (no gap); closed real failure-mode test-coverage gaps
+
+Delegated two bounded, offline, directive-sanctioned tasks in parallel;
+reviewed both results (diffs read directly, reasoning independently
+spot-checked against the actual manifest-writing code) before accepting.
+
+**Priority 3, resolved for the four calibration-scan jobs (threshold/
+hold-scan/S-curve/autocalibration): no `batch_received_at`-equivalent gap
+exists, and none was added.** RADIOROC 39's acquisition-path fix closed a
+real gap because `AcquisitionJob` writes accepted *physical events*
+(per-channel HG/LG amplitudes) whose host-receipt time is otherwise
+unrecoverable across a multi-batch run -- exactly the "event association"
+and "distinguish host receipt from physical-event timestamps" language in
+the directive's Priority 3. Threshold/hold-scan/S-curve/autocalibration
+are categorically different: each produces one aggregate rate or mean
+value per swept DAC/hold point, not an accepted event with an amplitude to
+associate with anything -- there is no event identity to timestamp, and
+the swept variable plus the CSV's own row order already fully order the
+points. Each of these jobs already has run-level `created_at`/
+`finished_at`/`elapsed_seconds` in its manifest (confirmed by reading
+`threshold.py`/`hold_scan.py` directly), and `persist()` durably writes the
+manifest after every point, so run duration is known and coarse-grained
+progress is auditable. This closes the item RADIOROC 39 flagged as "worth
+a quick check": checked, no gap found, no code changed.
+
+**Priority 4's own explicitly-sanctioned offline work** ("Exercise
+cancellation, storage failure, connection loss, and cleanup failures with
+fake transports/offline tests"): audited all 5 job modules
+(threshold/hold_scan/scurve/acquisition/autocalibration) across those four
+failure modes. Threshold/hold_scan/scurve were already fully covered.
+Closed five genuine, non-redundant gaps:
+- `acquisition`: cleanup failure landing *after* an otherwise fully-
+  successful run must flip status to `"failed"`, not hide the cleanup
+  error behind a `"completed"` report; a manifest-write (not CSV-write)
+  failure must surface via `persistence_errors` and leave the on-disk
+  manifest at its last truthful state.
+- `autocalibration`: a failed restore of the reference channel's probed-
+  away calibration DAC must flag `reference_restored = False` with a
+  warning, not be silently presented as a fully-restored run; a transport
+  disconnect mid-sub-scan must surface as `status="disconnected"` with
+  completed sub-runs recorded truthfully, not folded into a false overall
+  success; a manifest-write failure must propagate visibly (it does, via
+  both existing callers' blanket exception handling) and must not leave
+  the transport's session lock held for a later run.
+- **Flagged, not fixed (correctly out of this task's scope)**:
+  `AutocalibrationJob`'s own top-level manifest writer has no
+  persist()-retry-catch fallback for a second consecutive write failure,
+  unlike every sibling job's `persist()`-in-`finally` pattern -- it raises
+  instead of returning a structured `Result` with `persistence_errors`.
+  Verified this is not currently a silent-success bug (both
+  `ConnectionWorker._run_autocalibration` and
+  `scripts/radioroc_autocalibrate.py` already turn the raise into a
+  visible fault), but it's an API inconsistency worth attention if
+  `AutocalibrationResult` ever grows its own `persistence_errors` field to
+  match its siblings. Not changed this session -- a shared-contract change
+  needs the lead's own deliberate decision, not a test-audit's incidental
+  side effect.
+
+461/461 offline tests pass under `.conda-radioroc` (`tools/check_development.py`),
+run clean and combined with every other change from this session.
+
+## RADIOROC 39 (continued) — Priority 2 rehearsal: operator ran the calibration procedure through the GUI, found and fixed two real plotting bugs
+
+Same day, same bench (SiPMs still biased from earlier). Per the
+operator's own suggestion, they stood in for the student and ran
+`docs/plint_calibration_procedure.md`'s Steps 1/2/4 themselves through the
+actual GUI, with the lead walking through each field and independently
+verifying every result from the saved run data afterward (not just
+trusting the on-screen "looks alright") -- a real Priority 4 rehearsal
+data point, not just a Priority 2 exercise.
+
+**Step 1 (pedestal/noise/dead-channel ID)**, `ThresholdWindow`, channels
+4/6/32, DAC 0-1023 step 20, Ctest off: completed cleanly (52/52 points,
+cleanup restored, verification passed). Independently re-plotted and
+reviewed: all three channels show a real noise peak and a clean floor by
+DAC ~460-480, no channel excluded.
+
+**Step 2 (threshold alignment)**, `AutocalibrationWindow`: operator's
+first Preview had the Discriminator combo on T2, not T1 -- caught before
+running, not after. Corrected run completed cleanly (all four sub-scans:
+step1_zero/step1_full/step2/final, each independently confirmed
+`status: completed`, `cleanup: restored`). Independently computed each
+channel's 50%-crossing DAC from the final verification scan's own CSV
+(not trusted from a summary): ch4 ~178-180, ch6/ch32 ~176-178 -- aligned
+within about 2-4 DAC codes.
+
+**Step 4 (relative gain characterization)** hit real trouble, worked
+through live rather than glossed over:
+1. First attempt (Ctest on, generator still in single-shot mode from
+   earlier debugging) produced a curve identical in shape to a pure
+   dark-noise scan -- correctly diagnosed live as "no signal was actually
+   injected" (the generator was gated, waiting for a trigger nothing was
+   sending) rather than accepted as a gain result.
+2. Operator switched the generator back to continuous mode, but re-scanned
+   only DAC 0-250 after seeing "mostly zeros" -- pointed out live that
+   0-250 is still entirely inside the noise peak; the informative region
+   is the high-DAC plateau (400+), which a 0-250 scan cannot reach.
+3. Full-range rerun succeeded: a clean, real ~10-11 kHz plateau from DAC
+   ~440 through 1020, confirmed by reading the raw CSV values directly
+   (10130, 10540, 10280, 11060, 12420 Hz etc. -- genuinely varying,
+   Poisson-consistent measured counts, not a suspiciously constant number,
+   which is what ruled out "log-scale zero-clamping artifact" as an
+   explanation when the operator raised it). Channels 4/6/32 all show
+   closely matching plateau values -- no relative-gain outlier.
+
+**Two real GUI bugs found live during this rehearsal, both fixed and
+committed the same session:**
+- `ThresholdWindow`'s embedded plot used a plain connected-line style
+  where the standalone `scripts/plot_threshold_scan.py --steps` (and the
+  project's own 2026-06-26 logbook convention) already established that
+  threshold-scan data should render as a staircase, since it's a genuine
+  step function (one measured rate per discrete DAC code, no real
+  in-between value) -- not previously ported to the GUI. Fixed
+  (`drawstyle="steps-post"`).
+- `ThresholdWindow` had no log-scale option at all. Threshold-rate data
+  spans up to 8 orders of magnitude; on the resulting linear axis, Step
+  4's genuine ~10 kHz signal plateau is under 0.02% of the ~10^8 Hz noise
+  peak and renders as visually indistinguishable from a flat zero -- this
+  is exactly what led the operator to (reasonably) suspect the data was
+  wrong when it wasn't. Added a "Log Y" checkbox matching
+  `AcquisitionWindow`'s existing convention; independently rendered the
+  real window offscreen with the actual Step 4 data, before and after
+  toggling, to confirm.
+
+Both fixes: 450/450 offline tests pass each time
+(`tools/check_development.py`).
+
+**Step 3** (pick an operating threshold) and **Step 6** (save an
+attributable record) are decisions/documentation, not GUI actions --
+not finalized this session; see `NEXT_SESSION.md`. **Step 5** (hold/
+conversion timing) was not re-run through the GUI this session; the
+earlier same-day hold-scan result (peak ~530-550 ns) stands but wasn't
+rehearsed via `HoldScanWindow` specifically.
+
+**Equipment left at end of day**: SiPM bias (PSU CH3, 29.5 V) still ON.
+Signal generator: **mode left as burst/single-shot external-triggering,
+output turned off** -- a deliberate choice (burst mode was hard-won this
+session, given SCPI doesn't expose it on this unit's firmware; continuous
+mode is one trivial, already-documented command to restore if a future
+session wants more threshold/gain-style scans instead). Board disconnected
+cleanly.
+
+## RADIOROC 39 (continued) — Priority 3: closed the missing host-receipt-timestamp gap
+
+Same session, offline (no hardware touched), while the operator was away
+from the bench. A Priority 3 review of `src/radioroc/data/acquisition.py`
+and `application/acquisition.py` against `PLINT_STUDENT_MVP_DIRECTIVE.md`'s
+provenance requirements found most of it already satisfied by the
+existing design, and one real, concrete gap:
+
+- **Already fine, verified by reading the code, not assumed**: below-
+  threshold amplitude retention (every accepted batch writes HG/LG for
+  every configured channel, not just ones that crossed threshold --
+  matches what RADIOROC 39's own bench data showed empirically for the
+  uninvolved channel earlier the same day); event uniqueness (no single
+  ID column, but `(batch, event, channel)` is a verified-unique compound
+  key including across appended segments, per the existing
+  `test_append_mode_continues_batch_numbering_without_truncating`); no
+  irreversible cuts (the writer never filters on amplitude or any other
+  criterion -- thresholding is a hardware trigger-decision step, never a
+  data-writing step).
+- **Real gap, fixed**: no timestamp existed anywhere below the whole-run
+  level (`created_at`/`finished_at` in the manifest, nothing per-batch,
+  nothing in the CSV). A run with many batches had no way to tell when
+  within that run any given accepted event happened, which directly
+  limits the directive's "observed accepted-event rate" requirement to a
+  single run-wide average.
+
+**Fix**: added a `batch_received_at` list to the manifest (`{"batch": N,
+"received_at": <ISO 8601 UTC>}` per completed batch), recorded
+immediately after `acquire_adc_batch` returns -- i.e. genuinely a
+host-receipt timestamp, not a physical-event timestamp the hardware
+doesn't supply, named and documented as such so it can't be
+mis-claimed as trigger-time precision later. Deliberately added to the
+manifest, not the CSV: `AcquisitionRunWriter.POINT_FIELDS` is a fixed
+schema `scripts/plot_acquisition_spectrum.py` already parses, and this
+avoids touching it. `manifest.setdefault(...)` rather than a plain
+assignment, matching this job's existing per-segment-manifest convention
+(`completed_points` and others already reset per appended segment, per
+the same existing test above) -- verified this is consistent with, not a
+new exception to, how append mode already works here, rather than
+assuming a "preserve across segments" behavior that doesn't actually
+exist elsewhere in this file yet.
+
+New assertions added to the existing
+`test_success_values_progress_and_manifest` (not a new test function --
+this is exactly the manifest-shape check that test already owns) confirm
+the list has one entry per batch with the correct batch number and a
+parseable ISO timestamp. 450/450 offline tests pass under
+`.conda-radioroc` (`tools/check_development.py`).
+
+**Not done**: `HoldScanJob`/`ThresholdJob`'s manifests were not given the
+equivalent field -- this review was scoped to the acquisition path
+specifically (the directive's Priority 3 language is about acquired
+*events*), and adding it elsewhere wasn't verified as needed. Worth a
+quick check before assuming those manifests already have adequate timing
+granularity, rather than assuming either way.
+
+## RADIOROC 39 (continued) — SiPMs biased for the first time; explained (not fixed) the single-shot anomaly as a test-methodology artifact, not a hardware finding
+
+Same day, continuing directly from the entry below. Two developments,
+read in order because the second reframes the first.
+
+**SiPMs biased for the first time this project.** The operator realized
+mid-session that the three mounted SiPMs (channels 4/6/32) had never
+actually been powered to their operating high voltage -- everything in
+every earlier RADIOROC 39 entry today used Ctest, which injects charge
+directly into the ASIC and bypasses the SiPM entirely, so this did not
+invalidate those results, but it meant nothing today had yet exercised a
+real SiPM light response. Operator specified channel 3 of the Keysight
+EDU36311A PSU at 29.5 V. Set the current limit to 10 mA first (voltage
+and current both set with output still off, verified by readback before
+enabling), then enabled the output: measured ~10 mA during the brief
+capacitive-charging ramp (expected, not a fault), settling to **29.499 V
+at ~0.45-0.51 mA steady-state** -- confirms 10 mA is comfortably
+sufficient (~20x headroom), not marginal.
+
+**Re-ran the exact single-shot test from the entry below with SiPMs now
+biased -- the positive control that was failing is now fixed.** Same
+config (`trigger_type=1`, both slots Individual on channels 4/6,
+`hold_delay_ns=530`): the trivial positive control (Ctest on both
+channels, one external trigger) now correctly **accepts**, with a real,
+consistent signal on both channels (HG 405.5/406.0, versus ~75/67 under
+Ctest alone without SiPM gain). This strongly suggests the earlier
+positive-control failure was underpowered signal amplitude/reliability
+from Ctest injection alone, not a logic bug -- consistent with the
+continuous-mode result from the entry below (also Ctest-only) still
+being valid there, since continuous mode's repetition gave many chances
+where single-shot gave exactly one.
+
+**But then hit a second problem, live-diagnosed and resolved down to a
+correct explanation before the session ended:** ch4-alone and the
+"outside window" case both started showing false accepts. Root-caused in
+order:
+
+1. A fresh real (no-Ctest) threshold scan on the now-biased SiPMs showed
+   the DAC 550 threshold from the Ctest-only calibration sits inside the
+   real dark-noise tail (sparse but nonzero counts observed out to DAC
+   ~950) -- biasing changed the noise floor entirely, so the old
+   threshold no longer meant what it did. Moved to DAC 800, comfortably
+   clear.
+2. At DAC 800, ch4-alone correctly rejected again -- but the genuine
+   "outside window" case (ch4 pulse, then Ctest switched to ch6, then a
+   second pulse) still falsely accepted, with ch4 showing a real signal
+   and ch6 showing only a pedestal-level value in the same "accepted"
+   event -- i.e., the array had an entry for both channels but only one
+   of them reflected an actual event, exactly the "do not infer event
+   association from matching array lengths alone" pitfall the directive
+   names explicitly.
+3. **Decisive check**: repeated the same sequence -- fire ch4's pulse,
+   switch Ctest from channel 4 to channel 6 -- but never fired a second
+   pulse at all. This *still* showed "accepted," with the same
+   real-signal-on-ch4/pedestal-on-ch6 pattern. **This isolates the false
+   trigger to the act of switching which channel has Ctest enabled**, not
+   to anything about coincidence-window timing. The vendor guide's own
+   note that Ctest channel changes require "slow control ... sent to take
+   into account any change in the injected channel" is the likely
+   mechanism: reconfiguring the ASIC's internal Ctest-routing switch mid-
+   test is itself a small electrical transient on the newly-enabled
+   channel's front end, unrelated to any deliberate injected pulse.
+
+**Correction to this session's own record, made before it could stand
+uncorrected**: this session's every attempt at case (c) used exactly this
+Ctest-channel-switching technique to simulate "channel B fires later than
+channel A" -- meaning every case-(c)-shaped result produced today
+(including the "no time window enforced" conclusion stated mid-session)
+reflects this switching artifact, not genuine coincidence-window
+behavior, and should be disregarded as evidence either way. The
+continuous-mode result in the entry below did not use this technique
+(both channels' Ctest were enabled together, never switched during a
+timing-sensitive test) and is **not** affected by this finding -- it
+remains the operative evidence for Priority 0's core accept/reject/
+exclusion/association behavior.
+
+**Where this actually leaves Priority 0**: unchanged in substance from
+the entry below, now for a clearer reason. Case (c) is not failed and not
+passed -- it is **not yet validly tested**, because this bench's single
+shared Ctest injection line has no way to make channel 4 and channel 6
+fire at genuinely different times without also triggering this
+channel-switch artifact. Closing it needs either a second, independently
+timed injection path (a real one, not a channel-switched shared line), or
+accepting real uncorrelated SiPM dark counts as the timing source (now
+that biasing makes those genuinely available) with a long enough
+observation window to be statistically meaningful -- not attempted this
+session; a real design task, not a quick follow-up.
+
+**Left in a safe state**: Ctest disabled and masks cleared on all three
+channels, board disconnected cleanly. **SiPM bias (PSU channel 3, 29.5 V,
+10 mA limit) was left ON** -- unlike the board/generator, this was not
+powered back down, since biasing is now a standing prerequisite for any
+future real-signal work rather than a per-test setting; note this
+explicitly for whoever picks this up next so it isn't mistaken for
+already-off.
+
+## RADIOROC 39 (continued) — Case (c) attempted with real external single-shot triggering: got the mechanism working, hit a new, unexplained anomaly, deliberately stopped rather than force a result
+
+Same day, continuing directly from the entry below (read it first — this one
+assumes that context). Operator resolved the earlier open question
+themselves: the "known-good" burst-mode setup from RADIOROC 15/16/22/23
+was configured **on the generator's front panel**, not over SCPI — so the
+`BST*` command family being unsupported on this firmware's remote
+interface was real, but a red herring for getting single-shot triggering
+working at all.
+
+**Got genuine external single-shot triggering confirmed working, cleanly,
+independently verified:**
+- IO1's FPGA mux index had drifted to `0` (not `5`) since the earlier
+  continuous-mode work this session — fixed (`write_fpga_io_mux(io1=5)`)
+  before anything else, or none of this would have worked regardless of
+  the generator's own state.
+- With the generator front-panel-configured for external-triggered
+  single-cycle burst: confirmed **zero acquisitions over 5 seconds while
+  idle** (genuinely gated, not free-running), then fired exactly one
+  `pulse_synchro_trigger` and confirmed **exactly one** scope acquisition
+  resulted. A screenshot at that point showed a clean single pulse,
+  28.00 mV peak-to-peak, 100.3 ns wide -- correctly gated, but at roughly
+  half the amplitude of the continuous-mode signal this session's DAC 550
+  threshold was calibrated against (the operator identified why: the scope
+  and the board are both fed through a CAEN fan-in/fan-out module's
+  output, which has its own insertion loss). Operator increased the
+  generator from 500 mV to 1 V; a fresh screenshot then showed 52.40 mV
+  peak-to-peak, 100.5 ns -- matching the continuous-mode calibration
+  point closely.
+
+**Hit a new, genuinely unexplained problem, distinct from the earlier
+firmware/BST question, and did not paper over it.** With single-shot
+triggering electrically confirmed clean and the amplitude corrected, the
+*same* coincidence configuration that this session's earlier
+`coincidence_test.py` run validated repeatedly and reliably under
+continuous-mode signal conditions (`trigger_type=1`, both slots
+"Individual" on channels 4/6, threshold DAC 550, `hold_delay_ns=530`) --
+now, in single-shot mode, produced results backwards from every
+expectation, reproducibly across independent rewrites of the test:
+
+- A trivial **positive control** (Ctest enabled on both channels
+  simultaneously, one externally-triggered pulse -- the shared line means
+  zero relative delay, this must accept if the logic works at all) came
+  back **rejected**, every time, across three independently rewritten
+  test scripts.
+- The genuine **case (c)** setup (channel 4 alone, then channel 6 alone
+  roughly 150 ms later -- vastly outside the 50 ns window, this must
+  reject) came back **accepted**, every time.
+
+Three specific hypotheses were tested and each was ruled out before
+stopping, rather than accepted on a hunch:
+
+1. **A stale, previously-set ready flag.** Confirmed real in one run
+   (`ready` read `True` before anything in that script had fired a
+   pulse) -- but also confirmed *not* the explanation for the
+   backwards pattern: a dedicated check showed the arm sequence
+   (replicating `acquire_adc_batch`'s own word-2/word-21 reset) reliably
+   clears the ready bit to `False` immediately after arming, before any
+   pulse, in a clean run.
+2. **Hold/conversion timing mismatched for this signal path.** Ruled out
+   directly: a bounded hold-delay scan (`scripts/radioroc_hold_scan.py`,
+   channel 4 alone, Simple trigger, the same external single-shot
+   triggering, 17 points from 100-900 ns) showed a clean, unambiguous
+   peak at `hold_delay_ns` 500-550 (HG 461-533 against a ~105 pedestal
+   baseline at every other point) -- confirming 530 ns, the value already
+   in use, correctly samples this exact pulse's peak. Not the cause.
+3. **A bug in this session's own hand-rolled arm/read replacement for
+   `acquire_adc_batch`.** Ruled out by rewriting the test to use the
+   library's own already-proven `acquire_adc_batch` directly (via a
+   background thread for the pulse timing choreography, arming and
+   reading through the real, tested code path) -- identical backwards
+   result. Also ruled out reusing a stale `configure_adc_external_hold`
+   call across attempts by rewriting to call it fresh immediately before
+   every single attempt -- no change.
+
+**Deliberately stopped rather than force a conclusion.** With the
+operator's explicit agreement, given deadline pressure: this is left as a
+genuinely open, reproducible anomaly specific to single-shot external
+triggering, not resolved and not worked around. It does not call the
+continuous-mode result from the entry below into question -- that result
+was independently reproduced multiple times under conditions (repeated,
+long-duration signal presence) different enough from this single-shot
+anomaly that both can be true simultaneously: the coincidence *logic* is
+confirmed correct given a sustained, repeated real signal; something about
+how it responds to one isolated, precisely time-known external-triggered
+event is not yet understood.
+
+One live, undeveloped hypothesis worth recording for whoever picks this
+up: continuous mode gives the trigger logic many (thousands of) chances
+per test, so a per-attempt reliability issue could hide behind that
+repetition and only surface when there is exactly one chance. This was
+not tested (e.g., by repeating the single-shot positive control many
+times to see if it *ever* accepts, or checking whether the ready flag
+truly stays latched/high rather than being edge-sensitive and easy to
+miss on a 10 ms polling interval) -- a natural next step, not a
+conclusion.
+
+**Discussed and declined switching to LED illumination as a diagnostic**
+(operant's SiPMs would respond through the real signal chain instead of
+Ctest's direct capacitive injection, which might behave differently at
+the peak-detector). Clarified for the operator that this doesn't remove
+the need for controllable per-channel timing for case (c) itself --
+toggling channel mask/Ctest-enable between two sequential single pulses
+(exactly what this session already tried) is the right test design
+regardless of injection method; LED was only ever a way to test whether
+Ctest's specific pulse shape was implicated in the positive-control
+failure, not a shortcut around needing two time-separated events. Skipped
+for now given the deadline, not ruled out as a future diagnostic.
+
+**Left in a safe idle state**: Ctest disabled and masks cleared on all
+three channels, board disconnected cleanly. IO1's FPGA mux index is now
+correctly at `5` (was found drifted to `0` this session -- worth checking
+at the start of any future session touching this signal path rather than
+assuming it's still set).
+
+**Status for Priority 0, precisely**: the register/mask fix is
+demonstrated correct under continuous, repeated real-signal conditions
+(the entry below) -- accept/reject/exclusion/association all held up
+across 20+ repeated real events. External single-shot triggering is now
+confirmed achievable electrically (front panel, not SCPI). Whether the
+*same* coincidence logic responds correctly to a single, isolated,
+precisely-timed external event -- which is what a real muon-coincidence
+measurement will actually look like -- is genuinely unknown and flagged
+as the most important remaining open question before this can be called
+fully closed, not a formality.
+
+## RADIOROC 39 (continued) — Priority 0's physical bench demonstration (PASSED, one case still blocked)
+
+Same session, same day, operator physically present at the bench with three
+SiPMs mounted on channels 4, 6, 32, an Aim-TTi TGF4162 signal generator, and
+a Tektronix MSO56B oscilloscope, all already connected before this entry's
+work started. Operator stepped away for lunch partway through and
+authorized continuing solo, with instructions to keep bench-instrument use
+bounded (Normal trigger mode, a frequency-counter measurement, reset
+acquisitions, auto-stop after a fixed count rather than running the scope
+indefinitely) rather than leaving anything running open-ended.
+
+**Rediscovered the project's existing bench-automation setup.** Found (by
+searching more broadly than an initial pass) `docs/hardware/stage_c_io_sync_
+validation.md`, `logbooks/2026-06-26.md`, `SMOKE_TESTS.md`/`REFACTOR_
+CHECKLIST.md`'s "Known Lab Setup" sections, and prior `IMPLEMENTATION_
+STATUS.md` entries (RADIOROC 15/16/21/22/23/24) describing a signal
+generator (Aim-TTi TGF4162) and oscilloscope (Tektronix MSO56B) reached over
+SCPI/VISA (`pyvisa`+`pyvisa-py`), with FPGA `IO1` mux index `5` carrying the
+synchro-trigger signal used to drive the generator's external trigger input.
+Identified the physically connected instruments safely via `udevadm`
+metadata (read-only, no protocol writes) rather than guessing: RADIOROC
+board on `/dev/ttyUSB0`/`ttyUSB1` (FTDI dual-UART), TGF4162 on
+`/dev/ttyACM0`, Tektronix MSO56B and a Keysight PSU on separate USBTMC VISA
+resources.
+
+**Fetched the actual instrument manuals rather than guessing SCPI syntax**
+(Aim-TTi `TGF4000_Series_Instruction_Manual-Iss3.pdf`, Tektronix
+`4-5-6-MSO-6-LPD-Programmer-Manual-077130511.pdf`, both via `WebSearch`+
+`WebFetch`/`curl`, converted with `pdftotext` for exact command lookup).
+This surfaced a real, useful firmware discrepancy: the manual's `BST`/
+`BSTTRGSRC`/`BSTCOUNT` burst-mode command family is entirely unsupported
+on this specific unit (`*IDN?` firmware `01.05-02.10-01.20`) -- every burst
+command, including read-only queries, returns SCPI error `-111`
+("Unsupported remote command"), confirmed not a syntax issue (space-vs-no-
+space tested via `CHN`, which works both ways). This means the "known-good"
+external-triggered single-cycle burst mode documented in earlier sessions
+either used a different physical unit/firmware, or used a mechanism this
+session didn't rediscover (`CLKSRC EXT` is confirmed supported on this
+firmware and not yet tried for this purpose) -- flagged as unresolved
+below, not guessed around.
+
+**Switched the generator to continuous free-run** (`PULSFREQ 10000` +
+`OUTPUT ON`, `EER?` clean after each write) since the threshold scan job
+doesn't itself pulse any trigger and needs a continuously arriving signal
+to count. Independently verified via the oscilloscope rather than trusting
+the generator's own state: a real screenshot (`SAVE:IMAGe` +
+`FILESystem:READFile`, after finding the working save path -- an initial
+attempt into a nonexistent `C:/Temp/` subfolder silently failed) showed a
+clean single pulse, **51.20 mV peak-to-peak, 99.92 ns wide** -- matching
+the documented ~50 mV/~100 ns spec closely. Per the operator's explicit
+instructions: switched trigger mode to `TRIGger:A:MODe NORMal`, added a
+`MEASUrement:MEAS4:TYPe FREQUENCY` measurement, and ran a
+`ACQuire:SEQuence:MODe NUMACQs` / `ACQuire:SEQuence:NUMSEQuence 2000` /
+`ACQuire:STOPAfter SEQuence` / `ACQuire:STATE RUN` bounded sequence
+(reset from zero, confirmed it actually completed and stopped rather than
+assuming) -- measured **10.0000 kHz**, matching the generator's own
+`PULSFREQ` setting almost exactly, independent oscilloscope confirmation
+of the actual signal, not just a register readback.
+
+**Threshold scan** (`scripts/radioroc_threshold_scan.py --execute
+--apply-defaults --channels 4,6,32 --pat-gain 1 --dac-min 0 --dac-max 1023
+--dac-step 10 --window-ms 100 --use-ctest --verify-restoration`, 103
+points): a clean, textbook curve on all three channels -- a large
+noise/pedestal peak at low DAC (up to ~9e7 Hz, dominated by pure threshold
+noise, not the injected signal), falling through a transition region
+(DAC ~250-450), landing on a **stable ~10,000 Hz plateau from DAC ~460
+onward through 1023 on all three channels**, matching the generator's
+10 kHz injection rate almost exactly (10,020-10,150 Hz observed, consistent
+with ~100 ms/10 kHz Poisson counting noise). Restoration verification
+`status: "passed"`, no mismatches. **Picked DAC 550** as the working
+threshold: comfortably inside the clean plateau, well clear of the noise
+transition, not needlessly close to the DAC's own maximum.
+
+**Added CLI parity for the RADIOROC 39 register fix**: `scripts/
+radioroc_acquire.py` had no flags for `trigger_source_2`/
+`trigger_channel_2` (only `AcquisitionWindow` got them earlier this
+session) -- added `--adc-trigger-source-2`/`--trigger-channel-2`,
+defaults preserving old behavior, verified against
+`test_cli_and_api_have_identical_command_traces_and_values` and a full
+450/450 offline pass.
+
+**Ran the actual Priority 0 bench test** -- cases (a), (a) mirrored on the
+second channel, (b), (d) and its variants, and a repeated version of (b) --
+directly via `RadiorocDevice` primitives (`configure_adc_external_hold`
+with `trigger_type=1`, `trigger_source=3`+`trigger_channel=4`,
+`trigger_source_2=3`+`trigger_channel_2=6`, threshold DAC 550, this
+session's `unmask_channel_for_individual_coincidence` for both channels),
+not yet through the full `AcquisitionJob`/CLI path -- a deliberate,
+disclosed scope choice for a quick bounded diagnostic while working solo;
+re-running the identical case through `radioroc_acquire.py --execute` for
+a properly audited, restoration-verified, saved-CSV run is a good
+near-term follow-up now that the CLI has the needed flags.
+
+**Results, with the generator left running continuously at 10 kHz on
+whichever channel(s) had Ctest enabled per case:**
+
+| Case | Ctest-enabled channels | Result |
+|---|---|---|
+| (a) single channel alone | ch4 only | **Rejected** (`ADC acquisition timed out waiting for FPGA word 4 bit 5`) |
+| (a) mirrored | ch6 only | **Rejected** (same timeout) |
+| (b) both selected channels | ch4 + ch6 | **Accepted** -- 10/10 events, ch4 HG ~75-79, ch6 HG ~67-71, ch32 (uninvolved) retained its own untriggered baseline (~106-109) in the same event rows |
+| (d) excluded channel alone | ch32 only | **Rejected** |
+| (d) excluded + one real channel | ch4 + ch32 | **Rejected** |
+| (d) excluded + the other real channel | ch6 + ch32 | **Rejected** |
+| (b) repeated, larger batch | ch4 + ch6, 20 acquisitions | **Accepted** -- 20/20 events, all three channels' values stable and consistently associated across every event |
+
+This is the first physical evidence that the RADIOROC 39 register/mask fix
+does what it was meant to: a single channel firing repeatedly is
+correctly rejected, only the genuine configured pair is accepted, an
+excluded channel paired with either real channel still correctly rejects
+(confirming the trigger targets exactly the configured pair, not "any
+second channel"), and per-channel amplitude association -- including the
+uninvolved channel's retained below-threshold value, relevant to Priority
+3 -- held up across repeated real events. Caveat stated plainly: this
+session did not re-run the *old, pre-fix* code against this same hardware
+for a literal side-by-side regression capture -- the claim that the old
+code would have wrongly accepted case (a) rests on the register-level
+disassembly evidence from earlier in RADIOROC 39, not on a fresh live A/B
+comparison.
+
+**Not tested, and not currently testable with this bench setup: case (c),
+"two channels outside the coincidence window."** Ctest is a single shared
+injection line (one SMA input, confirmed by the operator) -- enabling two
+channels fires them at literally the same instant, and reliably offsetting
+one channel's pulse from the other by a controlled, known amount needs
+either a genuinely independent second timed pulse path, or the
+generator's burst/gated single-shot triggering -- which, as found above,
+this specific firmware doesn't expose over SCPI. This is recorded as an
+open, hardware-limited gap, not quietly worked around or assumed away.
+
+**Left in a safe idle state for the operator's return**: RADIOROC board
+disconnected cleanly (context-manager exit released the port lock, verified
+by a subsequent read-only reconnect), all Ctest/mask state cleared back to
+"everyone masked out," restoration verification passed on the threshold
+scan. The generator was left running continuously at 10 kHz/~50 mV/output
+ON (a safe, harmless idle state, not mid-experiment) since resolving its
+external-trigger mechanism on this firmware is exactly the open item above.
+The oscilloscope's bounded 2000-acquisition sequence completed and stopped
+on its own, not left free-running.
+
+**Next bounded task**: resolve how to get genuine external single-shot
+triggering on this specific TGF4162 firmware (try `CLKSRC EXT`, or ask the
+operator whether a different physical unit/firmware was used in the
+sessions that documented `BST*`), then design and run case (c) with it.
+Independently, re-run the case (a)/(b)/(d) results above through the full
+`radioroc_acquire.py --execute` CLI path (now flag-complete) for a saved,
+restoration-verified, reviewable artifact rather than only this session's
+interactive script output.
+
+## RADIOROC 39 (continued) — Closed the second-channel mask gap and added `AcquisitionWindow` coincidence controls: Priority 0's software side is done
+
+Same session, continuing directly from the entry below. The user asked to
+close out Priority 0 as completely as possible in software.
+
+**Closed the channel-mask gap without guessing the open discriminator-level
+question.** Rather than pin down which level (T1, T2, or TQ) "Individual
+trigger" mode taps -- more disassembly (`cbx_type_handle`, `init`'s signal
+wiring in `adc.pyc`) turned up no further evidence, and the actual mux is
+almost certainly FPGA gateware/ASIC-internal wiring this codebase's Python
+control-plane simply doesn't touch, so it is a genuine dead end for static
+analysis, not a missed search -- added
+`RadiorocDevice.unmask_channel_for_individual_coincidence`, which unmasks
+**all three** per-channel discriminator levels (T1, T2, and TQ mask bits at
+`(channel, subadd=6)`, string indices 3/4/5) for one named channel. This is
+safe specifically because genuine two-distinct-channel coincidence never
+simultaneously runs an OR-tree mode (NORT1/NORT2/NORTQ) on either slot --
+so unmasking extra levels on exactly the two named channels cannot pull in
+any other, unintended channel; every channel this isn't applied to stays
+masked out by the existing `prepare_trigger_masks`. `application/
+acquisition.py` and `application/hold_scan.py` now call this for both
+`trigger_channel` and `trigger_channel_2` whenever `trigger_type == 1` and
+both slots are `trigger_source(_2) == 3` (genuine Individual+Individual
+coincidence) and `use_mask` is set. New test:
+`test_unmask_channel_for_individual_coincidence_sets_all_three_levels` in
+`tests/test_radioroc_core.py`.
+
+Incidentally found (not fixed, out of scope): `write_fifo`/
+`prepare_trigger_masks` never update `RadiorocDevice`'s own `find_i2c_row`
+cache (`select_i2c_rows` explicitly returns copies), unlike the single-row
+`write_register` path `set_mask_for_channel` uses. This only matters for
+code that reads `find_i2c_row` back after a `write_fifo`-based write
+expecting to see the new value -- the existing acquisition/hold-scan
+restoration tests pass because their verification reads real transport
+state, not this cache, so this is not a live bug in anything currently
+shipped, just a latent trap for future code. Worth a look if a future
+session adds anything that reads channel-mask state back through
+`find_i2c_row` after `prepare_trigger_masks`.
+
+**Added `AcquisitionWindow` GUI controls** for everything RADIOROC 39
+recovered: a trigger-type combo (Simple trigger / 2 channels coincidence /
+Time window), a channel + mode pair for each of the two coincidence-input
+slots (T1 slot pre-defaults to "Individual trigger" on the existing
+`trigger_channel` field; the new T2 slot defaults to channel 5, mode
+"NORT1" -- i.e. unchanged legacy behavior until a user actually picks
+"Individual trigger" for it), a coincidence/time-window-width field, and a
+time-window trigger-count field. Deliberately always-visible rather than
+mirroring the vendor app's show/hide-by-mode behavior, to keep this first
+cut simple -- fields irrelevant to the selected mode are just unused.
+Wired into `AcquisitionConfig` construction in `operation()`. New test:
+`test_operation_wires_two_channel_coincidence_fields` in
+`tests/test_acquisition_gui.py`. Independently rendered the real window
+offscreen (`QT_QPA_PLATFORM=offscreen`) at three scroll positions and
+visually confirmed all seven new fields lay out cleanly with the existing
+form, no clipping or collision --
+`acquisition_window_controls{,2,3}.png` in this session's scratchpad.
+
+448/448 -> 450/450 offline tests pass under `.conda-radioroc`
+(`tools/check_development.py`): +1 from the mask-gap test, +1 from the new
+GUI test.
+
+**Priority 0's software side is now, as far as this session can take it,
+complete and tested**: the register contract is correct, the channel mask
+is closed for the one configuration the plint actually needs (genuine
+two-distinct-channel coincidence), and a student-operable GUI path exists
+to configure it. **What remains is exactly one thing, and it is
+irreducible**: per the directive, "simulated behavior alone cannot close
+this item." Nothing in this or the previous entry is a substitute for the
+designated operator running the bounded 5-case bench test with the
+now-known-correct recipe (`trigger_type=1`, `trigger_source=3` +
+`trigger_channel=A`, `trigger_source_2=3` + `trigger_channel_2=B`, mask
+unmasked automatically by the fix above). Not run this session -- no
+hardware access was taken, per the standing per-action authorization rule.
+
+## RADIOROC 39 (continued) — Landed the delegated Priority 1 legend/log-scale fix
+
+Same session, in parallel with the Priority 0 work above (non-overlapping
+files, per `AGENTS.md`). Delegated RADIOROC 38's already-diagnosed bug
+(all four plot windows' `axes.legend(fontsize=8)` with no `loc`, causing
+legend "jumping" between redraws and a title/legend collision plus
+unreadable overlapping log-scale tick labels on the spectra plot) to a
+subagent, scoped to only `src/radioroc/gui/{acquisition,autocalibration,
+scurve,hold_scan}_window.py`.
+
+**Reviewed the actual diff line-by-line, not just the reported test
+count**: all four files now anchor the legend outside the axes
+(`loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0.0`) instead
+of the data-dependent `"best"`, identically in all four -- confirmed this
+can't collide with a title placed above the axes, and no longer changes
+position between redraws since it no longer depends on data shape.
+`acquisition_window.py`'s histogram (the only one of the four with a Log Y
+control) additionally sets `axes.yaxis.set_minor_formatter(NullFormatter())`
+right after `set_yscale`, which keeps clean major decade labels
+(`10^0`, `10^1`, ...) while suppressing the crowded auto-labelled minor
+ticks (`2x10^0`, `3x10^0`, ...) that caused the reported clutter when the
+data spans under about one decade. All four windows already use
+`Figure(..., layout="constrained")`, which reallocates axes width for the
+new outside-anchored legend automatically -- no separate layout change was
+needed, and the agent correctly did not invent one.
+
+**Independently verified beyond the agent's own report**, per `AGENTS.md`:
+opened both PNGs the agent rendered from the real window classes (not a
+prototype) -- `/tmp/real_acquisition_window.png` (3-channel synthetic
+Gaussian HG spectrum, Log Y on) and `/tmp/real_scurve_window.png`
+(8-channel synthetic S-curve) -- and visually confirmed the legend sits
+cleanly outside the plot, no title collision, a single clean `10^0` label
+with no clutter, and the plot area is still fully usable with 8 legend
+entries. Re-ran the full suite myself afterward rather than trusting the
+agent's reported count: 448/448 under `.conda-radioroc`
+(`tools/check_development.py`, `MPLBACKEND=Agg QT_QPA_PLATFORM=offscreen`).
+
+One unrelated observation the agent surfaced but correctly left
+unchanged (outside this bounded bug's scope): these windows default to
+`resize(1180, 820)`, and 820px height slightly exceeds a 1366x768 laptop
+screen's usable height after the OS taskbar/title bar. Worth a look before
+the student rehearsal (Priority 4) if the student's actual machine has a
+smaller display.
+
+This closes RADIOROC 38's "not fixed in this entry" item and Priority 1's
+"a real visual check confirms the screen is usable" acceptance criterion
+for this specific defect.
+
+## RADIOROC 39 — Priority 0: recovered the real ADC coincidence-trigger register contract and fixed a confirmed 2-channel-coincidence gap in `configure_adc_external_hold`
+
+Per `PLINT_STUDENT_MVP_DIRECTIVE.md` Priority 0 and `NEXT_SESSION.md`'s
+handoff. The plint experiment's trigger is "two distinct selected channels
+above threshold within a coincidence window." It was genuinely unknown
+whether `radioroc_client.py`'s existing `trigger_type`/`trigger_source`
+fields (already used by `AcquisitionJob`/`HoldScanJob`, default
+`trigger_source=3`, never previously checked against this distinction)
+implement that, or something weaker like "N total threshold crossings from
+anywhere" that a single channel firing repeatedly could also satisfy.
+
+**Evidence gathered, in order, per `AGENTS.md`'s local-vendor-evidence-first
+rule:**
+
+1. `local_artifacts/downloads/Radioroc2 User Guide - 2_1_0_6(0125).pdf`
+   (`pdftotext -layout`), section 3.3 "Data acquisition": the ADC DAQ tab's
+   trigger-type combo box offers "Simple trigger," "coincidence between two
+   selected triggers," or "N triggers in a time window." Figure 25's
+   caption explicitly describes coincidence "between channel 0 and channel
+   1" — i.e., named channels, not an abstract source code. This confirms
+   the *documented* feature is a real per-channel coincidence, but the PDF
+   doesn't show the underlying widget/register wiring.
+2. `local_artifacts/extracted/RadiorocUI_2_2_0_5.exe_extracted/PYZ-00.pyz_
+   extracted/radioroc2UI.pyc`, disassembled directly with
+   `marshal.loads(data[16:])` + `dis.dis()` (genuine CPython 3.13 bytecode,
+   per `AGENTS.md`). `Ui_MainWindow.retranslateUi`'s `setItemText` calls
+   give the exact combo-box index→label mapping:
+   - `comboBox_adcTriggerType`: `0`="Simple trigger", `1`="2 channels
+     coincidence", `2`="Time window" (only 3 of the 4 values the client's
+     `0..3` range check allows are ever used by the vendor UI).
+   - `comboBox_adcT1` **and** `comboBox_adcT2` (two separate, independently
+     populated combo boxes — not one shared "trigger source" field):
+     `0`="NORT1", `1`="NORT2", `2`="NORTQ", `3`="Individual trigger",
+     `4`="OR64 (FPGA)". Each has its own paired channel-number field
+     (`lineEdit_T1` / `lineEdit_T2`), used only when that combo is
+     "Individual trigger."
+3. `adc.pyc`'s `start_adc` function (the actual register-write path, not
+   just the human-readable summary in `get_acq_setup`), disassembled the
+   same way. This nails down the exact bit layout the vendor app writes:
+   - FPGA word 22 = T1's channel number (`00` + 6 bits), written only when
+     `comboBox_adcT1.currentIndex() == 3`, else zeroed.
+   - FPGA word 23 = T2's channel number (`00` + 6 bits), written only when
+     `comboBox_adcT2.currentIndex() == 3`, else zeroed. (This register is
+     reused for an unrelated purpose when the vendor's separate
+     `checkBox_peakSensing` path is active — see below.)
+   - FPGA word 24 = coincidence/time window width in units of 5 ns. Matches
+     what `radioroc_client.py` already implemented correctly.
+   - FPGA word 25 = `T1_mode(3 bits) + rstn_manual(1) + ext_hold(1) +
+     ext_trig(1) + trigger_type(2 bits)`.
+   - FPGA word 27 = time-window trigger count (`adc_nb_trig`). Matches.
+   - FPGA word 30 = `hold_delay_high_nibble(4 bits) + T2_mode(3 bits)`
+     (7 meaningful bits; the vendor's own layout, not a bug in ours).
+
+**The confirmed bug**: `radioroc_client.py`'s `configure_adc_external_hold`
+(and the `AcquisitionConfig`/`HoldScanConfig` dataclasses feeding it)
+implemented word 22/24/25/27 correctly but had **no T2-slot fields at
+all** — word 23 was hardcoded to `"00000000"` (or an unrelated
+peak-sensing value) and word 30's low 3 bits were hardcoded to
+`bits(0, 3)` (`"000"` = NORT1). This means every acquisition run to date
+that requested `trigger_type=1` ("2 channels coincidence") actually
+configured: T1 = whatever `trigger_source`/`trigger_channel` said, **AND
+T2 = permanently "NORT1," an OR of every currently unmasked channel's T1
+output** — never a second, distinct, named channel. Worse, `acquisition.py`
+and `hold_scan.py` only ever call `device.set_mask_for_channel(...,
+enabled=True)` for the single `trigger_channel` (see `use_mask` handling in
+both application modules) — no code path unmasks a second channel at all.
+So even independent of the register gap, an OR-mode T2 input would
+currently degenerate to exactly the same single unmasked channel as T1,
+making the "coincidence" trivially self-satisfied by one channel's one
+threshold crossing. This is exactly the ambiguity the directive asked to
+resolve, now confirmed by disassembly rather than assumed — and it turns
+out to be *worse* than "ambiguous": as wired, `trigger_type=1` could not
+have implemented real 2-channel coincidence at all, regardless of what
+`trigger_source` was set to.
+
+**Fixed this session** (the part with a certain, disassembly-backed
+answer): added `trigger_source_2: int` and `trigger_channel_2: int` to
+`configure_adc_external_hold`, `AcquisitionConfig`, and `HoldScanConfig`,
+writing them to words 23/30 exactly as the vendor app does, with the same
+validation ranges as the existing `trigger_source`/`trigger_channel`. A new
+regression test, `test_adc_two_channel_coincidence_bit_positions` in
+`tests/test_radioroc_core.py`, exercises the exact bit positions on all
+four affected words plus the unchanged default (backward-compatible)
+behavior when the new fields are omitted. Also added a `ValueError` for
+combining `trigger_source_2 == 3` with `peak_sensing=True`, since both
+write FPGA word 23 and the vendor's own recovered layout gives no evidence
+either combination is meaningful — refusing loudly rather than guessing a
+priority between them. `application/acquisition.py` and
+`application/hold_scan.py` now pass these fields through from their
+configs. Independently verified: 448/448 under `.conda-radioroc`
+(`tools/check_development.py`).
+
+**Not fixed this session, and explicitly still open** (per the directive's
+"do not guess register writes to meet the deadline"):
+
+- **The channel-mask gap.** `set_mask_for_channel` is still only ever
+  called for the single `trigger_channel` in both application modules
+  (mechanically, adding a second `set_mask_for_channel(trigger_channel_2,
+  t1=..., enabled=True)` call when `trigger_source_2 == 3` is simple, and
+  the per-channel mask register itself, `(channel, subadd=6)`, is already
+  well-understood and unrelated to the separate `EN_th1`/`EN_th2`/`EN_thQ`
+  ASIC-wide enable bits at `(65, 7)` that RADIOROC 30/34 actually left
+  open — that was a different register and this entry's first draft
+  conflated the two; corrected here). The real open question is which
+  discriminator *level* (T1 or T2) "Individual trigger" mode taps for a
+  given slot: the vendor's `comboBox_adcT1`/`comboBox_adcT2` items have no
+  separate "Individual T1" vs "Individual T2" choice, so it's unconfirmed
+  whether that path routes through the ASIC-wide `selTrig` (Main tab)
+  setting, through the existing `t1: bool` config field applied
+  identically to both channels, or something else — nothing in the
+  disassembly captured so far pins this down. **This means a real
+  acquisition job run today, even after this fix, still cannot be trusted
+  to correctly unmask a second channel** — the register-level contract is
+  now correct and tested, but the full "two distinct channels actually
+  both contribute to the trigger" contract is not yet closed end-to-end.
+- **No GUI controls.** `AcquisitionWindow` (`src/radioroc/gui/
+  acquisition_window.py`) does not expose `trigger_type`, either T1/T2
+  slot's mode or channel, window width, or `adc_nb_trig` at all today — it
+  only ever constructs `AcquisitionConfig` with defaults (`trigger_type=0`,
+  "Simple trigger"). A student cannot configure coincidence mode from the
+  app yet. Adding these controls is bounded, well-specified follow-up work
+  now that the underlying contract is settled — a good candidate to
+  delegate once the mask gap above is also resolved (so the GUI isn't
+  built against a still-incomplete backend contract).
+- **The physical demonstration itself.** Per the directive, "simulated
+  behavior alone cannot close this item." The bounded 5-case test
+  (repeated single-channel pulses; two distinct channels in-window; two
+  channels outside the window; an excluded channel plus representative
+  pairs; distinguishable amplitudes confirming event/channel association)
+  still needs the designated operator at the bench, using the
+  now-known-correct recipe: `trigger_type=1`, `trigger_source=3` +
+  `trigger_channel=A`, `trigger_source_2=3` + `trigger_channel_2=B`, and
+  (once the mask gap is closed) both A and B unmasked. Not run this
+  session — no hardware access was taken, per the standing per-action
+  authorization rule.
+
+**Next bounded task**: pin down what discriminator level "Individual
+trigger" mode actually uses (more disassembly, or ask the operator to
+check the vendor app's own behavior/tooltips directly), then close the
+channel-mask gap for `trigger_channel_2` with that answer in hand, then
+add `AcquisitionWindow` coincidence controls, then request the operator
+for the bench test above.
+
+## RADIOROC 38 (continued) — Real, systemic plot-usability bug found from a live screenshot: legend placement and log-scale readability
+
+Same conversation, right at handoff. The operator screenshotted the
+just-landed spectra plot with Log Y enabled and flagged it directly: the
+y-axis's log tick labels overlap into an unreadable `10^0`/`10^1` cluster,
+and the channel legend box sits directly on top of the plot's own title
+text ("SIMULATION · finished · 500 events on disk") instead of somewhere
+that doesn't collide with it. The operator also reported, from prior use,
+that S-curve and other plots' legends visibly "jump around" between
+redraws -- confirming this isn't a one-off rendering glitch in the new
+feature.
+
+**Root cause confirmed, not guessed**: `grep -n "axes.legend(fontsize" src/
+radioroc/gui/*.py` shows the identical call --
+`self.axes.legend(fontsize=8)`, no `loc=` argument -- in **all four**
+plotting windows: `acquisition_window.py`, `autocalibration_window.py`,
+`scurve_window.py`, `hold_scan_window.py`. With no fixed location,
+matplotlib's `"best"` auto-placement algorithm re-decides the legend's
+position on every redraw based on the current data's shape, which is
+exactly what produces both the reported jumping (S-curve, redrawn live
+during a scan, with changing data on every point) and this screenshot's
+title collision (auto-placement has no awareness of where the title text
+sits, only of the data). This is a real, systemic, previously-unnoticed
+usability defect across the whole app, not specific to the new spectra
+feature -- it was only caught now because a live screenshot with Log Y
+enabled happened to make it obviously unreadable.
+
+**Not fixed in this entry** -- closing the conversation per the operator's
+own request for fresh context on Priority 0. Recorded here with enough
+specificity that the next session doesn't have to re-diagnose it: fix
+needs (a) a fixed `loc` for `legend()` in all four files (e.g. anchored
+outside the axes, or a corner unlikely to collide with typical data/title
+placement -- verify against real data shapes, not just a guess), (b)
+checking log-scale tick label formatting/spacing/rotation at this
+project's actual target screen resolution rather than a generic dev
+monitor, and (c) a broader look at whether the current plot-window layouts
+budget enough space for the plot itself at the resolution the student's
+own machine will actually use -- the `PLINT_STUDENT_MVP_DIRECTIVE.md`'s own
+acceptance criteria for Priority 1 explicitly requires "a real visual
+check confirms the screen is usable," and this finding is direct evidence
+that check has not yet actually passed.
+
+## RADIOROC 38 (continued) — Received `PLINT_STUDENT_MVP_DIRECTIVE.md`; shifting this week's priority to a student-usable MVP
+
+Same conversation, immediately after the spectra-rendering work below.
+Operator asked to check `PLINT_STUDENT_MVP_DIRECTIVE.md` (new file at repo
+root, dated 2026-09-23, arrived via a separate read-only review of this
+session's work) for this week's priorities, update the status docs
+accordingly, then start a fresh chat for the next bounded task.
+
+**Read the directive in full before acting -- do not treat this summary as
+a substitute for it.** It is a narrower delivery checkpoint within
+`CROSS_PLATFORM_REBUILD_PLAN.md`, explicitly not a replacement plan and not
+permission to weaken architecture, scientific-data requirements, or the
+plan's final acceptance gates. The experiment: one plastic scintillator
+("the plint") with 4-8 SiPMs, students calibrating channels then collecting
+data with a provisional trigger of **any two selected channels above
+threshold within a coincidence window**, retaining all selected channels'
+amplitudes (including below-threshold ones) for later hit-position/rate
+analysis. The directive is explicit that two SiPMs seeing the same light
+pulse does not by itself establish a muon -- label outputs as accepted
+events/accepted-event rate, not muon flux, until separate evidence exists.
+
+**Priority 0, and the reason it comes first:** the directive flags a real,
+previously-unexamined uncertainty -- does the current F11/F12 hardware/
+firmware configuration actually support "two *distinct* selected channels
+within a window," or does its existing "N triggers in a window" semantics
+also accept repeated pulses on *one* channel (which would silently produce
+a completely different, wrong physics result if assumed equivalent)? This
+was never audited against this specific requirement in any prior session;
+`AcquisitionConfig`'s `trigger_type`/`trigger_source`/`adc_window_ns`/
+`adc_nb_trig` fields exist and were carried through F12, but F12's own
+review (RADIOROC 35) only confirmed they plumb through to the existing
+`configure_adc_external_hold` primitive correctly -- it never asked whether
+that primitive's *semantics* match a two-distinct-channel coincidence
+requirement. The directive is explicit: "Simulated behavior alone cannot
+close this item" -- this needs vendor `.pyc` evidence plus a controlled
+physical demonstration with a specified 5-case test plan (single channel
+repeated pulses; two channels in-window; two channels out-of-window; an
+excluded channel; known distinguishable amplitudes confirming event/channel
+association including sub-threshold channels).
+
+**This was deliberately not started in this conversation.** The directive
+itself asks for a fresh chat for this work (this session is ending here by
+the operator's own request, for fresh context budget on what is a genuinely
+open-ended investigation), and starting it with only a few messages of
+context remaining would risk exactly the kind of rushed, under-verified
+register/firmware conclusion the directive explicitly warns against ("do
+not guess register writes to meet the deadline"). `NEXT_SESSION.md` is
+rewritten to hand this off as the clear first bounded task, with every
+piece of relevant existing context (F11/F12's current implementation,
+where the vendor `.pyc` evidence lives, what RADIOROC 35/36 already
+established and did not establish) linked from there.
+
+**Reconciling with the backlog this session was already carrying**: the
+T1/T2/TQ enable-bit blocker (RADIOROC 30/34) and F11's "not yet explicitly
+validated" note (RADIOROC 37) both fold directly into this same Priority 0
+investigation rather than remaining separate items -- T1/T2/TQ specifically
+becomes relevant only if the chosen student trigger workflow actually needs
+per-channel enable control the directive's Priority 2 flags this
+explicitly ("blockers if the chosen workflow needs them," not
+unconditionally). The Windows-comparison/M5 gap noted in RADIOROC 36 is
+reframed, not dropped: the directive keeps "targeted Windows comparisons
+needed to resolve the experiment's hardware semantics" as high priority
+while deferring broad screen-by-screen parity work.
+
+**No hardware was touched, no other session's app was launched or closed,
+and no operator authorization was inferred from the directive itself** --
+it explicitly says it grants none of that. A `radioroc.gui` instance this
+same conversation launched earlier (for the visual checks below) was still
+running when this entry was written; whether to leave it running or close
+it was left for the operator to say, not assumed either way.
+
+## RADIOROC 38 (continued) — Landed and live-visual-checked F13's spectra/histogram rendering
+
+Same conversation, after the visual check above. Operator asked to
+continue with all three open threads at once: F13 spectra rendering,
+real-hardware F12 validation, and the T1/T2/TQ enable-bit investigation.
+Delegated the spectra work (offline, no operator attention needed while it
+built) while turning to hardware-test planning for the other two.
+
+**Landed spectra/histogram rendering in `AcquisitionWindow`.** A
+matplotlib histogram of raw per-channel HG/LG values, per-channel
+visibility checkboxes scoped to the run's actual channels, HG/LG toggle,
+bins/log-scale controls, a display-only clear, live updates during a run,
+and vendor-file import via the already-landed `read_vendor_acquisition_file`
+for direct comparison against a real vendor-collected file. Live updates
+deliberately re-read the run's own `events.csv` from disk on a throttled
+~1/second timer rather than adding a second in-memory raw-sample buffer
+alongside the already-established bounded summary mailbox -- consistent
+with "the job writes every sample to disk" already being this codebase's
+design. Reviewed line-by-line (throttling logic, concurrent-writer
+tolerance in the disk re-read, segment-scoped rendering for saved/vendor
+data), independently verified 447/447 under `.conda-radioroc` before and
+after merging.
+
+**Live-visual-checked with the operator actually watching**, not just
+offline: launched the app fresh, ran a real 10-batch simulation, watched
+the histogram populate with a real Gaussian-shaped ch4 HG distribution,
+confirmed the per-channel checkbox and legend both appeared correctly, and
+toggled Log Y (hint text and control wiring confirmed correct; the visual
+difference between log/linear was subtle for this run's small 0-25 count
+range, but the delegated test suite already asserts `axes.get_yscale()`
+actually changes, which is the load-bearing check, not the eyeball one).
+No layout issues found.
+
+**F13's GUI is now functionally complete for its originally scoped slice**
+(connect/configure/run/cancel/reopen, live batch summary, spectra
+rendering, vendor-file comparison). Not yet done: any real-hardware
+exercise of `AcquisitionWindow`/`AcquisitionJob` (still offline/simulation
+only), and the broader F13 items further out of scope from the start
+(separate scatter/timeline event view, vendor-format export).
+
+## RADIOROC 38 — Live-visual-checked the new `AcquisitionWindow`, operator back in the lab
+
+New conversation, operator physically back at the board. Found an older
+`radioroc.gui` process already running (started before RADIOROC 37's
+`AcquisitionWindow` merge) -- confirmed with the operator it wasn't in use,
+closed it, and relaunched fresh from the current `feat/daq-results-gui`
+head so the new "Acquisition" tab would actually be present.
+
+**Visually confirmed the `AcquisitionWindow` skeleton for the first time**
+(built and reviewed offline/headless in RADIOROC 37, never seen on a real
+display until now): the tab appears correctly alongside Threshold scan/
+Hold scan/S-curve/Autocalibration; the Hardware-mode banner, form fields
+(Trigger channel, Threshold DAC showing "Keep current" for the sentinel
+value, Hold/conversion delay, Acquisitions per batch, Batches, output
+directory), and the "Deterministic synthetic ADC response" group
+(correctly greyed out outside Simulation mode) all render cleanly. Switched
+to Simulation, clicked Preview (dry-run JSON showed `threshold_dac: null`,
+confirming the 0-sentinel maps to `None` as designed), then ran a full
+10-batch simulation to completion: the live batch-summary panel showed
+real per-channel stats (`ch4_hg: n=50 min=717.0 max=902.8 mean=799.8`),
+progress bar reached 100%, and the final status/details JSON matched the
+code exactly (`status: completed`, `cleanup: restored`). No layout issues
+found. Closed the app cleanly afterward; no hardware touched, no board
+connection attempted.
+
+This closes out the "get a screenshot check on this before iterating
+further" item RADIOROC 37's handoff flagged as the most important
+follow-up for F13.
+
+## RADIOROC 37 — M3 milestone squash-merged to `main` via PR #1; started F13's `AcquisitionWindow` skeleton on a new branch
+
+Same conversation as RADIOROC 36, continuing after the operator returned.
+`feat/desktop-hardware-threshold` (92 commits, +29257/-978 across 146 files)
+was opened as PR #1 against `main` (stale since 2026-06-29) and squash-merged
+by the operator. New work now continues on `feat/daq-results-gui`, branched
+from the updated `main`.
+
+**Rough plan-completion assessment given on request** (not previously
+recorded anywhere): M0 ~50% (coarse F01-F17 backlog exists; the plan's own
+"detailed parity table" per row was never built as an artifact), M1 ~85%,
+M2 ~85%, M3 100% (confirmed this session), M4 ~55% functionally built but
+~15% by the plan's own strict "compared against the real running Windows
+app" gate (everything vendor-derived so far is static `.pyc` disassembly,
+not a live side-by-side run), M5 ~5%. Headline rough estimate given:
+~35-40% of the full plan, explicitly caveated as swinging between ~25-30%
+(strict gate) and ~50-55% (functional-only) depending which bar is used.
+
+**Started F13's next slice: an `AcquisitionWindow` GUI skeleton** --
+connect (via the same shared `ConnectionWorker` shell every other window
+uses), configure an `AcquisitionConfig`, preview/run/cancel, live
+batch-progress display, reopen a saved run via the already-landed
+`read_acquisition_run`. Deliberately scoped to exclude spectra/histogram
+rendering, bins/scales controls, and vendor-file import/export UI --
+those need visual iteration this session (last ~30 minutes before the
+operator left for a train) isn't positioned to get right blind, matching
+RADIOROC 35/36's own judgment call to hold off on exactly that kind of
+work when unsupervised.
+
+Delegated to a background agent in an isolated worktree with a contract
+built from a fresh, careful read of `threshold_worker.py`/
+`connection_worker.py`'s threshold-specific state and methods/
+`threshold_window.py`'s dual-mode (owned-panel vs shared-connection) split
+-- the same rigor as F12/F13 Phase A's delegations, including an explicit
+flag that `connection_worker.py` (917 lines, shared by every window) is
+sensitive shared-contract territory and the agent should say so rather
+than improvise if any part of mirroring the threshold pattern there isn't
+a confident, purely-additive change.
+
+**Reviewed and landed, same entry.** Went through every changed/new file:
+`connection_worker.py`'s ~130-line addition was checked field-for-field
+against the existing `_run_threshold`/`_threshold_fault`/`run_threshold`
+methods and found to be an exact, correct structural mirror -- the agent's
+own claim of confidence held up under direct comparison, not just trusted.
+`acquisition_worker.py` was checked against `JobEvent`'s real field names
+(`point`/`values`) to confirm `summarize_acquisition_event` reads the
+right attributes. `acquisition_window.py` (813 lines) was read in full;
+one minor, non-blocking UX gap noted (the `threshold_dac` spinbox uses `0`
+as its "keep current" sentinel, but `0` is a valid real threshold DAC
+value, so this window can never explicitly request exactly `0` --
+self-evident in the UI, not silent data loss, not worth blocking on). Ran
+a real end-to-end smoke test beyond the delegated agent's own unit
+tests: constructed the window offscreen, ran a 3-batch simulation to
+completion, confirmed the live per-channel batch-summary text, the
+completed/cleanup-restored status, and reopened the saved run through a
+fresh window instance to confirm the reader round-trip -- all worked
+together, not just in isolated unit tests. Noticed the run directory got
+labeled `.../hardware/...` despite running in Simulation mode; traced it
+to `_mode_changed()` only regenerating the output path on switch-to-
+hardware, not switch-to-simulation -- checked `threshold_window.py` and
+confirmed this exact asymmetry already exists there unchanged, so it's a
+pre-existing, already-shipped quirk faithfully mirrored, not a regression
+introduced here, and out of scope to fix as part of this task (fixing it
+correctly means fixing it for all five scan windows at once, a separate,
+well-scoped follow-up if it's ever judged worth doing).
+
+Merged with `--no-ff`, no conflicts (the delegated worktree only touched
+files the contract named). Re-ran `check_development.py` on the actual
+merged tree under `.conda-radioroc` as the final gate: 440/440, matching
+the pre-merge count exactly. **`AcquisitionWindow` is landed.** F13's
+data layer (Phase A) and its GUI skeleton (this entry) are both done;
+spectra/histogram rendering, bins/scales controls, and vendor-file
+import/export UI remain the next slice, and were deliberately kept out of
+both.
+
 ## RADIOROC 36 — Landed F13 Phase A: acquisition-run reader and vendor-file reader, one more real bug found in review
 
 New conversation continuing directly from RADIOROC 35's handoff (`NEXT_SESSION.md`

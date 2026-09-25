@@ -341,7 +341,15 @@ class HoldScanJobTests(unittest.TestCase):
     def test_invalid_configuration_has_no_hardware_or_files(self):
         for changes in ({"mode": "bogus"}, {"hold_step": 0}, {"acquisitions": 0},
                         {"acquisitions": 256}, {"adc_window_ns": 3}, {"sync_io": "bogus"},
-                        {"timeout_s": 0}, {"trigger_channel": 999}, {"channels": [70]}):
+                        {"timeout_s": 0}, {"trigger_channel": 999}, {"channels": [70]},
+                        # Same-shaped bug as AcquisitionConfig (RADIOROC 40):
+                        # application/hold_scan.py unconditionally unmasks
+                        # trigger_channel and only records HG/LG stats for
+                        # channels in `channels` -- a trigger channel absent
+                        # from channels would never have its own response
+                        # curve recorded at all.
+                        {"trigger_channel": 7},  # channels=[4], trigger_channel not among them
+                        {"trigger_type": 1, "trigger_source_2": 3, "trigger_channel_2": 7}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 HoldScanJob().run(self.device, HoldScanJobConfig(replace(self.scan, **changes)))
         self.assertEqual(self.transport.trace, [])

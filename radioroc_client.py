@@ -281,18 +281,33 @@ class HoldScanConfig:
     - `mode` (`str`): `"internal"` for ASIC delay-cell codes or `"external"`
       for FPGA-generated hold delays in ns.
     - `channels` (`list[int]`): ADC channels to summarize.
-    - `trigger_channel` (`int`): Channel used for the ADC trigger setup.
     - `hold_min` (`int`): First hold code or external hold delay in ns.
     - `hold_max` (`int`): Last hold code or external hold delay in ns.
     - `hold_step` (`int`): Hold code or delay step.
     - `threshold_dac` (`int | None`): Optional T1/T2 threshold DAC setting.
     - `acquisitions` (`int`): ADC acquisitions per hold point.
     - `conversion_delay_ns` (`int`): ADC conversion delay, divisible by 40 ns.
-    - `trigger_type` (`int`): Vendor ADC trigger type code.
-    - `trigger_source` (`int`): Vendor ADC trigger source code.
+    - `trigger_type` (`int`): Vendor ADC trigger type code (`0` simple, `1`
+      2-channel coincidence, `2` time window).
+    - `trigger_source` (`int`): Vendor ADC first coincidence-input code
+      (`0` NORT1, `1` NORT2, `2` NORTQ, `3` individual channel, `4` OR64).
+      This is the vendor GUI's "T1" combo box in the ADC DAQ tab; the name
+      predates recognizing it as one of two independent coincidence inputs.
+    - `trigger_channel` (`int`): Channel used when `trigger_source == 3`.
+    - `trigger_source_2` (`int`): Vendor ADC second coincidence-input code,
+      same encoding as `trigger_source`. Only meaningful for genuine
+      2-distinct-channel coincidence (`trigger_type == 1`) when set to `3`
+      with `trigger_channel_2` naming a different channel from
+      `trigger_channel`; the vendor default (and this default) is `0`
+      (NORT1), which is an OR of every currently *unmasked* channel's T1
+      output, not a second specific channel.
+    - `trigger_channel_2` (`int`): Channel used when `trigger_source_2 == 3`.
     - `rstn_manual` (`bool`): Vendor ADC reset-n manual bit.
     - `external_trigger` (`bool`): Use external ASIC acquisition trigger bit.
     - `peak_sensing` (`bool`): Use vendor external-hold peak-sensing path.
+      Mutually exclusive with `trigger_source_2 == 3`: both reuse FPGA word
+      23, and this vendor-recovered register layout has never been observed
+      combining them.
     - `adc_window_ns` (`int`): ADC coincidence/window width, divisible by 5 ns.
     - `adc_nb_trig` (`int`): ADC time-window trigger count.
     - `timeout_s` (`float`): Per-batch ADC timeout.
@@ -319,6 +334,8 @@ class HoldScanConfig:
     conversion_delay_ns: int = 400
     trigger_type: int = 0
     trigger_source: int = 3
+    trigger_source_2: int = 0
+    trigger_channel_2: int = 0
     rstn_manual: bool = False
     external_trigger: bool = False
     peak_sensing: bool = False
@@ -352,6 +369,16 @@ class HoldScanConfig:
         if len(set(self.channels)) != len(self.channels):
             raise ValueError("channels must be unique")
         validate_channel(self.trigger_channel)
+        if self.trigger_channel not in self.channels:
+            # application/hold_scan.py unconditionally unmasks trigger_channel
+            # (set_mask_for_channel) and only records HG/LG mean/stdev for
+            # channels in self.channels -- a trigger channel absent from
+            # channels would never have its own response curve recorded,
+            # defeating the point of a hold scan for that channel.
+            raise ValueError(
+                "trigger_channel must be one of channels, or its response curve will "
+                "never be recorded"
+            )
         validate_scan_range(self.hold_min, self.hold_max, self.hold_step, name="hold")
         if self.mode == "internal" and not (0 <= self.hold_min <= 255 and 0 <= self.hold_max <= 255):
             raise ValueError("internal hold code range must be within 0..255")
@@ -367,6 +394,24 @@ class HoldScanConfig:
             raise ValueError("trigger_type must be in range 0..3")
         if not 0 <= self.trigger_source <= 7:
             raise ValueError("trigger_source must be in range 0..7")
+        if not 0 <= self.trigger_source_2 <= 7:
+            raise ValueError("trigger_source_2 must be in range 0..7")
+        validate_channel(self.trigger_channel_2)
+        if (self.trigger_type == 1 and self.trigger_source == 3 and self.trigger_source_2 == 3
+                and self.trigger_channel_2 not in self.channels):
+            # Mirrors application/hold_scan.py's own gating condition for a
+            # genuine 2-distinct-channel individual coincidence -- the one case
+            # where trigger_channel_2 names a second real trigger channel whose
+            # response curve this scan is meant to characterize.
+            raise ValueError(
+                "trigger_channel_2 must be one of channels for a 2-channel individual "
+                "coincidence trigger, or its response curve will never be recorded"
+            )
+        if self.trigger_source_2 == 3 and self.peak_sensing:
+            raise ValueError(
+                "trigger_source_2 == 3 (a second individual coincidence channel) and "
+                "peak_sensing cannot be combined: both write FPGA word 23"
+            )
         if self.adc_window_ns < 0 or self.adc_window_ns % 5 != 0:
             raise ValueError("adc_window_ns must be non-negative and divisible by 5")
         if not 0 <= self.adc_nb_trig <= 63:
@@ -408,8 +453,20 @@ class AcquisitionConfig:
     - `peak_sensing` (`bool`): Use vendor external-hold peak-sensing path.
     - `t1` (`bool`): Use T1 threshold when true, T2 when false.
     - `use_mask` (`bool`): Mask all but the trigger channel.
-    - `trigger_type` (`int`): Vendor ADC trigger type code.
-    - `trigger_source` (`int`): Vendor ADC trigger source code.
+    - `trigger_type` (`int`): Vendor ADC trigger type code (`0` simple, `1`
+      2-channel coincidence, `2` time window).
+    - `trigger_source` (`int`): Vendor ADC first coincidence-input code
+      (`0` NORT1, `1` NORT2, `2` NORTQ, `3` individual channel, `4` OR64).
+      This is the vendor GUI's "T1" combo box in the ADC DAQ tab; the name
+      predates recognizing it as one of two independent coincidence inputs.
+    - `trigger_source_2` (`int`): Vendor ADC second coincidence-input code,
+      same encoding as `trigger_source`. Only meaningful for genuine
+      2-distinct-channel coincidence (`trigger_type == 1`) when set to `3`
+      with `trigger_channel_2` naming a different channel from
+      `trigger_channel`; the default `0` (NORT1) is an OR of every
+      currently *unmasked* channel's T1 output, not a second specific
+      channel.
+    - `trigger_channel_2` (`int`): Channel used when `trigger_source_2 == 3`.
     - `adc_window_ns` (`int`): ADC coincidence/window width, divisible by 5 ns.
     - `adc_nb_trig` (`int`): ADC time-window trigger count.
     - `rstn_manual` (`bool`): Vendor ADC reset-n manual bit.
@@ -434,6 +491,8 @@ class AcquisitionConfig:
     use_mask: bool = True
     trigger_type: int = 0
     trigger_source: int = 3
+    trigger_source_2: int = 0
+    trigger_channel_2: int = 0
     adc_window_ns: int = 50
     adc_nb_trig: int = 1
     rstn_manual: bool = False
@@ -461,6 +520,16 @@ class AcquisitionConfig:
         if len(set(self.channels)) != len(self.channels):
             raise ValueError("channels must be unique")
         validate_channel(self.trigger_channel)
+        if self.trigger_channel not in self.channels:
+            # application/acquisition.py unconditionally unmasks trigger_channel
+            # (set_mask_for_channel) regardless of trigger_type/trigger_source,
+            # and only writes per-event HG/LG rows for channels in self.channels
+            # -- a trigger channel absent from channels would trigger real
+            # events whose own amplitude is then silently never saved.
+            raise ValueError(
+                "trigger_channel must be one of channels, or its amplitude will never "
+                "be saved for any accepted event"
+            )
         if self.threshold_dac is not None and not 0 <= self.threshold_dac <= 1023:
             raise ValueError("threshold_dac must be in range 0..1023")
         if self.hold_delay_ns < 0 or self.hold_delay_ns % 5 != 0:
@@ -484,6 +553,26 @@ class AcquisitionConfig:
             raise ValueError("trigger_type must be in range 0..3")
         if not 0 <= self.trigger_source <= 7:
             raise ValueError("trigger_source must be in range 0..7")
+        if not 0 <= self.trigger_source_2 <= 7:
+            raise ValueError("trigger_source_2 must be in range 0..7")
+        validate_channel(self.trigger_channel_2)
+        if (self.trigger_type == 1 and self.trigger_source == 3 and self.trigger_source_2 == 3
+                and self.trigger_channel_2 not in self.channels):
+            # Mirrors application/acquisition.py's own gating condition for a
+            # genuine 2-distinct-channel individual coincidence (the only mode
+            # where trigger_channel_2 names a second real trigger channel,
+            # which that same code then unmasks and expects to be one of the
+            # channels whose amplitude gets saved per accepted event).
+            raise ValueError(
+                "trigger_channel_2 must be one of channels for a 2-channel individual "
+                "coincidence trigger, or its amplitude will never be saved for any "
+                "accepted event"
+            )
+        if self.trigger_source_2 == 3 and self.peak_sensing:
+            raise ValueError(
+                "trigger_source_2 == 3 (a second individual coincidence channel) and "
+                "peak_sensing cannot be combined: both write FPGA word 23"
+            )
         if self.adc_window_ns < 0 or self.adc_window_ns % 5 != 0:
             raise ValueError("adc_window_ns must be non-negative and divisible by 5")
         if not 0 <= self.adc_nb_trig <= 63:
@@ -1568,6 +1657,40 @@ class RadiorocDevice:
         data[5] = "1" if enabled else "0"
         self.write_register(channel, 6, "".join(data))
 
+    def unmask_channel_for_individual_coincidence(self, channel: int, enabled: bool = True) -> None:
+        """Unmask all three discriminator levels for one coincidence channel.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `enabled` (`bool`): Mask bit value applied to all three levels.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes one channel mask register if present in the loaded defaults.
+
+        `configure_adc_external_hold`'s `trigger_source`/`trigger_source_2 ==
+        3` ("Individual trigger") selects a specific channel for one of the
+        ADC DAQ tab's two coincidence-input slots, but which per-channel
+        discriminator level (T1, T2, or TQ -- the three independent mask
+        bits `set_mask_for_channel`/`set_tq_mask_for_channel` control) that
+        path actually taps has not been recovered from disassembly (see
+        IMPLEMENTATION_STATUS.md RADIOROC 39/40) and needs a physical test
+        to resolve conclusively. Rather than guess, this unmasks all three
+        levels for the one named channel, which is safe specifically because
+        genuine two-distinct-channel coincidence never simultaneously uses
+        an OR-tree mode (NORT1/NORT2/NORTQ) on either slot -- so unmasking
+        extra levels on the two named channels cannot pull any other,
+        unintended channel into the trigger; every channel this call is not
+        applied to stays fully masked out by `prepare_trigger_masks`.
+        """
+
+        validate_channel(channel)
+        self.set_mask_for_channel(channel, t1=True, enabled=enabled)
+        self.set_mask_for_channel(channel, t1=False, enabled=enabled)
+        self.set_tq_mask_for_channel(channel, enabled=enabled)
+
     def set_input_dac_enable_for_channel(self, channel: int, enabled: bool) -> None:
         """Enable or disable one channel's input DAC.
 
@@ -2293,21 +2416,42 @@ class RadiorocDevice:
         peak_sensing: bool,
         adc_window_ns: int,
         adc_nb_trig: int,
+        trigger_source_2: int = 0,
+        trigger_channel_2: int = 0,
     ) -> None:
         """Configure FPGA/ASIC registers for external hold acquisition.
 
         **Inputs**
-        - `trigger_channel` (`int`): Channel used for ADC trigger setup.
+        - `trigger_channel` (`int`): Channel used for ADC trigger setup when
+          `trigger_source == 3` (vendor "Individual trigger" code).
         - `hold_delay_ns` (`int`): External hold delay in ns, divisible by 5.
         - `conversion_delay_ns` (`int`): ADC conversion delay, divisible by 40.
         - `nb_acq` (`int`): Number of ADC acquisitions.
-        - `trigger_type` (`int`): Vendor ADC trigger type code.
-        - `trigger_source` (`int`): Vendor ADC trigger source code.
+        - `trigger_type` (`int`): Vendor ADC trigger type code (`0` simple,
+          `1` 2-channel coincidence, `2` time window).
+        - `trigger_source` (`int`): Vendor ADC first coincidence-input code
+          (`0` NORT1, `1` NORT2, `2` NORTQ, `3` individual channel, `4`
+          OR64). This is the vendor GUI's "T1" combo box in the ADC DAQ tab;
+          the name predates recognizing it as one of two independent
+          coincidence inputs, recovered from `radioroc2UI.pyc`/`adc.pyc`
+          disassembly (see IMPLEMENTATION_STATUS.md RADIOROC 39).
         - `rstn_manual` (`bool`): Vendor ADC reset-n manual bit.
         - `ext_trig` (`bool`): Use external acquisition trigger bit.
         - `peak_sensing` (`bool`): Use external peak-sensing control path.
+          Mutually exclusive with `trigger_source_2 == 3`: both write FPGA
+          word 23.
         - `adc_window_ns` (`int`): ADC trigger window in ns, divisible by 5.
         - `adc_nb_trig` (`int`): ADC time-window trigger count.
+        - `trigger_source_2` (`int`): Vendor ADC second coincidence-input
+          code, same encoding as `trigger_source`. This is the vendor GUI's
+          "T2" combo box. Only setting this to `3` (individual channel,
+          named by `trigger_channel_2`) together with `trigger_source == 3`
+          and `trigger_type == 1` configures genuine coincidence between two
+          *distinct, named* channels; the default `0` (NORT1) is an OR of
+          every currently unmasked channel's T1 output, which a single
+          unmasked channel can satisfy alone.
+        - `trigger_channel_2` (`int`): Channel used when
+          `trigger_source_2 == 3`.
 
         **Returns**
         - `None`
@@ -2317,6 +2461,7 @@ class RadiorocDevice:
         """
 
         validate_channel(trigger_channel)
+        validate_channel(trigger_channel_2)
         if hold_delay_ns < 0 or hold_delay_ns % 5 != 0:
             raise ValueError("hold_delay_ns must be non-negative and divisible by 5")
         if conversion_delay_ns < 0 or conversion_delay_ns % 40 != 0:
@@ -2327,10 +2472,17 @@ class RadiorocDevice:
             raise ValueError("trigger_type must be in range 0..3")
         if not 0 <= trigger_source <= 7:
             raise ValueError("trigger_source must be in range 0..7")
+        if not 0 <= trigger_source_2 <= 7:
+            raise ValueError("trigger_source_2 must be in range 0..7")
         if adc_window_ns < 0 or adc_window_ns % 5 != 0:
             raise ValueError("adc_window_ns must be non-negative and divisible by 5")
         if not 0 <= adc_nb_trig <= 63:
             raise ValueError("adc_nb_trig must be in range 0..63")
+        if trigger_source_2 == 3 and peak_sensing:
+            raise ValueError(
+                "trigger_source_2 == 3 (a second individual coincidence channel) and "
+                "peak_sensing cannot be combined: both write FPGA word 23"
+            )
 
         ext_hold_code: int = hold_delay_ns // 5
         if ext_hold_code > 0xFFF:
@@ -2346,7 +2498,12 @@ class RadiorocDevice:
         saved_w23: str = self.read_word(23) if (peak_sensing and not self.dry_run) else "00000000"
         peak_or_ext_trig: bool = peak_sensing or ext_trig
         self.write_word(22, "00" + bits(trigger_channel, 6))
-        self.write_word(23, "01" + saved_w23[2:] if peak_sensing else "00000000")
+        if peak_sensing:
+            self.write_word(23, "01" + saved_w23[2:])
+        elif trigger_source_2 == 3:
+            self.write_word(23, "00" + bits(trigger_channel_2, 6))
+        else:
+            self.write_word(23, "00000000")
         self.write_word(24, bits(adc_window_ns // 5, 8))
         self.write_word(
             25,
@@ -2354,7 +2511,7 @@ class RadiorocDevice:
         )
         self.write_word(26, ext_hold_bits[4:])
         self.write_word(27, "00" + bits(adc_nb_trig, 6))
-        self.write_word(30, ext_hold_bits[:4] + bits(0, 3))
+        self.write_word(30, ext_hold_bits[:4] + bits(trigger_source_2, 3))
         self.write_word(31, bits(conversion_delay_ns // 40, 8))
         self.write_word(21, bits(nb_acq))
 
