@@ -92,6 +92,20 @@ diffs reviewed and checks rerun by the lead, cherry-picked here):
 - Combined after all four: exit 0, 474 tests OK, none skipped. A real on-screen
   visual check at 1024x768 is still pending (offscreen tests only).
 
+Bench, operator busy (pre-authorized board use): Acquisition rehearsal via
+`MainWindow` stopped before any write: Registers tab "Read all" raised
+`TimeoutError: i2c FIFO transaction timed out`; worker closed the session to
+`error` (register (4,7) untouched; word0 restored `00111111`, status 5).
+Read-only probe (`RadiorocDevice.read_fifo` over the 677-row default table):
+11 single-chunk transactions of 64 rows (256 bytes) all OK (~0.064 s each);
+a 128-row (two-chunk) transaction then left the board unresponsive on USB
+(status read times out; needs power cycle). Consistent with every hang seen
+(full-table defaults write, full read-all): multi-chunk FIFO transactions in
+`i2c_fifo_transaction` are unreliable; single-chunk ones are not observed to
+fail. Vendor I2C sequence being extracted from
+`local_artifacts/generated_notes/radioroc_i2c_pydisasm.txt` before any fix.
+Evidence: `radioroc_runs/acq_ctest_selftrig_ch4_20261016T061806Z/`.
+
 Operator decisions needed (MVP directive): trigger scheme (the hardware has a fixed
 named pair; options are a fixed pair, OR trigger plus an offline two-channel cut,
 or external coincidence); plint channel-to-position map; calibration
