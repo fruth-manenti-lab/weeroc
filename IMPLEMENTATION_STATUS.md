@@ -33,10 +33,30 @@ per operator: SiPMs connected but unbiased; generator set up for Ctest.
   idle, no error shown). Harness worked after waiting for the port list.
   Not yet reproduced offline.
 
-Next: operator sets the generator to external trigger, single-cycle burst,
-and confirms 1 V `ZLOAD OPEN` through the 20 dB attenuator into `in_test1`
-(~50 mV at the board), then rerun the Ctest-on/sync-off control (expect
-pedestal only) and the Step 5 hold scan.
+- Generator incident: my earlier `CHN 2`/`OUTPUT OFF` left the TGF4162
+  front panel on channel 2 and in remote; the operator noticed. Restored
+  with `CHN 1` + `LOCAL`. Ctest is generator channel 1 only.
+- Controls after the operator's channel-1 setup (Ctest on, sync off):
+  CH1 output OFF -> no triggers, ADC acquisition timeout, app faulted
+  visibly with cleanup restored (correct behavior); CH1 output ON -> clean
+  decaying hold curve. So events are triggered by ch4's discriminator on the
+  generator's own (free-running) pulses, not by IO1; the earlier saturation
+  had gone after the operator's setup.
+- Step 5, self-triggered (sync off), hold 0-600 ns step 20, otherwise as
+  above: completed, 31 points, restored, 10 events/point. Clear peak: HG
+  981 +/- 1.5 at 60-80 ns (LG 212 at 60 ns), falling to 98 at 400 ns and
+  undershooting to ~37 (below the 104 pedestal) by 500-600 ns.
+  `radioroc_runs/step5_hold_selftrig_ctest_ch4_20261016T054013Z/` with
+  `hold_curve.png`. Candidate `hold_delay_ns` 70 (peak-plateau centre,
+  smallest spread), conversion 400 ns. Discriminator-referenced timing
+  matches how the plint experiment will trigger (SiPM discriminators).
+  Caveats: HG peak is ~96% of the ~1016 saturation level, so this pulse is
+  too large for amplitude (Step 4) work; hold timing should be confirmed with
+  real biased-SiPM pulses and the experiment's coincidence trigger setting.
+
+Next: operator confirms 70 ns; then write the Step 6 record with
+`scripts/radioroc_save_calibration_record.py` (Step 1 rerun with bias on
+first, since the procedure requires biased floors).
 
 ## Independent plint MVP sanity review — 24 September 2026 (Astra)
 
