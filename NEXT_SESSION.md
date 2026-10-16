@@ -8,6 +8,11 @@ locally, nothing pushed. Earlier the same day, a separate branch
 noise/grounding investigation in its own `IMPLEMENTATION_STATUS.md`; port those
 findings here if still relevant (not merged).
 
+Durable procedures and lessons: `docs/bench_runbook.md`. An offline app
+test by another assistant (ChatGPT, no equipment) was started on 2026-10-16 using
+`docs/offline_app_test_guide.md`; look for `docs/app_test_report_*.md` and
+triage its findings before new work. It was told not to change code or git state.
+
 ## Environment (this Mac)
 - Use `.venv-foundation` (PySide6) with `PYTHONPATH=src`. `.conda-radioroc` has
   no PySide6 and silently skips ~148 GUI tests.
