@@ -173,7 +173,7 @@ class AcquisitionGuiTests(unittest.TestCase):
         self.window.channel_select.set_channels([2, 4])
         self.window.start_run()
         self.wait_idle()
-        self.assertTrue(self.window._spectra_rows)
+        self.assertTrue(self.window._spectra)
         self.assertGreater(len(self.window.axes.patches), 0)
 
     def test_channel_visibility_toggle_changes_what_is_plotted(self):
@@ -212,7 +212,7 @@ class AcquisitionGuiTests(unittest.TestCase):
         self.assertTrue((self.directory / "events.csv").exists())
 
         self.window.clear_spectra()
-        self.assertEqual(self.window._spectra_rows, ())
+        self.assertFalse(self.window._spectra)
         self.assertEqual(len(self.window.axes.patches), 0)
         self.assertTrue((self.directory / "events.csv").exists())
 
@@ -224,7 +224,7 @@ class AcquisitionGuiTests(unittest.TestCase):
         self.assertEqual(len(self.window.axes.patches), 0)
 
         self.window.open_saved(self.directory)
-        self.assertTrue(self.window._spectra_rows)
+        self.assertTrue(self.window._spectra)
         self.assertGreater(len(self.window.axes.patches), 0)
 
     def _run_eight_channels(self):
@@ -294,14 +294,71 @@ class AcquisitionGuiTests(unittest.TestCase):
         self.window._live_refresh_tick = 0
         self.window.worker = _FakeWorker()
         try:
-            with patch("radioroc.gui.acquisition_window._read_live_events",
-                      return_value=()) as reread:
+            with patch("radioroc.gui.acquisition_window._LiveEventsReader.poll",
+                      return_value=False) as reread:
                 ticks = self.window._LIVE_REFRESH_EVERY_TICKS
                 for _ in range(3 * ticks - 1):
                     self.window.poll_worker()
                 self.assertEqual(reread.call_count, 2)
         finally:
             self.window.worker = None
+
+    # -- incremental, bounded live reading. ----------------------------
+
+    @staticmethod
+    def _csv_text(batches, events, channels):
+        lines = ["batch,event,channel,hg,lg"]
+        for batch in range(batches):
+            for channel in range(channels):
+                for event in range(events):
+                    lines.append(f"{batch},{event},{channel},{(batch * 7 + event * 3 + channel) % 4000},"
+                                 f"{(event * 5 + channel) % 4000}")
+        return "\n".join(lines) + "\n"
+
+    def test_incremental_reader_matches_full_read_with_partial_line(self):
+        import numpy as np
+        from radioroc.gui.acquisition_window import _LiveEventsReader, _SpectraData, _read_live_events
+        self.directory.mkdir(parents=True, exist_ok=True)
+        path = self.directory / "events.csv"
+        text = self._csv_text(3, 5, 4)
+        cut = len(text) // 2
+        path.write_text(text[:cut])           # ends mid-line
+        reader = _LiveEventsReader(path)
+        reader.poll()
+        self.assertLess(reader.data.rows, 60)
+        with path.open("a") as stream:
+            stream.write(text[cut:])
+        reader.poll()
+        full = _SpectraData()
+        full.add_rows(_read_live_events(path))
+        self.assertEqual(reader.data.rows, 60)
+        self.assertEqual(reader.data.events, 15)
+        self.assertEqual(full.events, 15)
+        for channel in range(4):
+            np.testing.assert_array_equal(reader.data.hg[channel], full.hg[channel])
+            np.testing.assert_array_equal(reader.data.lg[channel], full.lg[channel])
+        # Truncation/replacement resets instead of mixing old and new data.
+        path.write_text(self._csv_text(1, 2, 1))
+        reader.poll()
+        self.assertEqual((reader.data.rows, reader.data.events), (2, 2))
+
+    def test_live_tick_is_fast_and_display_memory_bounded(self):
+        from radioroc.gui.acquisition_window import _LiveEventsReader, _MAX_LINES_PER_TICK
+        self.directory.mkdir(parents=True, exist_ok=True)
+        path = self.directory / "events.csv"
+        path.write_text(self._csv_text(100, 1000, 8))   # 100k events x 8 ch = 800k rows
+        reader = _LiveEventsReader(path)
+        started = time.perf_counter()
+        reader.poll()
+        elapsed = time.perf_counter() - started
+        self.assertLess(elapsed, 0.5)
+        self.assertEqual(reader.data.rows, _MAX_LINES_PER_TICK - 1)  # header line counted
+        while reader.poll():
+            pass
+        self.assertEqual(reader.data.rows, 800_000)
+        self.assertEqual(reader.data.events, 100_000)
+        self.assertEqual(len(reader.data._batch_events), 1000)
+        self.assertEqual(sum(a.size for a in reader.data.hg.values()), 8 * 4096)
 
     def test_close_failure_remains_visible(self):
         from radioroc.application.acquisition_worker import AcquisitionWorker

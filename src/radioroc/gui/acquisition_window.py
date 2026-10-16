@@ -17,8 +17,8 @@ only the bounded batch summary above, because every raw sample is already
 durably written to the run's own ``events.csv`` by the job. Spectra
 rendering therefore does not add a second in-memory raw-sample buffer to
 route around that: it periodically re-reads the run's own ``events.csv``
-from disk (see ``_read_live_events``/``_refresh_live_spectra`` below) and
-re-renders the histogram from the file, throttled to roughly once per
+from disk (incrementally, by byte offset: ``_LiveEventsReader``) and
+accumulates bounded fixed-bin histograms, throttled to roughly once per
 second (``_LIVE_REFRESH_EVERY_TICKS`` poll ticks) rather than on every
 100ms timer tick, so a long run doesn't spend all its time re-parsing a
 growing CSV. The same histogram also renders a previously saved run
@@ -26,6 +26,7 @@ growing CSV. The same histogram also renders a previously saved run
 """
 
 import csv
+import os
 from datetime import datetime
 import json
 from pathlib import Path
@@ -37,6 +38,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPlainTextEdit, QProgressBar,
     QPushButton, QScrollArea, QSpinBox, QSplitter, QVBoxLayout, QWidget,
 )
+import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.ticker import NullFormatter
@@ -113,8 +115,155 @@ def _count_events(rows):
 
 
 def _events_text(rows):
+    if isinstance(rows, _SpectraData):
+        return f"{rows.events} events ({rows.rows} channel rows)"
     events = _count_events(rows)
     return f"{events} events ({len(rows)} channel rows)"
+
+
+# ADC values are 12-bit; the display histograms use one fixed bin per ADC
+# count (out-of-range values clamp into the edge bins) and are re-binned to
+# the user's "bins" setting only at draw time, so memory is
+# O(channels x 2 x 4096) regardless of run length. No existing display
+# feature needs raw rows, so no row ring buffer is kept.
+_ADC_BINS = 4096
+# Cap on CSV lines parsed per refresh tick so a tick never blocks the GUI
+# for long; the remainder is picked up on the following ticks.
+_MAX_LINES_PER_TICK = 20_000
+
+
+class _SpectraData:
+    """Bounded display state: fixed-bin HG/LG counts per channel plus counts."""
+
+    def __init__(self):
+        self.hg = {}
+        self.lg = {}
+        self.rows = 0
+        self._finished_events = 0
+        self._batch = None
+        self._batch_events = set()
+
+    @property
+    def events(self):
+        """Physical events = distinct (batch, event).
+
+        Rows are channel-major within a batch (every event of ch0, then ch1,
+        ...) but a batch's rows are appended contiguously, so only the
+        current batch's event ids are kept in memory (bounded by the
+        acquisitions-per-batch setting).
+        """
+        return self._finished_events + len(self._batch_events)
+
+    def __bool__(self):
+        return self.rows > 0
+
+    def _note_event(self, batch, event):
+        if batch != self._batch:
+            self._finished_events += len(self._batch_events)
+            self._batch_events = set()
+            self._batch = batch
+        self._batch_events.add(event)
+
+    def add_arrays(self, channels, hg, lg):
+        channels = np.asarray(channels)
+        hg_bins = np.clip(np.floor(np.asarray(hg, dtype=float)), 0, _ADC_BINS - 1).astype(np.int64)
+        lg_bins = np.clip(np.floor(np.asarray(lg, dtype=float)), 0, _ADC_BINS - 1).astype(np.int64)
+        for channel in np.unique(channels):
+            mask = channels == channel
+            key = int(channel)
+            if key not in self.hg:
+                self.hg[key] = np.zeros(_ADC_BINS, dtype=np.int64)
+                self.lg[key] = np.zeros(_ADC_BINS, dtype=np.int64)
+            self.hg[key] += np.bincount(hg_bins[mask], minlength=_ADC_BINS)
+            self.lg[key] += np.bincount(lg_bins[mask], minlength=_ADC_BINS)
+        self.rows += len(channels)
+
+    def add_rows(self, rows):
+        """Add dict rows (saved-run / vendor shapes); used for one-shot loads."""
+        rows = list(rows)
+        if not rows:
+            return
+        for row in rows:
+            if "batch" in row and "event" in row:
+                self._note_event(row["batch"], row["event"])
+        self.add_arrays([r["channel"] for r in rows], [r["hg"] for r in rows],
+                        [r["lg"] for r in rows])
+
+
+class _LiveEventsReader:
+    """Incremental tail reader for a run's ``events.csv``.
+
+    Remembers the byte offset and header; each ``poll`` parses only newly
+    appended *complete* lines (a partially written last line is left for the
+    next poll), at most ``_MAX_LINES_PER_TICK`` of them. A truncated or
+    replaced file (smaller size or different inode) resets the state.
+    """
+
+    def __init__(self, path):
+        self.path = path
+        self._reset()
+
+    def _reset(self):
+        self.data = _SpectraData()
+        self._offset = 0
+        self._header = None
+        self._ident = None
+
+    def poll(self, max_lines=None):
+        """Parse newly appended lines; return True if the data changed."""
+        max_lines = max_lines or _MAX_LINES_PER_TICK
+        try:
+            stat = os.stat(self.path)
+            ident = (stat.st_dev, stat.st_ino)
+            if (self._ident is not None and ident != self._ident) or stat.st_size < self._offset:
+                self._reset()
+            self._ident = ident
+            if stat.st_size == self._offset:
+                return False
+            with open(self.path, "rb") as stream:
+                stream.seek(self._offset)
+                lines = []
+                offset = self._offset
+                while len(lines) < max_lines:
+                    line = stream.readline()
+                    if not line.endswith(b"\n"):
+                        break  # EOF or torn last line: retry next poll
+                    offset += len(line)
+                    lines.append(line)
+        except OSError:
+            return False
+        self._offset = offset
+        if not lines:
+            return False
+        text = [line.decode("utf-8", "replace") for line in lines]
+        if self._header is None:
+            self._header = next(csv.reader([text[0]]), [])
+            text = text[1:]
+        try:
+            index = {name: self._header.index(name) for name in ("channel", "hg", "lg")}
+        except ValueError:
+            return False
+        b_idx = self._header.index("batch") if "batch" in self._header else None
+        e_idx = self._header.index("event") if "event" in self._header else None
+        channels, hgs, lgs = [], [], []
+        for fields in csv.reader(text):
+            try:
+                channel = int(fields[index["channel"]])
+                hg = float(fields[index["hg"]])
+                lg = float(fields[index["lg"]])
+                key = None
+                if b_idx is not None and e_idx is not None and fields[b_idx] and fields[e_idx]:
+                    key = (int(fields[b_idx]), int(fields[e_idx]))
+            except (IndexError, ValueError):
+                continue
+            if key is not None:
+                self.data._note_event(*key)
+            channels.append(channel)
+            hgs.append(hg)
+            lgs.append(lg)
+        if channels:
+            self.data.add_arrays(channels, hgs, lgs)
+        return True
 
 
 def _read_live_events(path):
@@ -176,7 +325,8 @@ class AcquisitionWindow(QMainWindow):
         self._hardware_running = False
         self._live_csv_path = None
         self._live_refresh_tick = 0
-        self._spectra_rows = ()
+        self._spectra = _SpectraData()
+        self._live_reader = None
         self._spectra_title = "No data yet"
         self.spectra_channel_checks = {}
 
@@ -926,7 +1076,8 @@ class AcquisitionWindow(QMainWindow):
         self._live_csv_path = self._active_directory / _EVENTS_CSV_NAME
         self._live_refresh_tick = 0
         self._set_spectra_channels(channels)
-        self._spectra_rows = ()
+        self._live_reader = _LiveEventsReader(self._live_csv_path)
+        self._spectra = self._live_reader.data
         self._spectra_title = f"{mode} · running · waiting for the first batch"
         self._refresh_spectra()
 
@@ -934,11 +1085,18 @@ class AcquisitionWindow(QMainWindow):
         path = self._live_csv_path
         if path is None or not path.exists():
             return
-        rows = _read_live_events(path)
-        self._spectra_rows = rows
+        if self._live_reader is None or self._live_reader.path != path:
+            self._live_reader = _LiveEventsReader(path)
+        changed = self._live_reader.poll()
+        if not running:
+            # Final refresh: drain whatever the per-tick cap left behind.
+            while self._live_reader.poll():
+                changed = True
+        self._spectra = self._live_reader.data
         state = "running" if running else "finished"
-        self._spectra_title = f"{mode} · {state} · {_events_text(rows)} on disk"
-        self._refresh_spectra()
+        if changed or not running:
+            self._spectra_title = f"{mode} · {state} · {_events_text(self._spectra)} on disk"
+            self._refresh_spectra()
 
     def _set_spectra_channels(self, channels):
         while self.spectra_channels_layout.count():
@@ -958,7 +1116,7 @@ class AcquisitionWindow(QMainWindow):
         self.spectra_channels_layout.addStretch(1)
 
     def _refresh_spectra(self):
-        self._render_spectra(self._spectra_rows, self._spectra_title)
+        self._render_spectra(self._spectra, self._spectra_title)
 
     def _render_spectra(self, rows, title):
         self.axes.clear()
@@ -980,14 +1138,21 @@ class AcquisitionWindow(QMainWindow):
                    if box.isChecked()]
         plotted = False
         if rows and selected:
-            by_channel: dict[int, list[float]] = {}
-            for row in rows:
-                by_channel.setdefault(row["channel"], []).append(row[gain_field])
+            table = rows.hg if gain_field == "hg" else rows.lg
             for channel in selected:
-                values = by_channel.get(channel)
-                if values:
-                    self.axes.hist(values, bins=bins, alpha=0.55, label=f"ch{channel}")
-                    plotted = True
+                counts = table.get(channel)
+                if counts is None:
+                    continue
+                nonzero = np.flatnonzero(counts)
+                if not len(nonzero):
+                    continue
+                lo, hi = int(nonzero[0]), int(nonzero[-1]) + 1
+                edges = np.linspace(lo, hi, bins + 1)
+                weights, _ = np.histogram(np.arange(lo, hi) + 0.5, bins=edges,
+                                          weights=counts[lo:hi])
+                self.axes.hist(edges[:-1] + np.diff(edges) / 2, bins=edges, weights=weights,
+                               alpha=0.55, label=f"ch{channel}")
+                plotted = True
         if plotted:
             # Fixed outside-axes placement instead of loc="best": "best"
             # re-picks a position from the current data shape on every
@@ -998,7 +1163,8 @@ class AcquisitionWindow(QMainWindow):
         self.canvas.draw_idle()
 
     def clear_spectra(self):
-        self._spectra_rows = ()
+        self._spectra = _SpectraData()
+        self._live_reader = None
         self._spectra_title = "Cleared — no data displayed (saved data is untouched)"
         self._refresh_spectra()
 
@@ -1017,7 +1183,9 @@ class AcquisitionWindow(QMainWindow):
             channels = sorted({row["channel"] for row in vendor.rows})
             self.banner.setText(f"VENDOR FILE · {path}")
             self._set_spectra_channels(channels)
-            self._spectra_rows = vendor.rows
+            self._live_reader = None
+            self._spectra = _SpectraData()
+            self._spectra.add_rows(vendor.rows)
             self._spectra_title = f"VENDOR FILE · {Path(path).name} · {len(vendor.rows)} rows"
             self._refresh_spectra()
             status = f"Imported vendor file · {len(vendor.rows)} rows · channels {channels}"
@@ -1071,7 +1239,9 @@ class AcquisitionWindow(QMainWindow):
             # append-mode CSV history) matches the manifest's declared
             # channels -- see read_acquisition_run's module docstring.
             self._set_spectra_channels(saved.channels)
-            self._spectra_rows = saved.current_segment_rows
+            self._live_reader = None
+            self._spectra = _SpectraData()
+            self._spectra.add_rows(saved.current_segment_rows)
             self._spectra_title = (f"{label} · {saved.status} · "
                                    f"{_events_text(saved.current_segment_rows)} in this run's segment")
             self._refresh_spectra()
