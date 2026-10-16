@@ -197,6 +197,26 @@ defaults, before any further scan. `led_flush_on_threshold_ch4_6_32_20261016T070
 Gap to check offline: why verification reports failed with empty mismatch and
 missing lists (likely an exception during readback; should say so).
 
+After power cycle + defaults (677/677 verified), operator confirmed generator
+pulsing. LED on/off threshold pair ch 4,6,32 (both PASSED): LED clearly visible
+above the pedestal, e.g. DAC 480 ch4 4.8e4 vs 2.3e3, ch6 1.5e5 vs 230, ch32
+4.2e4 vs 4.9e3 Hz; LED-on curves non-monotonic in places (LED output
+fluctuating; operator reported a loose LED connection).
+`led_pulsing_on/off_threshold_ch4_6_32_*`.
+LED self-triggered hold scans, ch6, threshold 480 (LED-dominated), Ctest off,
+sync off, 20 acq: requested == received 20 at every point. Default gains: HG
+~110-123 (sd 7-45) vs pedestal ~104, LG flat 98, no peak over 0-600 ns.
+With `high_gain_code=15`: LG rose to ~104-120 with sd up to 47 and tracked the
+pulses, while HG barely changed. First bench evidence that the HG/LG
+shaper-gain fields may be swapped (the existing "HG/LG nibble mapping" concern);
+not resolved, needs a register-level check against the vendor UI before Step 4
+relies on it. LED signals are only ~5-15 counts above the pedestal, so p.e. peaks
+are not resolvable at these settings.
+`led_selftrig_hold_ch6_20261016T*`, `led_selftrig_hold_ch6_hg15_*`.
+Accounting fix: the count-word low byte is constant 254 with exact counts and the
+vendor divides by 256 too, so the "not a multiple of 256" warning was a false
+alarm; removed (raw word still recorded), test updated.
+
 Operator decisions needed (MVP directive): trigger scheme (the hardware has a fixed
 named pair; options are a fixed pair, OR trigger plus an offline two-channel cut,
 or external coincidence); plint channel-to-position map; calibration

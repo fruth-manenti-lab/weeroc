@@ -2598,11 +2598,10 @@ class RadiorocDevice:
         count_words: str = self.read_word(29) + self.read_word(28)
         count_word_value: int = int(count_words, 2)
         total_nb_acq: int = count_word_value // 256
+        # The low byte is not a count remainder (bench: constant 254 with exact
+        # requested == received); the vendor also divides by 256. Keep the raw
+        # word for diagnosis without warning on it.
         batch_warnings: list[str] = []
-        if count_word_value % 256:
-            batch_warnings.append(
-                f"ADC count word {count_word_value} is not a multiple of 256; "
-                f"decoding {total_nb_acq} events (remainder {count_word_value % 256})")
         self.last_adc_batch = {"requested": nb_acq, "received": max(total_nb_acq, 0),
                                "count_word": count_word_value, "payload_bytes": 0,
                                "warnings": batch_warnings}

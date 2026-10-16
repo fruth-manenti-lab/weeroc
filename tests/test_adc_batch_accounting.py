@@ -27,13 +27,14 @@ class DeviceAccountingTests(unittest.TestCase):
         self.assertEqual((info["requested"], info["received"], info["count_word"]), (2, 2, 512))
         self.assertEqual((info["payload_bytes"], info["warnings"]), (2 * 64 * 4, []))
 
-    def test_count_word_not_multiple_of_256_is_flagged(self):
+    def test_count_word_low_byte_is_recorded_not_warned(self):
+        # Bench: low byte constant 254 with requested == received.
         device, transport = self.device(2, hold_payload(2, {}))
-        transport.words[28] = bits(7)
+        transport.words[28] = bits(254)
         device.acquire_adc_batch(nb_acq=2, timeout_s=1.0)
-        self.assertEqual(device.last_adc_batch["count_word"], 519)
+        self.assertEqual(device.last_adc_batch["count_word"], 2 * 256 + 254)
         self.assertEqual(device.last_adc_batch["received"], 2)
-        self.assertIn("not a multiple of 256", device.last_adc_batch["warnings"][0])
+        self.assertEqual(device.last_adc_batch["warnings"], [])
 
     def test_short_payload_raises(self):
         device, _ = self.device(2, hold_payload(2, {})[:-4])
