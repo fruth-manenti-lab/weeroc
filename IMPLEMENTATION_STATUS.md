@@ -159,6 +159,17 @@ pedestal (DAC 0), i.e. the bias-supply-path interference identified this
 morning is back now that the supply is cabled. The LED-off scan is the
 biased Step 1 floor for now (contaminated by that interference).
 
+LED brightness raised by operator: threshold on/off pair again equal within
+noise (`led_bright_on_*`, `led_bright_off_*`). Synced hold scan (IO1 mux 5
+sync on, Ctest off, ch4, threshold 450, 0-900 ns step 50, 20 acq):
+completed and restored, but HG ~190-235 (sd 105-130) flat over delay, LG mean
+above HG, and 38-41 events per 20 requested acquisitions
+(`led_sync_hold_ch4_*`). No LED-correlated signal demonstrated. The
+event-count excess (about 2x requested) is unexplained and should be checked
+against the acquisition short/over-batch accounting gap in the review. Stopped
+generator/LED experiments: the generator's actual mode, rate, width and amplitude
+are unobservable from here; they need an operator scope check.
+
 Operator decisions needed (MVP directive): trigger scheme (the hardware has a fixed
 named pair; options are a fixed pair, OR trigger plus an offline two-channel cut,
 or external coincidence); plint channel-to-position map; calibration
