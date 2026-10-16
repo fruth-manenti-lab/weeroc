@@ -40,6 +40,10 @@ class SavedAcquisitionRun:
     status: str
     execution_mode: str
     warnings: tuple[str, ...]
+    # One dict per append segment: segment_id, channels, start_batch, batches,
+    # status, operation, created_at, finished_at, row_count. Old single-segment
+    # files yield one entry synthesized from the top-level manifest.
+    segments: tuple[dict, ...] = ()
 
 
 def read_acquisition_run(path: Path) -> SavedAcquisitionRun:
@@ -159,8 +163,38 @@ def read_acquisition_run(path: Path) -> SavedAcquisitionRun:
     if not isinstance(mode, str):
         mode = "unknown"
         warnings.append("manifest execution_mode is invalid")
+    segments = _read_segments(manifest, rows, warnings, start_batch, batches, manifest_channels)
     return SavedAcquisitionRun(directory, manifest, rows, current_segment_rows, channels,
-                               status, mode, tuple(_unique(warnings)))
+                               status, mode, tuple(_unique(warnings)), segments)
+
+
+def _read_segments(manifest, rows, warnings, start_batch, batches, channels) -> tuple[dict, ...]:
+    raw = manifest.get("segments")
+    entries = []
+    if isinstance(raw, list) and raw and all(isinstance(item, dict) for item in raw):
+        for index, item in enumerate(raw):
+            try:
+                seg_channels, seg_start, seg_batches = _manifest_acquisition(item)
+            except ValueError as exc:
+                warnings.append(f"segment {index} manifest is invalid: {exc}")
+                continue
+            entries.append((index, item, seg_channels, seg_start, seg_batches))
+    else:
+        entries.append((0, manifest, channels, start_batch, batches))
+    result = []
+    for index, item, seg_channels, seg_start, seg_batches in entries:
+        stop = seg_start + seg_batches
+        result.append({
+            "segment_id": index, "channels": list(seg_channels), "start_batch": seg_start,
+            "batches": seg_batches, "status": item.get("status"), "operation": item.get("operation"),
+            "created_at": item.get("created_at"), "finished_at": item.get("finished_at"),
+            "row_count": sum(1 for row in rows if seg_start <= row["batch"] < stop),
+        })
+    ranges = sorted((s["start_batch"], s["start_batch"] + s["batches"], s["segment_id"]) for s in result)
+    for (_, prev_stop, prev_id), (start, _, cur_id) in zip(ranges, ranges[1:]):
+        if start < prev_stop:
+            warnings.append(f"segments {prev_id} and {cur_id} claim overlapping batches")
+    return tuple(result)
 
 
 def _resolve_paths(path: Path) -> tuple[Path, Path, Path]:
