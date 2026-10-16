@@ -1,5 +1,43 @@
 # Implementation status
 
+## RADIOROC 42 — Newest app on the bench: Step 1 passed, Step 5 blocked on generator setup
+
+Branch `lab/newest-app-test` from `origin/main` `c1b1993` (same tree as
+`feat/daq-results-gui` `a24172d`). `tools/check_development.py` passed under
+`.conda-radioroc` (exit 0). Hardware driven through the real `MainWindow`
+(offscreen harness, shared `ConnectionPanel`, `/dev/cu.usbserial-RD3_320`,
+115200, 0.5 s); the operator closed their own desktop instance first. Bench
+per operator: SiPMs connected but unbiased; generator set up for Ctest.
+
+- Step 1 (Threshold scan tab), ch 4,6,32, T1, gain 1, DAC 0-1023 step 10,
+  100 ms, mask on, Ctest off, defaults off (keeps the operator's
+  autocalibration trims): completed, 103 points/309 windows, restored,
+  verification passed. Pedestal peak DAC 110 on all three; zero rate above
+  DAC 320 (ch4, ch6) and 450 (ch32), unbiased.
+  `radioroc_runs/step1_pedestal_ch4_6_32_20261016T052958Z/`.
+- Step 5 (Hold scan tab), ch4, external hold 100-900 ns step 50, 10 acq,
+  threshold 450, Ctest on, sync pulse on IO1 mux 5, conversion 400 ns,
+  trigger type 0/source 3, rstn manual, gain 1, defaults off: app run
+  completed and restored, but data not acceptable: HG mean ~520-780 with
+  stdev ~420-460 at every delay, 14-17 events per 10 acquisitions, no peak.
+  Controls: Ctest off -> HG 103.7 +/- 0.7, exactly 10 events (clean);
+  Ctest on with sync off -> HG 1016 +/- 1 (raw ~4066, HG saturated), LG 223,
+  at every delay. So the generator fires without the IO1 trigger and the
+  pulse at the board is far above ~50 mV (attenuator missing or amplitude
+  too high). Not a software finding. Runs:
+  `step5_hold_ctest_ch4_20261016T053208Z`,
+  `step5_hold_ctestoff_control_ch4_20261016T053251Z`,
+  `step5_hold_ctest_nosync_control_ch4_20261016T053320Z`.
+- App observation: `ConnectionPanel.connect_to()` issued while the
+  start-up port discovery is still running is silently dropped (state stays
+  idle, no error shown). Harness worked after waiting for the port list.
+  Not yet reproduced offline.
+
+Next: operator sets the generator to external trigger, single-cycle burst,
+and confirms 1 V `ZLOAD OPEN` through the 20 dB attenuator into `in_test1`
+(~50 mV at the board), then rerun the Ctest-on/sync-off control (expect
+pedestal only) and the Step 5 hold scan.
+
 ## Independent plint MVP sanity review — 24 September 2026 (Astra)
 
 Reviewed `feat/daq-results-gui` at `4435584`, at the operator's request,
