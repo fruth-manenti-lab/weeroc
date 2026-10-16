@@ -54,6 +54,7 @@ from radioroc.gui.channel_select import ChannelSelectGrid
 from radioroc.gui.connection_panel import ConnectionPanel
 from radioroc.gui.hint_bar import HintBar
 from radioroc.transport.acquisition_simulator import AcquisitionSimulationConfig
+from radioroc.gui.output_paths import guard_output, refresh_auto_output
 
 # The filename `AcquisitionRunWriter`/`AcquisitionJob` write events to inside
 # a run's `out_dir` (see `radioroc/data/acquisition.py`'s `self.csv_path` and
@@ -670,9 +671,8 @@ class AcquisitionWindow(QMainWindow):
             self._accepted_mode = requested
         simulation = self.mode.currentIndex() == 0
         self._show_mode_banner()
-        if not simulation and previous_mode != self._accepted_mode:
-            if "radioroc_runs" in Path(self.output.text()).parts:
-                self.output.setText(_new_directory("hardware"))
+        if previous_mode != self._accepted_mode:
+            refresh_auto_output(self.output, "simulation" if simulation else "hardware", _new_directory)
         self.run_button.setText("Run simulation" if simulation else "Run hardware acquisition")
         self.sim_group.setEnabled(simulation and self.worker is None)
         self._update_connection_controls()
@@ -853,6 +853,8 @@ class AcquisitionWindow(QMainWindow):
         output = self.output.text().strip()
         if not output:
             raise ValueError("choose a new run directory")
+        output = guard_output(self.output, "hardware" if self.mode.currentIndex() == 1 else "simulation",
+                              _new_directory)
         acquisition = AcquisitionConfig(
             channels, trigger_channel=self.trigger_channel.value(),
             threshold_dac=self.threshold_dac.value() or None,
@@ -1216,7 +1218,7 @@ class AcquisitionWindow(QMainWindow):
         try:
             saved = read_acquisition_run(Path(path))
             label = saved.execution_mode.upper()
-            self.banner.setText(f"SAVED RUN · {label} · {saved.status} · {saved.directory}")
+            self.banner.setText(f"SAVED RUN · {label} · {saved.status} · {saved.directory} · Controls show current settings, not this run's")
             manifest_batches = None
             if saved.manifest:
                 manifest_batches = saved.manifest.get("operation", {}).get("acquisition", {}).get("batches")

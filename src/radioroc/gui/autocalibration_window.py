@@ -509,12 +509,37 @@ class AutocalibrationWindow(QMainWindow):
         if path:
             self.open_saved(Path(path))
 
+    def _apply_saved_operation(self, operation):
+        """Populate the controls from a saved manifest's operation (new output dir and
+        persistent FPGA init/defaults are deliberately left untouched)."""
+        if not isinstance(operation, dict):
+            return
+        def put(name, setter, convert=lambda v: v):
+            if operation.get(name) is not None:
+                try:
+                    setter(convert(operation[name]))
+                except (TypeError, ValueError):
+                    pass
+        put("channels", self.channel_select.set_channels, lambda v: [int(c) for c in v])
+        put("t1", lambda v: self.discriminator.setCurrentIndex(0 if v else 1), bool)
+        put("use_mask", self.use_mask.setChecked, bool)
+        put("use_ctest", self.use_ctest.setChecked, bool)
+        put("trigger_level", self.trigger_level.setChecked, bool)
+        self.trigger_preamp_gain.setValue(int(operation.get("trigger_preamp_gain") or 0))
+        for name in ("clock_index", "probe_dac_min", "probe_dac_max", "probe_dac_step",
+                     "transition_dac_step", "transition_margin", "transition_dac_floor",
+                     "transition_dac_cap", "final_window_before", "final_window_after",
+                     "final_dac_step"):
+            put(name, getattr(self, name).setValue, int)
+
     def open_saved(self, path):
         if self._hardware_running:
             return
         try:
             saved = read_autocalibration_run(Path(path))
-            self.banner.setText(f"SAVED RESULT · {saved.status} · {saved.directory}")
+            self._apply_saved_operation(saved.manifest.get("operation"))
+            self.banner.setText(f"SAVED RESULT · {saved.status} · {saved.directory} · "
+                                "Controls show this saved run's settings")
             step = next((name for name in reversed(_STEP_ORDER) if name in saved.sub_runs), None)
             if step is None:
                 self._plot((), "No sub-scans recorded for this saved run")

@@ -30,6 +30,7 @@ from radioroc.gui.channel_select import ChannelSelectGrid
 from radioroc.gui.connection_panel import ConnectionPanel
 from radioroc.gui.hint_bar import HintBar
 from radioroc.transport.hold_scan_simulator import HoldSimulationConfig
+from radioroc.gui.output_paths import guard_output, refresh_auto_output
 
 
 def _integer(low, high, value):
@@ -435,8 +436,8 @@ class HoldScanWindow(QMainWindow):
         if not simulation and previous_mode != self._accepted_mode:
             self.initialize.setChecked(False)
             self.defaults.setChecked(False)
-            if "radioroc_runs" in Path(self.output.text()).parts:
-                self.output.setText(_new_directory("hardware"))
+        if previous_mode != self._accepted_mode:
+            refresh_auto_output(self.output, "simulation" if simulation else "hardware", _new_directory)
         self.run_button.setText("Run simulation" if simulation else "Run hardware hold scan")
         self.sim_group.setEnabled(simulation and self.worker is None)
         self._update_connection_controls()
@@ -455,6 +456,14 @@ class HoldScanWindow(QMainWindow):
         else:
             self.hold_min.setRange(0, 20475)
             self.hold_max.setRange(0, 20475)
+        unit = "code (0-255)" if internal else "delay (ns)"
+        form = self.controls.layout()
+        for field, text in ((self.hold_min, f"First hold {unit}"), (self.hold_max, f"Last hold {unit}"),
+                            (self.hold_step, "Hold step (codes)" if internal else "Hold step (ns)")):
+            label = form.labelForField(field)
+            if label is not None:
+                label.setText(text)
+            field.setSuffix("" if internal else " ns")
 
     def _show_mode_banner(self):
         self.banner.setText(
@@ -632,6 +641,8 @@ class HoldScanWindow(QMainWindow):
         output = self.output.text().strip()
         if not output:
             raise ValueError("choose a new run directory")
+        output = guard_output(self.output, "hardware" if self.mode.currentIndex() == 1 else "simulation",
+                              _new_directory)
         mode = "internal" if self.hold_mode.currentIndex() == 0 else "external"
         scan = HoldScanConfig(
             mode=mode, channels=channels, trigger_channel=self.trigger_channel.value(),
@@ -887,7 +898,7 @@ class HoldScanWindow(QMainWindow):
         try:
             saved = read_hold_run(Path(path))
             label = saved.execution_mode.upper()
-            self.banner.setText(f"SAVED RESULT · {label} · {saved.status} · {saved.directory}")
+            self.banner.setText(f"SAVED RESULT · {label} · {saved.status} · {saved.directory} · Controls show current settings, not this run's")
             self._plot(saved.rows, saved.x_name, f"{label} · {saved.status} · {len(saved.rows)} saved points")
             status = f"{label} · {saved.status} · {len(saved.rows)} points"
             self.status.setText(status + (" · " + "; ".join(saved.warnings) if saved.warnings else ""))

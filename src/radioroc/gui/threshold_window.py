@@ -24,6 +24,7 @@ from radioroc.gui.channel_select import ChannelSelectGrid
 from radioroc.gui.connection_panel import ConnectionPanel
 from radioroc.gui.hint_bar import HintBar
 from radioroc.transport.threshold_simulator import ThresholdSimulationConfig
+from radioroc.gui.output_paths import guard_output, refresh_auto_output
 
 
 def _integer(low, high, value):
@@ -328,8 +329,8 @@ class ThresholdWindow(QMainWindow):
         if not simulation and previous_mode != self._accepted_mode:
             self.initialize.setChecked(False)
             self.defaults.setChecked(False)
-            if "radioroc_runs" in Path(self.output.text()).parts:
-                self.output.setText(_new_directory("hardware"))
+        if previous_mode != self._accepted_mode:
+            refresh_auto_output(self.output, "simulation" if simulation else "hardware", _new_directory)
         self.run_button.setText("Run simulation" if simulation else "Run hardware threshold")
         self.sim_group.setEnabled(simulation and self.worker is None)
         self._update_connection_controls()
@@ -510,6 +511,8 @@ class ThresholdWindow(QMainWindow):
         output = self.output.text().strip()
         if not output:
             raise ValueError("choose a new run directory")
+        output = guard_output(self.output, "hardware" if self.mode.currentIndex() == 1 else "simulation",
+                              _new_directory)
         scan = ThresholdScanConfig(
             channels, dac_min=self.dac_min.value(), dac_max=self.dac_max.value(),
             dac_step=self.dac_step.value(), trigger_window_ms=self.window_ms.value(),
@@ -741,7 +744,7 @@ class ThresholdWindow(QMainWindow):
         try:
             saved = read_threshold_run(Path(path))
             label = saved.execution_mode.upper()
-            self.banner.setText(f"SAVED RESULT · {label} · {saved.status} · {saved.directory}")
+            self.banner.setText(f"SAVED RESULT · {label} · {saved.status} · {saved.directory} · Controls show current settings, not this run's")
             self._plot(saved.rows, f"{label} · {saved.status} · {len(saved.rows)} saved points")
             status = f"{label} · {saved.status} · {len(saved.rows)} points"
             self.status.setText(status + (" · " + "; ".join(saved.warnings) if saved.warnings else ""))
