@@ -92,6 +92,15 @@ diffs reviewed and checks rerun by the lead, cherry-picked here):
 - Combined after all four: exit 0, 474 tests OK, none skipped. A real on-screen
   visual check at 1024x768 is still pending (offscreen tests only).
 
+- `3ed90b2` review finding 8: append keeps a per-segment manifest list
+  (`segments`, same schema_version; top level still describes the latest
+  segment; an old single-segment run converts to `segments[0]`). Segments are
+  identified by batch range (no CSV column change); an append whose batch range
+  overlaps an earlier segment is rejected without touching files. Mixed
+  channel sets are allowed and recorded per segment. The reader exposes
+  `segments`. The GUI has no append path; CLI `--append` is unchanged.
+  Combined: exit 0, 478 tests OK.
+
 Bench, operator busy (pre-authorized board use): Acquisition rehearsal via
 `MainWindow` stopped before any write: Registers tab "Read all" raised
 `TimeoutError: i2c FIFO transaction timed out`; worker closed the session to
