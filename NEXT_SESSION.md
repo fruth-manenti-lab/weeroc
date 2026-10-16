@@ -15,8 +15,12 @@ findings here if still relevant (not merged).
   `/dev/cu.usbmodemDA20FE0E1` (pyvisa in `.conda-radioroc`). Generator: touch
   **channel 1 only** (`CHN 1`; `CHN 2` switches the front panel) and send
   `LOCAL` afterwards; tell the operator before any generator write.
-- Bench harnesses driving the real `MainWindow` were in the session scratchpad
-  (not kept in the repo); copies sit in some `radioroc_runs/` evidence folders.
+- Bench harnesses (local, uncommitted): `radioroc_runs/bench_harnesses_RADIOROC42/`
+  - `mainwindow_card.py` (connect + Threshold tab), `holdscan_card4.py` (Hold tab),
+  `acq_card.py` (Registers-tab Ctest + Acquisition tab), `defaults_traced.py`
+  (apply + verify defaults with request trace), `i2c_trace_probe.py`,
+  `gen.py ON|OFF` (generator CH1 output + LOCAL). Configured by `CARD_*` env vars;
+  run with `PYTHONPATH=src:. .venv-foundation/bin/python <script>`.
 
 ## Bench rules learned in RADIOROC 42
 - After every power cycle the ASIC is at power-on values: apply defaults (verify)
