@@ -731,6 +731,14 @@ class ConnectionWorker:
             problems.append(f"autocalibration status: {result.status}")
         if result.reference_restored is False:
             problems.append("reference channel calibration DAC restoration was not confirmed")
+        if getattr(result, "calibration_status", None) == "unverified":
+            changed = ", ".join(
+                f"ch{item['channel']} {item['before']}->{item['after']} ({item['state']})"
+                for item in result.applied_corrections)
+            problems.append(
+                "unverified calibration: trim corrections were applied but final "
+                f"verification did not pass ({changed}); re-run autocalibration "
+                "or restore trims before acquiring")
         return "; ".join(problems) or None
 
     @staticmethod

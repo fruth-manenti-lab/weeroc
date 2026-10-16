@@ -404,6 +404,41 @@ class ConnectionWorkerTests(unittest.TestCase):
         self.assertEqual(set(session.thread_ids), {worker._thread.ident})
         self.assertEqual(session.close_calls, 0)
 
+    def test_autocalibration_cancelled_after_corrections_latches_unverified_fault(self):
+        from radioroc.application.autocalibration import AutocalibrationJob
+        readings = [
+            (200, 200), (200, 0), (200, 0), (200, 200), (200, 200), (200, 0),
+            (200, 200), (200, 200), (200, 100), (200, 200), (200, 0), (200, 0),
+        ]
+        transport = ScurveTransport(point_readings=list(readings))
+        session = ThresholdSession(transport)
+        worker = self.started(session_factory=lambda config: session)
+        worker.connect(RadiorocConnectionConfig(port="fake-control"))
+        self.wait_for(worker, "connected")
+        original = AutocalibrationJob._run_sub_scan
+
+        def cancel_at_final(job, device, *, out_dir, **kwargs):
+            if Path(out_dir).name == "final":
+                worker._autocalibration_token.cancel()
+                kwargs["cancellation"].checkpoint()
+            return original(job, device, out_dir=out_dir, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(AutocalibrationJob, "_run_sub_scan", new=cancel_at_final):
+            operation = AutocalibrationJobConfig(
+                channels=[4, 5], t1=True, out_dir=Path(tmp) / "run",
+                probe_dac_min=0, probe_dac_max=20, probe_dac_step=10,
+                transition_dac_step=10, transition_margin=5,
+                transition_dac_floor=20, transition_dac_cap=20,
+                final_window_before=5, final_window_after=5, final_dac_step=5,
+            )
+            worker.run_autocalibration(operation)
+            snap = self.wait_for(worker, "faulted", timeout=10)
+            result = worker.autocalibration_snapshot().outcome.result
+        self.assertEqual(result.status, "cancelled")
+        self.assertEqual(result.calibration_status, "unverified")
+        self.assertIn("unverified calibration", snap.fault)
+
     def test_channel_config_applies_verifies_restores_and_stays_on_worker_thread(self):
         transport = OwnedThresholdTransport()
         session = ThresholdSession(transport)

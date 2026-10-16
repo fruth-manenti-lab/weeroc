@@ -117,6 +117,57 @@ class CalibrationRecordTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_calibration_record(path)
 
+    def save(self, dirs, **overrides):
+        kwargs = dict(operator="t", threshold_dac=512, threshold_margin_reasoning="x",
+                      per_channel_relative_response={"ch4": 1.0}, sub_scan_dirs=dirs)
+        kwargs.update(overrides)
+        return save_calibration_record(self.root / "rec" / "calibration_record.json", **kwargs)
+
+    def make_autocal(self, name, *, status="completed", calibration_status="verified",
+                     final_status="completed", final_verification=None):
+        directory = self.root / name
+        final = directory / "final"
+        final.mkdir(parents=True)
+        final_manifest = {"status": final_status, "board_identity": "usb:A"}
+        if final_verification is not None:
+            final_manifest["verification"] = {"status": final_verification}
+        (final / "metadata.json").write_text(json.dumps(final_manifest))
+        (directory / "autocalibration_metadata.json").write_text(json.dumps({
+            "status": status, "calibration_status": calibration_status,
+            "sub_runs": {"final": str(final)}}))
+        return directory
+
+    def test_accepts_autocalibration_run_directory(self):
+        directory = self.make_autocal("autocal", final_verification="passed")
+        self.save({"step2": directory, "step1": self.make_sub_scan("s1", board_identity="usb:A")})
+        record = load_calibration_record(self.root / "rec" / "calibration_record.json")
+        self.assertEqual(record["sub_scans"]["step2"]["kind"], "autocalibration")
+        self.assertEqual(record["board_identity"], "usb:A")
+
+    def test_rejects_unverified_or_incomplete_autocalibration(self):
+        for kwargs in ({"status": "cancelled"}, {"calibration_status": "unverified"},
+                       {"final_status": "cancelled"}, {"final_verification": "failed"}):
+            with self.assertRaises(ValueError, msg=kwargs):
+                self.save({"step2": self.make_autocal(f"a{len(kwargs)}{list(kwargs)[0]}", **kwargs)})
+
+    def test_rejects_failed_verification_status(self):
+        directory = self.make_sub_scan("failed_verif")
+        (directory / "metadata.json").write_text(json.dumps(
+            {"status": "completed", "verification": {"status": "failed"}}))
+        with self.assertRaises(ValueError) as ctx:
+            self.save({"step5": directory})
+        self.assertIn("verification", str(ctx.exception))
+
+    def test_rejects_invalid_values_and_empty_evidence(self):
+        good = {"s": self.make_sub_scan("ok")}
+        for overrides in ({"threshold_dac": -1}, {"threshold_dac": 1024}, {"threshold_dac": True},
+                          {"hold_delay_ns": -5}, {"conversion_delay_ns": "x"},
+                          {"shaper_gain_codes": {"XX": 1}}):
+            with self.assertRaises(ValueError, msg=overrides):
+                self.save(good, **overrides)
+        with self.assertRaises(ValueError):
+            self.save({})
+
 
 if __name__ == "__main__":
     unittest.main()

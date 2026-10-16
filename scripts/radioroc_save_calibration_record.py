@@ -55,6 +55,19 @@ def _parse_excluded(text: str) -> dict:
     return {"channel": channel, "reason": reason}
 
 
+def _parse_shaper_gain(text: str) -> tuple[str, int]:
+    if "=" not in text:
+        raise argparse.ArgumentTypeError(f"--shaper-gain must be HG=n or LG=n, got {text!r}")
+    key, value = text.split("=", 1)
+    key = key.upper()
+    if key not in ("HG", "LG"):
+        raise argparse.ArgumentTypeError(f"--shaper-gain key must be HG or LG, got {key!r}")
+    try:
+        return key, int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"--shaper-gain value is not an integer: {text!r}") from exc
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line parser.
 
@@ -75,7 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Why this threshold margin was chosen")
     parser.add_argument("--sub-scan", action="append", default=[], type=_parse_sub_scan,
                         metavar="label=path",
-                        help="Sub-scan output directory, repeatable, "
+                        help="Sub-scan or autocalibration run directory, repeatable, "
                              "e.g. --sub-scan step1_pedestal=/path/to/dir")
     parser.add_argument("--per-channel-response", action="append", default=[], type=_parse_per_channel,
                         metavar="ch=value",
@@ -86,6 +99,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hold-delay-ns", type=int, help="Chosen hold delay in ns")
     parser.add_argument("--conversion-delay-ns", type=int, help="Chosen conversion delay in ns")
     parser.add_argument("--trigger-preamp-gain-code", type=int, help="Trigger preamp gain code used")
+    parser.add_argument("--shaper-gain", action="append", default=[], type=_parse_shaper_gain,
+                        metavar="HG|LG=code",
+                        help="Shaper gain code, repeatable, e.g. --shaper-gain HG=10 --shaper-gain LG=20")
     return parser
 
 
@@ -116,6 +132,7 @@ def main() -> int:
             hold_delay_ns=args.hold_delay_ns,
             conversion_delay_ns=args.conversion_delay_ns,
             trigger_preamp_gain_code=args.trigger_preamp_gain_code,
+            shaper_gain_codes=dict(args.shaper_gain) or None,
         )
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
