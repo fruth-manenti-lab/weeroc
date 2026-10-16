@@ -19,6 +19,7 @@ from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.application.threshold import ThresholdJob, ThresholdJobConfig
 from radioroc.application.threshold_worker import ThresholdWorker
 from radioroc.data.threshold_reader import read_threshold_run
+from radioroc.gui.layout_util import fit_controls_pane, fit_special_text, wrap_plot_title
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
 from radioroc.gui.channel_select import ChannelSelectGrid
 from radioroc.gui.connection_panel import ConnectionPanel
@@ -143,6 +144,7 @@ class ThresholdWindow(QMainWindow):
         self.discriminator.addItems(["T1", "T2"])
         self.gain = _integer(0, 63, 0)
         self.gain.setSpecialValueText("Keep current")
+        fit_special_text(self.gain)
         form.addRow(self.channel_select)
         for label, field in [("First DAC", self.dac_min), ("Last DAC", self.dac_max),
                              ("DAC step", self.dac_step), ("Counter window (ms)", self.window_ms),
@@ -195,7 +197,7 @@ class ThresholdWindow(QMainWindow):
         self.details.setPlaceholderText("Preview, run provenance and cleanup details appear here.")
         right_layout.addWidget(self.details, 2)
         split.addWidget(right)
-        split.setSizes([410, 750])
+        fit_controls_pane(split, scroll, self.controls)
 
         buttons = QHBoxLayout()
         self.preview_button = QPushButton("Preview")
@@ -709,7 +711,7 @@ class ThresholdWindow(QMainWindow):
     def _plot(self, rows, title):
         self._last_rows, self._last_title = rows, title
         self.axes.clear()
-        self.axes.set_title(title, fontsize=11)
+        self.axes.set_title(wrap_plot_title(title), fontsize=10)
         self.axes.set_xlabel("Threshold DAC code")
         self.axes.set_ylabel("Trigger rate (Hz)")
         # Threshold rates span many orders of magnitude (a noise-dominated

@@ -430,6 +430,42 @@ class MainWindowTests(unittest.TestCase):
         window.hint.eventFilter(window.main_panel.apply_button, QEvent(QEvent.Type.Enter))
         self.assertNotEqual(window.statusBar().currentMessage(), default_message)
 
+    def test_minimum_size_fits_1024x768_display(self):
+        window = self._make_window()
+        hint = window.minimumSizeHint()
+        self.assertLessEqual(hint.width(), 1000)
+        self.assertLessEqual(hint.height(), 620)
+
+    def test_every_page_keeps_a_usable_plot_at_1024x700(self):
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        window = self._make_window()
+        window.show()
+        pages = [(1, None), (2, 0), (2, 1), (2, 2), (2, 3)]
+        for row, tab in pages:
+            window.sidebar.setCurrentRow(row)
+            if tab is not None:
+                window.calibration_tabs.setCurrentIndex(tab)
+            window.resize(1024, 700)
+            _app().processEvents()
+            canvases = [c for c in window.pages.currentWidget().findChildren(FigureCanvasQTAgg)
+                        if c.isVisible()]
+            self.assertTrue(canvases, (row, tab))
+            for canvas in canvases:
+                self.assertGreater(canvas.width(), 200, (row, tab))
+                self.assertGreater(canvas.height(), 150, (row, tab))
+
+    def test_keep_current_spinbox_is_wide_enough_for_its_text(self):
+        window = self._make_window()
+        spins = [window.scurve_window.trigger_preamp_gain,
+                 window.autocalibration_window.trigger_preamp_gain,
+                 window.threshold_window.gain,
+                 window.hold_scan_window.trigger_preamp_gain]
+        for spin in spins:
+            text = spin.specialValueText()
+            self.assertEqual(text, "Keep current")
+            self.assertGreaterEqual(
+                spin.sizeHint().width(), spin.fontMetrics().horizontalAdvance(text) + 20)
+
 
 if __name__ == "__main__":
     unittest.main()

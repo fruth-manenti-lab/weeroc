@@ -25,6 +25,7 @@ from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.application.hold_scan import HoldScanJob, HoldScanJobConfig
 from radioroc.application.hold_scan_worker import HoldScanWorker
 from radioroc.data.hold_reader import read_hold_run
+from radioroc.gui.layout_util import fit_controls_pane, fit_special_text, wrap_plot_title
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
 from radioroc.gui.channel_select import ChannelSelectGrid
 from radioroc.gui.connection_panel import ConnectionPanel
@@ -214,10 +215,13 @@ class HoldScanWindow(QMainWindow):
         gain_form = QFormLayout(self.gain_group)
         self.trigger_preamp_gain = _integer(0, 63, 0)
         self.trigger_preamp_gain.setSpecialValueText("Keep current")
+        fit_special_text(self.trigger_preamp_gain)
         self.high_gain_code = _integer(0, 15, 0)
         self.high_gain_code.setSpecialValueText("Keep current")
+        fit_special_text(self.high_gain_code)
         self.low_gain_code = _integer(0, 15, 0)
         self.low_gain_code.setSpecialValueText("Keep current")
+        fit_special_text(self.low_gain_code)
         for label, field in [("Trigger preamp gain code", self.trigger_preamp_gain),
                              ("High-gain shaper code", self.high_gain_code),
                              ("Low-gain shaper code", self.low_gain_code)]:
@@ -260,7 +264,7 @@ class HoldScanWindow(QMainWindow):
         self.details.setPlaceholderText("Preview, run provenance and cleanup details appear here.")
         right_layout.addWidget(self.details, 2)
         split.addWidget(right)
-        split.setSizes([410, 750])
+        fit_controls_pane(split, scroll, self.controls)
 
         buttons = QHBoxLayout()
         self.preview_button = QPushButton("Preview")
@@ -855,7 +859,7 @@ class HoldScanWindow(QMainWindow):
 
     def _plot(self, rows, x_name, title):
         self.axes.clear()
-        self.axes.set_title(title, fontsize=11)
+        self.axes.set_title(wrap_plot_title(title), fontsize=10)
         self.axes.set_xlabel("Internal hold code" if x_name == "hold_code" else "External hold delay (ns)")
         self.axes.set_ylabel("ADC counts")
         self.axes.grid(True, alpha=0.2)

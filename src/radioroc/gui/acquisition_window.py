@@ -49,6 +49,7 @@ from radioroc.application.acquisition_worker import AcquisitionWorker
 from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.data.acquisition_reader import read_acquisition_run
 from radioroc.data.vendor_acquisition import read_vendor_acquisition_file
+from radioroc.gui.layout_util import fit_controls_pane, fit_special_text, wrap_plot_title
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
 from radioroc.gui.channel_select import ChannelSelectGrid
 from radioroc.gui.connection_panel import ConnectionPanel
@@ -335,11 +336,11 @@ class AcquisitionWindow(QMainWindow):
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
         title = QLabel("RADIOROC  |  Acquisition workflow")
-        title.setStyleSheet("font-size: 22px; font-weight: 600; padding: 8px 0")
+        title.setStyleSheet("font-size: 18px; font-weight: 600; padding: 2px 0")
         layout.addWidget(title)
         self.banner = QLabel()
         self.banner.setWordWrap(True)
-        self.banner.setStyleSheet("background: #173e58; color: white; padding: 10px; border-radius: 5px")
+        self.banner.setStyleSheet("background: #173e58; color: white; padding: 4px 8px; border-radius: 5px")
         layout.addWidget(self.banner)
         split = QSplitter(Qt.Orientation.Horizontal)
         layout.addWidget(split, 1)
@@ -399,6 +400,7 @@ class AcquisitionWindow(QMainWindow):
         self.trigger_channel = _integer(0, 63, 4)
         self.threshold_dac = _integer(0, 1023, 0)
         self.threshold_dac.setSpecialValueText("Keep current")
+        fit_special_text(self.threshold_dac)
         self.hold_delay_ns = _integer(0, 100000, 530)
         self.hold_delay_ns.setSingleStep(5)
         self.conversion_delay_ns = _integer(0, 100000, 400)
@@ -408,10 +410,13 @@ class AcquisitionWindow(QMainWindow):
         self.timeout_s = _decimal(0.001, 3600, 5.0)
         self.trigger_preamp_gain = _integer(0, 63, 0)
         self.trigger_preamp_gain.setSpecialValueText("Keep current")
+        fit_special_text(self.trigger_preamp_gain)
         self.high_gain_code = _integer(0, 15, 0)
         self.high_gain_code.setSpecialValueText("Keep current")
+        fit_special_text(self.high_gain_code)
         self.low_gain_code = _integer(0, 15, 0)
         self.low_gain_code.setSpecialValueText("Keep current")
+        fit_special_text(self.low_gain_code)
         self.discriminator = QComboBox()
         self.discriminator.addItems(["T1", "T2"])
         # Vendor ADC DAQ tab combo items, recovered from radioroc2UI.pyc/
@@ -479,9 +484,12 @@ class AcquisitionWindow(QMainWindow):
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
 
         self.spectra_group = QGroupBox("Spectra display")
         spectra_layout = QVBoxLayout(self.spectra_group)
+        spectra_layout.setContentsMargins(6, 4, 6, 4)
+        spectra_layout.setSpacing(2)
         spectra_controls = QHBoxLayout()
         spectra_controls.addWidget(QLabel("Gain:"))
         self.spectra_gain = QComboBox()
@@ -492,12 +500,15 @@ class AcquisitionWindow(QMainWindow):
         spectra_controls.addWidget(self.spectra_bins)
         self.spectra_log_y = QCheckBox("Log Y")
         spectra_controls.addWidget(self.spectra_log_y)
-        self.spectra_clear_button = QPushButton("Clear plot")
-        spectra_controls.addWidget(self.spectra_clear_button)
-        self.import_vendor_button = QPushButton("Import vendor file…")
-        spectra_controls.addWidget(self.import_vendor_button)
         spectra_controls.addStretch(1)
         spectra_layout.addLayout(spectra_controls)
+        spectra_buttons = QHBoxLayout()
+        self.spectra_clear_button = QPushButton("Clear plot")
+        spectra_buttons.addWidget(self.spectra_clear_button)
+        self.import_vendor_button = QPushButton("Import vendor file…")
+        spectra_buttons.addWidget(self.import_vendor_button)
+        spectra_buttons.addStretch(1)
+        spectra_layout.addLayout(spectra_buttons)
         self.spectra_channels_widget = QWidget()
         self.spectra_channels_layout = QHBoxLayout(self.spectra_channels_widget)
         self.spectra_channels_layout.setContentsMargins(0, 0, 0, 0)
@@ -507,7 +518,7 @@ class AcquisitionWindow(QMainWindow):
         self.figure = Figure(figsize=(6, 4), layout="constrained")
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.axes = self.figure.add_subplot(111)
-        self.canvas.setMinimumHeight(240)
+        self.canvas.setMinimumHeight(180)
         # Vertical splitter: the plot gets priority; the text panes below are
         # user-resizable and collapsible so they cannot squeeze the axes.
         self.right_split = QSplitter(Qt.Orientation.Vertical)
@@ -523,6 +534,9 @@ class AcquisitionWindow(QMainWindow):
         self.details.setReadOnly(True)
         self.details.setPlaceholderText("Preview, run provenance and cleanup details appear here.")
         self.right_split.addWidget(self.details)
+        # Let the text panes shrink so the window can fit a 1024x768 display.
+        self.batch_summary.setMinimumHeight(28)
+        self.details.setMinimumHeight(28)
         self.right_split.setChildrenCollapsible(True)
         self.right_split.setStretchFactor(0, 6)
         self.right_split.setStretchFactor(1, 1)
@@ -530,7 +544,7 @@ class AcquisitionWindow(QMainWindow):
         self.right_split.setSizes([420, 80, 80])
         right_layout.addWidget(self.right_split, 1)
         split.addWidget(right)
-        split.setSizes([410, 750])
+        fit_controls_pane(split, scroll, self.controls)
 
         buttons = QHBoxLayout()
         self.preview_button = QPushButton("Preview")
@@ -1122,7 +1136,7 @@ class AcquisitionWindow(QMainWindow):
 
     def _render_spectra(self, rows, title):
         self.axes.clear()
-        self.axes.set_title(title, fontsize=11)
+        self.axes.set_title(wrap_plot_title(title), fontsize=10)
         gain_field = "hg" if self.spectra_gain.currentIndex() == 0 else "lg"
         gain_label = "HG" if gain_field == "hg" else "LG"
         self.axes.set_xlabel(f"{gain_label} (ADC counts)")

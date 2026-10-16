@@ -29,6 +29,7 @@ from matplotlib.figure import Figure
 
 from radioroc.application.autocalibration import AutocalibrationJob, AutocalibrationJobConfig
 from radioroc.data.autocalibration_reader import read_autocalibration_run
+from radioroc.gui.layout_util import fit_controls_pane, fit_special_text, wrap_plot_title
 from radioroc.gui.channel_select import ChannelSelectGrid
 from radioroc.gui.hint_bar import HintBar
 
@@ -116,6 +117,7 @@ class AutocalibrationWindow(QMainWindow):
         gain_form = QFormLayout(self.gain_group)
         self.trigger_preamp_gain = _integer(0, 63, 0)
         self.trigger_preamp_gain.setSpecialValueText("Keep current")
+        fit_special_text(self.trigger_preamp_gain)
         gain_form.addRow("Trigger preamp gain code", self.trigger_preamp_gain)
         form.addRow(self.gain_group)
 
@@ -181,7 +183,7 @@ class AutocalibrationWindow(QMainWindow):
         self.details.setPlaceholderText("Preview and run/result details appear here.")
         right_layout.addWidget(self.details, 2)
         split.addWidget(right)
-        split.setSizes([410, 750])
+        fit_controls_pane(split, scroll, self.controls)
 
         buttons = QHBoxLayout()
         self.preview_button = QPushButton("Preview")
@@ -477,7 +479,7 @@ class AutocalibrationWindow(QMainWindow):
 
     def _plot(self, rows, title):
         self.axes.clear()
-        self.axes.set_title(title, fontsize=11)
+        self.axes.set_title(wrap_plot_title(title), fontsize=10)
         self.axes.set_xlabel("Threshold DAC code")
         self.axes.set_ylabel("Turn-on (%)")
         self.axes.set_ylim(-5, 105)

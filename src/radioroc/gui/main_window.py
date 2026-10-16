@@ -236,7 +236,7 @@ class MainWindow(QMainWindow):
         self.status_strip = QLabel("Not connected")
         self.status_strip.setWordWrap(True)
         status_layout.addWidget(self.status_strip, 1)
-        status_row.setMinimumHeight(40)
+        status_row.setMinimumHeight(28)
         outer.addWidget(status_row)
         self.connection_panel.status_changed.connect(self._refresh_status_strip)
         self._refresh_status_strip()
