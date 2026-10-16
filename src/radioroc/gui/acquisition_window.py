@@ -106,6 +106,17 @@ def _format_batch_summary(mode, row):
     return "\n".join(lines)
 
 
+def _count_events(rows):
+    """Physical events = distinct (batch, event); the CSV has one row per channel."""
+    return len({(row["batch"], row["event"]) for row in rows
+                if "batch" in row and "event" in row})
+
+
+def _events_text(rows):
+    events = _count_events(rows)
+    return f"{events} events ({len(rows)} channel rows)"
+
+
 def _read_live_events(path):
     """Re-read a run's ``events.csv`` for display, tolerating a concurrent writer.
 
@@ -122,11 +133,15 @@ def _read_live_events(path):
         with path.open(newline="", encoding="utf-8") as stream:
             for row in csv.DictReader(stream):
                 try:
-                    rows.append({
+                    entry = {
                         "channel": int(row["channel"]),
                         "hg": float(row["hg"]),
                         "lg": float(row["lg"]),
-                    })
+                    }
+                    if row.get("batch") not in (None, "") and row.get("event") not in (None, ""):
+                        entry["batch"] = int(row["batch"])
+                        entry["event"] = int(row["event"])
+                    rows.append(entry)
                 except (KeyError, TypeError, ValueError):
                     continue
     except OSError:
@@ -341,18 +356,28 @@ class AcquisitionWindow(QMainWindow):
         self.figure = Figure(figsize=(6, 4), layout="constrained")
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.axes = self.figure.add_subplot(111)
-        right_layout.addWidget(self.canvas, 3)
+        self.canvas.setMinimumHeight(240)
+        # Vertical splitter: the plot gets priority; the text panes below are
+        # user-resizable and collapsible so they cannot squeeze the axes.
+        self.right_split = QSplitter(Qt.Orientation.Vertical)
+        self.right_split.addWidget(self.canvas)
 
         self.batch_summary = QPlainTextEdit()
         self.batch_summary.setReadOnly(True)
         self.batch_summary.setPlaceholderText(
             "The most recent batch's per-channel event count/min/max/mean "
             "appears here while a run is in progress.")
-        right_layout.addWidget(self.batch_summary, 1)
+        self.right_split.addWidget(self.batch_summary)
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
         self.details.setPlaceholderText("Preview, run provenance and cleanup details appear here.")
-        right_layout.addWidget(self.details, 1)
+        self.right_split.addWidget(self.details)
+        self.right_split.setChildrenCollapsible(True)
+        self.right_split.setStretchFactor(0, 6)
+        self.right_split.setStretchFactor(1, 1)
+        self.right_split.setStretchFactor(2, 1)
+        self.right_split.setSizes([420, 80, 80])
+        right_layout.addWidget(self.right_split, 1)
         split.addWidget(right)
         split.setSizes([410, 750])
 
@@ -912,7 +937,7 @@ class AcquisitionWindow(QMainWindow):
         rows = _read_live_events(path)
         self._spectra_rows = rows
         state = "running" if running else "finished"
-        self._spectra_title = f"{mode} · {state} · {len(rows)} events on disk"
+        self._spectra_title = f"{mode} · {state} · {_events_text(rows)} on disk"
         self._refresh_spectra()
 
     def _set_spectra_channels(self, channels):
@@ -968,7 +993,7 @@ class AcquisitionWindow(QMainWindow):
             # re-picks a position from the current data shape on every
             # redraw, which visibly jumps around during a live run and can
             # land the legend box on top of the title above it.
-            self.axes.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0),
+            self.axes.legend(fontsize=7, ncol=1, handlelength=1.0, labelspacing=0.3, loc="upper left", bbox_to_anchor=(1.02, 1.0),
                              borderaxespad=0.0)
         self.canvas.draw_idle()
 
@@ -1027,13 +1052,15 @@ class AcquisitionWindow(QMainWindow):
             manifest_batches = None
             if saved.manifest:
                 manifest_batches = saved.manifest.get("operation", {}).get("acquisition", {}).get("batches")
-            status = (f"{label} · {saved.status} · {len(saved.current_segment_rows)} events in this "
-                     f"run's segment ({len(saved.rows)} total in file) · channels {saved.channels}")
+            status = (f"{label} · {saved.status} · {_events_text(saved.current_segment_rows)} in this "
+                     f"run's segment ({_events_text(saved.rows)} total in file) · channels {saved.channels}")
             self.status.setText(status + (" · " + "; ".join(saved.warnings) if saved.warnings else ""))
             self.details.setPlainText(json.dumps({
                 "status": saved.status, "execution_mode": saved.execution_mode,
                 "channels": saved.channels, "row_count": len(saved.rows),
                 "current_segment_row_count": len(saved.current_segment_rows),
+                "event_count": _count_events(saved.rows),
+                "current_segment_event_count": _count_events(saved.current_segment_rows),
                 "warnings": saved.warnings, "manifest": saved.manifest,
             }, indent=2))
             completed = (saved.manifest.get("completed_points") if saved.manifest else None) or 0
@@ -1046,7 +1073,7 @@ class AcquisitionWindow(QMainWindow):
             self._set_spectra_channels(saved.channels)
             self._spectra_rows = saved.current_segment_rows
             self._spectra_title = (f"{label} · {saved.status} · "
-                                   f"{len(saved.current_segment_rows)} events in this run's segment")
+                                   f"{_events_text(saved.current_segment_rows)} in this run's segment")
             self._refresh_spectra()
         except Exception as exc:
             self.status.setText(f"Cannot open result: {exc}")

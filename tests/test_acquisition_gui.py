@@ -227,6 +227,37 @@ class AcquisitionGuiTests(unittest.TestCase):
         self.assertTrue(self.window._spectra_rows)
         self.assertGreater(len(self.window.axes.patches), 0)
 
+    def _run_eight_channels(self):
+        self.window.channel_select.set_channels(list(range(8)))
+        self.window.batches.setValue(3)
+        self.window.acquisitions_per_batch.setValue(5)
+        self.window.start_run()
+        self.wait_idle()
+
+    def test_event_count_is_physical_events_not_channel_rows(self):
+        from radioroc.gui.acquisition_window import _count_events, _read_live_events
+        self._run_eight_channels()
+        live = _read_live_events(self.directory / "events.csv")
+        self.assertEqual(len(live), 120)
+        self.assertEqual(_count_events(live), 15)
+        self.window._refresh_live_spectra("Simulation", False)
+        self.assertIn("15 events (120 channel rows)", self.window._spectra_title)
+        self.window.open_saved(self.directory)
+        self.assertIn("15 events (120 channel rows)", self.window._spectra_title)
+        self.assertIn("15 events (120 channel rows)", self.window.status.text())
+
+    def test_plot_keeps_size_at_1024x768_with_eight_channels(self):
+        self.window.resize(1024, 768)
+        self.window.show()
+        self._run_eight_channels()
+        self.window.open_saved(self.directory)
+        self.app.processEvents()
+        self.window.canvas.draw()
+        box = self.window.axes.get_window_extent()
+        self.assertGreater(box.width, 100)
+        self.assertGreater(box.height, 100)
+        self.assertEqual(len(self.window.axes.get_legend().get_texts()), 8)
+
     def test_import_vendor_file_renders_through_the_same_path(self):
         fixture = (Path(__file__).parent / "fixtures" /
                   "vendor_readable_adc_acq_sample.txt")
