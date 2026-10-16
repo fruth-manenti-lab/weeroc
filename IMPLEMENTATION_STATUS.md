@@ -182,7 +182,7 @@ reset at 0, never comparing with the requested `nb_acq`; the hold scan stores
 `len(high_gain[ch])` as count. Requested-vs-received mismatches are silently
 accepted (review "short batches" gap, here over-count); misframed payloads
 would also explain LG > HG. Offline fix started: record requested/received per
-batch and surface mismatches. Bench signal path (generator/LED/IO1) needs an
+batch and surface mismatches (landed as the next commit: `last_adc_batch` {requested, received, count_word, payload_bytes, warnings}; non-multiple-of-256 count words warned; payload-length mismatch raises; hold CSV gains trailing `requested`/`received` columns; acquisition manifest gains `batch_counts`; mismatches become result warnings; 487 tests OK). Bench signal path (generator/LED/IO1) needs an
 operator scope check; no further guessing.
 
 Operator decisions needed (MVP directive): trigger scheme (the hardware has a fixed
