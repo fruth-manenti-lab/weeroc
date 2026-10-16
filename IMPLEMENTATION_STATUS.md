@@ -125,6 +125,29 @@ a power cycle, run a request-level trace of one 128-row read (scratchpad
 then.
 Evidence: `radioroc_runs/acq_ctest_selftrig_ch4_20261016T061806Z/`.
 
+After operator power-cycle (SiPMs unbiased): single-row reads OK (ch4
+sub7 `00001111`). Acquisition tab rehearsal via `MainWindow`, Ctest enabled through
+the Registers tab single write (4,7) `00011111` (verified), ch4 simple
+trigger, threshold 450, hold 70, conv 400, 5x20: completed, restored; reopened
+"100 events (100 channel rows)"; 1024x768 screenshots usable; (4,7) restored
+to `00001111` (verified). `radioroc_runs/acq_ctest_selftrig_ch4_20261016T062341Z/`.
+But HG 270 +/- 6.6, inconsistent with the earlier 981 at 70 ns. Cause found:
+power cycles reset the ASIC to power-on values (not defaults), so post-cycle
+scans ran on an undefined configuration (the operator's autocalibration trims
+were also lost). A hold recheck without defaults gave a flat HG 704 at 20-200 ns.
+Defaults then applied with a request trace: one vendor-identical write, 70 requests OK,
+677/677 verified by 64-row reads. Hold recheck with defaults: HG saturated
+~1017 at 80-600 ns (as in the first Ctest attempt). The good decaying curve was
+seen only right after `OUTPUT ON` was sent to CH1, so the Ctest result depends
+on generator state that I cannot observe; generator-dependent work is paused
+pending the operator's check of CH1 pulse width/amplitude/trigger (scope).
+I2C hang: with a fresh power cycle plus defaults, 64-, 128- and 677-row traced reads
+all OK (677: 71 requests, max 17 ms). All three hangs today were the first
+large I2C operation after >= 20 min idle (00:14 overnight, 04:35 after
+20 min, 06:18 after 38 min). Testing: 25 min idle then a traced 677-row read.
+Lesson for the procedure: after every power cycle, apply defaults (and redo
+autocalibration) before any scan.
+
 Operator decisions needed (MVP directive): trigger scheme (the hardware has a fixed
 named pair; options are a fixed pair, OR trigger plus an offline two-channel cut,
 or external coincidence); plint channel-to-position map; calibration
