@@ -64,11 +64,11 @@ All five findings were fixed offline on `lab/newest-app-test`; 496 tests pass.
 
 | # | Fix | Commit |
 |---|---|---|
-| 1 | Minimum window size 858x832 → 834x603. Acquisition page 698x736 → 674x519 (smaller canvas minimum, two-row spectra controls, tighter margins). Long plot titles wrap instead of clipping. Control panes sized to their forms. Reviewed with offscreen 1024x700 screenshots of reopened real runs. | `layout` commit after `fe70dc2` |
+| 1 | Minimum window size 858x832 → 834x603. Acquisition page 698x736 → 674x519 (smaller canvas minimum, two-row spectra controls, tighter margins). Long plot titles wrap instead of clipping. Control panes sized to their forms. Reviewed with offscreen 1024x700 screenshots of reopened real runs. | `8c007e9` |
 | 2 | `gui/output_paths.py`: switching mode regenerates an app-generated run directory for the new mode. At run start, a stale auto path is regenerated and a user-chosen path in the wrong `radioroc_runs/<mode>` tree is refused with a message. | `fe70dc2` |
 | 3 | Reopening Autocalibration fills its controls from the saved manifest. Threshold/Hold/S-curve/Acquisition banners now say the controls show current settings, not the run's. | `fe70dc2` |
 | 4 | Hold labels and suffix follow the mode: codes (0-255) for internal, ns for external. | `fe70dc2` |
-| 5 | "Keep current" spinboxes widened to fit their text; no horizontal scrollbar in the calibration forms. | layout commit |
+| 5 | "Keep current" spinboxes widened to fit their text; no horizontal scrollbar in the calibration forms. | `8c007e9` |
 
 Still open: the one-line hint bars truncate at 1024 px (full text in the
 tooltip). Not verified on the real macOS display: ask the tester to recheck
