@@ -148,6 +148,17 @@ large I2C operation after >= 20 min idle (00:14 overnight, 04:35 after
 Lesson for the procedure: after every power cycle, apply defaults (and redo
 autocalibration) before any scan.
 
+LED test (operator: SiPMs biased, LED pulsed by generator CH1, brightness
+unknown): threshold scans ch 4,6,32 (DAC 0-1023 step 10, 100 ms, gain 1) with
+CH1 on, then CH1 off (LED dark), then CH1 back on; both completed, restored,
+verified. `led_on_threshold_ch4_6_32_20261016T*`, `led_off_threshold_*`.
+No LED-attributable rate above the pedestal (on/off equal within scan noise
+at DAC 200-600 on all three channels): LED too dim or its pulse rate small
+against a dark rate of ~1e5 Hz. Biased curves again show ~2-3e5 Hz below the
+pedestal (DAC 0), i.e. the bias-supply-path interference identified this
+morning is back now that the supply is cabled. The LED-off scan is the
+biased Step 1 floor for now (contaminated by that interference).
+
 Operator decisions needed (MVP directive): trigger scheme (the hardware has a fixed
 named pair; options are a fixed pair, OR trigger plus an offline two-channel cut,
 or external coincidence); plint channel-to-position map; calibration
