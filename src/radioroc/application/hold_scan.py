@@ -289,6 +289,15 @@ class HoldScanJob:
                 high_gain, low_gain = device.acquire_adc_batch(
                     nb_acq=scan.acquisitions, timeout_s=scan.timeout_s, synchro_trigger=scan.synchro_trigger)
                 token.checkpoint()
+                accounting = getattr(device, "last_adc_batch", None) or {}
+                received = accounting.get("received", len(high_gain[0]) if high_gain else 0)
+                for note in accounting.get("warnings", ()):
+                    warning = f"{x_name}={hold_value}: {note}"
+                    if warning not in result.warnings:
+                        result.warnings.append(warning)
+                if received != scan.acquisitions:
+                    result.warnings.append(
+                        f"{x_name}={hold_value}: requested {scan.acquisitions} events but received {received}")
                 row = {x_name: hold_value}
                 for channel in scan.channels:
                     hg_mean, hg_stdev = device.mean_stdev(high_gain[channel])
@@ -298,6 +307,8 @@ class HoldScanJob:
                     row[f"ch{channel}_lg_mean"] = lg_mean
                     row[f"ch{channel}_lg_stdev"] = lg_stdev
                     row[f"ch{channel}_count"] = len(high_gain[channel])
+                row["requested"] = scan.acquisitions
+                row["received"] = received
                 writer.append_point(row)
                 result.points += 1
                 persist()

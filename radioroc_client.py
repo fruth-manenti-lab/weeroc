@@ -1134,6 +1134,9 @@ class RadiorocDevice:
         self.transport: RadiorocSerial = transport
         self.dry_run: bool = dry_run
         self.i2c_rows: list[I2CRow] = []
+        # Accounting for the most recent acquire_adc_batch: requested/received events,
+        # raw count word, payload bytes and protocol warnings.
+        self.last_adc_batch: dict | None = None
         self.chip_id: int = RADIOROC_CHIP_ID
         self.address_bits: int = ASIC_ADDRESS_BITS
         self.subaddress_bits: int = ASIC_SUBADDRESS_BITS
@@ -2571,6 +2574,8 @@ class RadiorocDevice:
         if not 1 <= nb_acq <= 255:
             raise ValueError("nb_acq must be in range 1..255")
         if self.dry_run:
+            self.last_adc_batch = {"requested": nb_acq, "received": nb_acq, "count_word": None,
+                                   "payload_bytes": 0, "warnings": []}
             return [[math.nan] * nb_acq for _ in range(N_CHANNELS)], [[math.nan] * nb_acq for _ in range(N_CHANNELS)]
 
         saved_w2: str = self.read_word(2)
@@ -2591,11 +2596,26 @@ class RadiorocDevice:
             raise TimeoutError("ADC acquisition timed out waiting for FPGA word 4 bit 5")
 
         count_words: str = self.read_word(29) + self.read_word(28)
-        total_nb_acq: int = int(int(count_words, 2) / 256)
+        count_word_value: int = int(count_words, 2)
+        total_nb_acq: int = count_word_value // 256
+        batch_warnings: list[str] = []
+        if count_word_value % 256:
+            batch_warnings.append(
+                f"ADC count word {count_word_value} is not a multiple of 256; "
+                f"decoding {total_nb_acq} events (remainder {count_word_value % 256})")
+        self.last_adc_batch = {"requested": nb_acq, "received": max(total_nb_acq, 0),
+                               "count_word": count_word_value, "payload_bytes": 0,
+                               "warnings": batch_warnings}
         if total_nb_acq <= 0:
             return [[] for _ in range(N_CHANNELS)], [[] for _ in range(N_CHANNELS)]
 
-        payload: bytes = self.transport.read_words(20, total_nb_acq * N_CHANNELS * 4)
+        expected_bytes: int = total_nb_acq * N_CHANNELS * 4
+        payload: bytes = self.transport.read_words(20, expected_bytes)
+        self.last_adc_batch["payload_bytes"] = len(payload)
+        if len(payload) != expected_bytes:
+            raise TransportProtocolError(
+                f"ADC payload length {len(payload)} does not match expected {expected_bytes} bytes "
+                f"for {total_nb_acq} events (requested {nb_acq})")
         low_gain: list[list[float]] = [[] for _ in range(N_CHANNELS)]
         high_gain: list[list[float]] = [[] for _ in range(N_CHANNELS)]
         channel: int = 0

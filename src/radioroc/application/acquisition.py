@@ -188,6 +188,9 @@ class AcquisitionJob:
         # without_truncating), an appended segment's manifest reflects only
         # that segment's own batches, same as everything else in it.
         manifest.setdefault("batch_received_at", [])
+        # Per-batch requested/received event accounting (FPGA may return a
+        # different count than requested; see MVP_SANITY_REVIEW).
+        manifest.setdefault("batch_counts", [])
         writer = AcquisitionRunWriter(Path(acquisition.out_dir), manifest, append=append)
         result.metadata_path = writer.metadata_path
         fpga = {}
@@ -298,6 +301,19 @@ class AcquisitionJob:
                     synchro_trigger=acquisition.synchro_trigger)
                 manifest["batch_received_at"].append({"batch": batch, "received_at": _now()})
                 token.checkpoint()
+                accounting = getattr(device, "last_adc_batch", None) or {}
+                requested = acquisition.acquisitions_per_batch
+                received = accounting.get("received", len(high_gain[0]) if high_gain else 0)
+                manifest["batch_counts"].append({
+                    "batch": batch, "requested": requested, "received": received,
+                    "count_word": accounting.get("count_word"), "payload_bytes": accounting.get("payload_bytes"),
+                    "mismatch": received != requested})
+                for note in accounting.get("warnings", ()):
+                    warning = f"batch {batch}: {note}"
+                    if warning not in result.warnings:
+                        result.warnings.append(warning)
+                if received != requested:
+                    result.warnings.append(f"batch {batch}: requested {requested} events but received {received}")
                 event_rows = []
                 for channel in acquisition.channels:
                     for event, (hg, lg) in enumerate(zip(high_gain[channel], low_gain[channel])):
