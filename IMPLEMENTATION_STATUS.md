@@ -185,6 +185,18 @@ would also explain LG > HG. Offline fix started: record requested/received per
 batch and surface mismatches (landed as the next commit: `last_adc_batch` {requested, received, count_word, payload_bytes, warnings}; non-multiple-of-256 count words warned; payload-length mismatch raises; hold CSV gains trailing `requested`/`received` columns; acquisition manifest gains `batch_counts`; mismatches become result warnings; 487 tests OK). Bench signal path (generator/LED/IO1) needs an
 operator scope check; no further guessing.
 
+LED re-seated flush to the scintillator by the operator: LED-on threshold scan
+ch 4,6,32 collected 103 points but ended `failed`/faulted: restoration
+verification status failed with no mismatches or missing entries (cleanup
+`restored`), then the board stopped answering USB (status reads time out). The
+LED-off scan could not connect. CH1 restored ON + LOCAL. LED-on data are
+untrusted (all channels cut off sharply near DAC 520, unlike every other
+scan). Hang occurred about 8 min after the previous board activity, right after
+the operator handled the setup near the board. Needs power cycle, then
+defaults, before any further scan. `led_flush_on_threshold_ch4_6_32_20261016T070312Z`.
+Gap to check offline: why verification reports failed with empty mismatch and
+missing lists (likely an exception during readback; should say so).
+
 Operator decisions needed (MVP directive): trigger scheme (the hardware has a fixed
 named pair; options are a fixed pair, OR trigger plus an offline two-channel cut,
 or external coincidence); plint channel-to-position map; calibration
