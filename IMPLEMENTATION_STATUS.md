@@ -76,6 +76,21 @@ diffs reviewed and checks rerun by the lead, cherry-picked here):
   the reference-restoration cache check with real readback.
 - Combined check: `PYTHONPATH=src .venv-foundation/bin/python
   tools/check_development.py` exit 0, 471 tests OK, none skipped.
+- `f953301` connect-during-discovery: `MainWindow` refreshes ports at
+  start-up; `ConnectionWorker.connect()` during "discovering" raised
+  `JobBusyError`, whose message `ConnectionPanel` then overwrote with the next
+  snapshot, so Connect looked silently dropped. A connect issued during
+  discovery is now queued and runs when discovery ends (discarded on shutdown
+  or existing session). The worker test fails without the fix.
+  Residual, not fixed: panel errors can still be overwritten by the next poll.
+- `873287c` review finding 6: Acquisition live display reads `events.csv`
+  incrementally (byte offset, torn-line and replace/truncate handling,
+  20k lines per tick) into fixed 4096-bin HG/LG histograms per channel; the
+  bins control re-bins at draw time. Display floors the x0.25-scaled values to
+  whole bins (display only; saved data untouched). Synthetic 800k-row tick
+  takes ~0.012 s (was 6.1 s); display memory is channels x 2 x 4096.
+- Combined after all four: exit 0, 474 tests OK, none skipped. A real on-screen
+  visual check at 1024x768 is still pending (offscreen tests only).
 
 Operator decisions needed (MVP directive): trigger scheme (the hardware has a fixed
 named pair; options are a fixed pair, OR trigger plus an offline two-channel cut,
