@@ -217,6 +217,14 @@ Accounting fix: the count-word low byte is constant 254 with exact counts and th
 vendor divides by 256 too, so the "not a multiple of 256" warning was a false
 alarm; removed (raw word still recorded), test updated.
 
+Offline app test (ChatGPT, no hardware, `docs/app_test_report_2026-10-16.md`):
+5 findings, all fixed offline and merged (`fe70dc2` behaviour: sim/hardware output
+paths, autocal reopen, hold labels; layout commit: minimum window size 834x603,
+wrapped titles, "Keep current" width). 496 tests OK. Real-display 1024x768
+recheck pending. Correction: the earlier claim that the Acquisition plot kept
+its size at 1024x768 rested on offscreen tests and was wrong on the real display
+(the window minimum was ~926 px tall).
+
 Operator decisions needed (MVP directive): trigger scheme (the hardware has a fixed
 named pair; options are a fixed pair, OR trigger plus an offline two-channel cut,
 or external coincidence); plint channel-to-position map; calibration
