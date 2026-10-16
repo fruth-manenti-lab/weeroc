@@ -258,6 +258,24 @@ class ConnectionWorkerTests(unittest.TestCase):
         self.assertEqual(worker.snapshot().state, "stopped")
         self.assertIn("close", session.calls)
 
+    def test_connect_issued_during_discovery_is_queued_not_dropped(self):
+        discovering, release = threading.Event(), threading.Event()
+        def slow_discovery():
+            discovering.set()
+            release.wait(3)
+            return [PORT]
+        session = FakeSession()
+        worker = self.started(discovery=slow_discovery,
+                              session_factory=lambda config: session)
+        worker.refresh()
+        self.assertTrue(discovering.wait(3))
+        self.assertEqual(worker.snapshot().state, "discovering")
+        worker.connect(RadiorocConnectionConfig(port="fake-control"))
+        release.set()
+        snap = self.wait_for(worker, "connected")
+        self.assertEqual(snap.ports, (PORT,))
+        self.assertIn("enter", session.calls)
+
     def test_overlapping_commands_are_rejected_after_busy_state_is_published(self):
         entered, release = threading.Event(), threading.Event()
         worker = self.started(session_factory=lambda config: FakeSession(entered=entered, release=release))
