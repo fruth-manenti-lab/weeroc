@@ -111,8 +111,18 @@ a 128-row (two-chunk) transaction then left the board unresponsive on USB
 (status read times out; needs power cycle). Consistent with every hang seen
 (full-table defaults write, full read-all): multi-chunk FIFO transactions in
 `i2c_fifo_transaction` are unreliable; single-chunk ones are not observed to
-fail. Vendor I2C sequence being extracted from
-`local_artifacts/generated_notes/radioroc_i2c_pydisasm.txt` before any fix.
+fail. Vendor bytecode (`local_artifacts/generated_notes/radioroc_i2c_pydisasm.txt`,
+i2c.py:143-309) shows our `i2c_fifo_transaction` matches the vendor sequence
+exactly (256-byte chunks, word 60 0/2/4, poll word 4 bit [7] x1000 with no
+sleep, word 0 bit 1, one drain of word 55 at the end), and the vendor also
+reads and writes the whole table in one multi-chunk call. So "multi-chunk is
+unsupported" is NOT established. The only certain difference is that on poll
+timeout the vendor prints and continues (still writing 60=`00000100`), while we
+raise and skip it. The vendor also checks a D2XX event status before each USB
+request; we reset the input buffer before reads. Root cause open. Next: after
+a power cycle, run a request-level trace of one 128-row read (scratchpad
+`i2c_trace_probe.py`) to find the exact request that stalls. No fix until
+then.
 Evidence: `radioroc_runs/acq_ctest_selftrig_ch4_20261016T061806Z/`.
 
 Operator decisions needed (MVP directive): trigger scheme (the hardware has a fixed
