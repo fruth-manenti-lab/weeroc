@@ -171,6 +171,20 @@ against the acquisition short/over-batch accounting gap in the review. Stopped
 generator/LED experiments: the generator's actual mode, rate, width and amplitude
 are unobservable from here; they need an operator scope check.
 
+Biased (operator confirmed; voltage not stated): LED on/off threshold pair
+ch 4,6,32: rates above the pedestal 2-5x the unbiased values (bias effective; e.g. ch4
+DAC 400 1.4e5 vs 3e4 Hz) but LED on/off still equal. Synced hold scan (sync
+on, Ctest off): identical to unbiased (HG ~220 +/- 115, LG > HG, 40-41 events
+per 20 requested), so it is not SiPM signal. App gap confirmed in code:
+`RadiorocDevice.acquire_adc_batch` (radioroc_client.py ~2593) takes the FPGA
+count (words 29/28 / 256) and decodes that many events with a channel counter
+reset at 0, never comparing with the requested `nb_acq`; the hold scan stores
+`len(high_gain[ch])` as count. Requested-vs-received mismatches are silently
+accepted (review "short batches" gap, here over-count); misframed payloads
+would also explain LG > HG. Offline fix started: record requested/received per
+batch and surface mismatches. Bench signal path (generator/LED/IO1) needs an
+operator scope check; no further guessing.
+
 Operator decisions needed (MVP directive): trigger scheme (the hardware has a fixed
 named pair; options are a fixed pair, OR trigger plus an offline two-channel cut,
 or external coincidence); plint channel-to-position map; calibration
