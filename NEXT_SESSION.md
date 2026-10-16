@@ -10,8 +10,9 @@ findings here if still relevant (not merged).
 
 Durable procedures and lessons: `docs/bench_runbook.md`. An offline app
 test by another assistant (ChatGPT, no equipment) was started on 2026-10-16 using
-`docs/offline_app_test_guide.md`; look for `docs/app_test_report_*.md` and
-triage its findings before new work. It was told not to change code or git state.
+`docs/offline_app_test_guide.md`. Its report is in
+`docs/app_test_report_2026-10-16.md` (2 student-blocking: 1024x768 layout, stale hardware
+output path in Simulation); triage it before new work, once the operator asks. It was told not to change code or git state.
 
 ## Environment (this Mac)
 - Use `.venv-foundation` (PySide6) with `PYTHONPATH=src`. `.conda-radioroc` has
