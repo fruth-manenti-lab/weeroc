@@ -3,8 +3,10 @@
 ## RADIOROC 42 — Newest app on the bench: Step 1 passed, Step 5 blocked on generator setup
 
 Branch `lab/newest-app-test` from `origin/main` `c1b1993` (same tree as
-`feat/daq-results-gui` `a24172d`). `tools/check_development.py` passed under
-`.conda-radioroc` (exit 0). Hardware driven through the real `MainWindow`
+`feat/daq-results-gui` `a24172d`). Correction: the first `tools/check_development.py`
+run used `.conda-radioroc`, which has no PySide6 on this Mac, so it exited 0 with
+148 GUI tests skipped. Use `.venv-foundation` (PySide6 6.11.2) with
+`PYTHONPATH=src` here. Hardware driven through the real `MainWindow`
 (offscreen harness, shared `ConnectionPanel`, `/dev/cu.usbserial-RD3_320`,
 115200, 0.5 s); the operator closed their own desktop instance first. Bench
 per operator: SiPMs connected but unbiased; generator set up for Ctest.
@@ -53,6 +55,32 @@ per operator: SiPMs connected but unbiased; generator set up for Ctest.
   Caveats: HG peak is ~96% of the ~1016 saturation level, so this pulse is
   too large for amplitude (Step 4) work; hold timing should be confirmed with
   real biased-SiPM pulses and the experiment's coincidence trigger setting.
+
+Offline MVP-review fixes (delegated to two workers in separate worktrees,
+diffs reviewed and checks rerun by the lead, cherry-picked here):
+- `a24a18c` review finding 7: Acquisition counts physical events as
+  distinct (batch, event) groups ("15 events (120 channel rows)"), live and on
+  reopen; plot and text panes are in a vertical splitter with a compact legend,
+  so the axes keep their size at 1024x768 with 8 channels. Vendor-file import
+  still reports rows.
+- `440865c` review findings 4/5 and record validation: autocalibration logs each
+  trim write (`attempted` then `applied`) and persists computed results and
+  `applied_corrections` in `autocalibration_metadata.json`.
+  `calibration_status` is not_applied/unverified/verified, where verified means
+  the final scan completed (no alignment-tolerance check yet; tolerance is
+  operator-defined). An unverified ending latches a ConnectionWorker fault.
+  No restoration writes added. The calibration record accepts autocalibration
+  run directories, rejects failed verification, out-of-range values and empty
+  evidence; the CLI gains `--shaper-gain HG=n/LG=n`. Upper bounds of 255 and
+  1,000,000 for gain codes and delays are loose guesses. Not done: replacing
+  the reference-restoration cache check with real readback.
+- Combined check: `PYTHONPATH=src .venv-foundation/bin/python
+  tools/check_development.py` exit 0, 471 tests OK, none skipped.
+
+Operator decisions needed (MVP directive): trigger scheme (the hardware has a fixed
+named pair; options are a fixed pair, OR trigger plus an offline two-channel cut,
+or external coincidence); plint channel-to-position map; calibration
+acceptance tolerances; student machine/OS; confirm the 70 ns hold.
 
 Next: operator confirms 70 ns; then write the Step 6 record with
 `scripts/radioroc_save_calibration_record.py` (Step 1 rerun with bias on
