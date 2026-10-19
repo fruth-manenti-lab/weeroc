@@ -29,6 +29,31 @@ generator CH1 ON (left ON + LOCAL at end), board powered.
 - Harness note: `acq_led.py` reports CHECK even on success because it parses the
   details pane after `open_saved` replaced the JSON; read the first summary.
 
+Scope session (same day): the operator connected the ASIC Analog_Probe to a
+LeCroy WP254HD (USBTMC `USB0::1535::4131::4609N03241`; the scope stalls pyvisa-py's
+REN_CONTROL, so `dso.py` in the bench harness dir skips it; C1 = probe, C2 =
+generator CH1 split, 1 MOhm). Generator per operator: 5 V, 1 kHz, 100 ns pulse
+(its SCPI queries did not answer; not re-read). LED unwrapped for more light.
+- Probe register (vendor `send_aprb`, bytecode): per-channel row `(ch, 66)`, low
+  nibble = shaper HG, shaper LG, preamp HG, preamp LG (bit3..0); common enables
+  `(66,70)` default `00011111`. `aprobe.py 6 1000` routes ch6 HG shaper; reset with
+  `aprobe.py 6 0000`. Probe node order not independently confirmed on the scope.
+- The ASIC had returned to power-on values before this (every channel differed);
+  defaults re-applied (677/677). ch6 HG code set to 15 live (`hgcode.py`).
+  Probe and HG 15 on ch6 are still set at handoff (outside the defaults table).
+- 60 single shots on C2 trigger (TDIV 100 ns, TRDL -300 ns): an LED-induced
+  shaper pulse is present in nearly every shot, peak ~180 ns after the generator
+  edge, 30-260 mV above baseline (median ~100 mV), baseline noise ~5 mV rms.
+  So the earlier ADC runs mostly triggered on noise, not on the LED.
+- Biased ch6 threshold scan, 1 kHz LED on vs off (200 ms windows, DAC 300-700,
+  `led1k_on/off_thr_ch6_*`): trigger noise ~1.3e4 Hz at DAC 480, ~3e3 at 500,
+  ~3e2 at 520; LED adds roughly 0.2-0.65 kHz at 500-520 (about 18-65% of triggers
+  at 510-520). Trigger path is far noisier than the shaper path.
+- Hold scan ch6, threshold 520, 100 acq/point, 0-400 ns
+  (`led1k_hold_ch6_thr520_*`): HG mean rises from ~112 to ~130 with sd up to ~77
+  at 320-400 ns; no sharp peak, mixed with noise triggers. Needs finer/longer
+  hold range and an offline amplitude cut.
+
 Next: redo autocalibration with bias on, then choose the threshold from a biased
 LED-on/off threshold scan so the trigger selects LED pulses, repeat the
 acquisition, and scope-check the generator/LED pulse.
