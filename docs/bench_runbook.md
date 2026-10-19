@@ -175,3 +175,15 @@ saved data). Never delete those folders.
   silently skipping ~148 GUI tests. Use it only for pyvisa/generator scripts
   and legacy tools.
 - Launch the app: `.venv-foundation/bin/radioroc-desktop`.
+
+## 8. External-trigger acquisition rate (19 October)
+
+With `external_trigger` on (generator CH2 into `IO6`), the board delivered only about **20 events per second**,
+whatever the generator rate (200 Hz during these runs; 100 events took ~5 s and 200 events ~11 s). Cause not known
+(probably a fixed per-event handshake in the ADC sequence). Consequences: use batches of at most 100 events or
+set `timeout_s` to 60 s or more, otherwise a 200-event batch sits right at a 10 s timeout and fails
+intermittently with `ADC acquisition timed out waiting for FPGA word 4 bit 5`; budget about 100 s per 2000 events.
+Self-triggered (discriminator) acquisition is much faster (100,000 events in a few minutes).
+The LED saturates: with a 40 ns pulse, `HILVL` 4 V and 5 V gave identical light (median 119.0 vs 119.2),
+so apparent trends over a descending sweep were baseline drift (pedestal 103 to 106); use shorter pulses or lower
+levels and alternate the order as a control.
