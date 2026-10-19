@@ -54,7 +54,29 @@ generator CH1 split, 1 MOhm). Generator per operator: 5 V, 1 kHz, 100 ns pulse
   at 320-400 ns; no sharp peak, mixed with noise triggers. Needs finer/longer
   hold range and an offline amplitude cut.
 
-Next: redo autocalibration with bias on, then choose the threshold from a biased
+Synced LED scan (generator corrected from internal to external-triggered burst by
+the operator; board IO1 -> generator trigger in; verified on the scope: no
+pulses while the board is idle):
+- The generator had been on internal trigger all along; that explains the
+  earlier "~90 events per 50 requested", the flat HG ~220 sd ~125 and LG > HG
+  in the synced scans (free-running LED pulses, not a framing bug).
+- First synced scan after the generator change hung the board 13 s in
+  (`led_sync2_*`: TransportTimeoutError, restore failed, "1 mismatches"; the
+  new fault text listed every timeout). Power cycle, defaults (677/677), HG 15
+  and probe re-applied, then it ran cleanly twice. Root cause of the hang still
+  unknown (sixth hang; no new pattern beyond handling/cabling changes).
+- Ch6, threshold 520, sync on (IO1 mux 5), HG code 15, 50 acq/point
+  (`led_sync3_*`, `led_sync4_*`): the HG shaper pulse is traced out by the hold
+  delay: pedestal ~99 up to 475 ns, rise from ~500 ns, **peak ~200 at ~600 ns
+  (+100 counts)**, undershoot to ~47 at 800-850 ns, back to pedestal ~1050 ns.
+  sd 35-60 at the peak (amplitude spread, candidate p.e. structure). LG flat at
+  ~89 (default gain). Events 50-53 per 50 requested. Matches the scope (~100 mV
+  median). So for this plint/LED setup the sync-referenced hold delay is ~600 ns.
+- App gap: the Acquisition page/`AcquisitionConfig` has `synchro_trigger` but no
+  IO-mux (sync_io/sync_io_mux_index) and no GUI control, so a synced acquisition
+  cannot be run from the app yet; only the hold scan has them.
+
+Next (superseded by the synced scan above): redo autocalibration with bias on, then choose the threshold from a biased
 LED-on/off threshold scan so the trigger selects LED pulses, repeat the
 acquisition, and scope-check the generator/LED pulse.
 
