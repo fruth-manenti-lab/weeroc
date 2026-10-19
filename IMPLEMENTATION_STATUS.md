@@ -122,6 +122,20 @@ Solo hour (operator at lunch): LED drive sweep and desktop launcher.
   `configs/radioroc_icon.png` (package data). Launch checked; it connects to
   hardware only on Connect. Re-run the script if the checkout moves. 503 tests OK.
 
+After the power cycle (operator back): defaults applied (677/677), generator OFF for
+Step 1. **Biased Step 1** (`step1_biased_dark_ch4_6_32_*`, SiPMs 29 V, LED off, DAC 0-1023
+step 10, 100 ms, gain 1): clean floor (<= 20 Hz from there on) at DAC **450 (ch4), 500
+(ch6), 500 (ch32)**; at DAC 0-300 the rates are 1e5-9e7 Hz (electronic noise peak).
+**Important:** the ~1.3e4 Hz noise at DAC 480 seen in the earlier LED on/off scans was
+with the analog probe enabled on ch6 (and the scope cabled); with the probe off the
+ASIC trigger is clean down to ~DAC 450-500. The guide warns the probe degrades the
+analog performance; treat probe use as a diagnostic, not an operating mode, and reset
+it (`aprobe.py 6 0000`) before any measurement that matters.
+Synced acquisition without the probe, threshold 480 (`led_sync_acq_noprobe_thr480_*`):
+1128 events (2.8% extra), HG medians 212 / 184 / 153, p10 108-117 (near pedestal), so
+the lower threshold admits smaller pulses. Drive sweep repeated at threshold 470
+(`bench_RADIOROC43/sweep3`).
+
 Next (superseded by the synced scan above): redo autocalibration with bias on, then choose the threshold from a biased
 LED-on/off threshold scan so the trigger selects LED pulses, repeat the
 acquisition, and scope-check the generator/LED pulse.
