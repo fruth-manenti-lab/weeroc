@@ -105,9 +105,10 @@ or `i2c FIFO transaction timed out`. Only a power cycle (USB + 5 V) recovers it.
   1.5×10⁵ Hz on against 230 Hz off.
 - **LED pulses are small in the ADC** at default shaper gains (~5–15 counts
   above the pedestal), too small to resolve photoelectron peaks.
-- **Possible HG/LG swap:** setting `high_gain_code=15` changed the *low-gain*
-  reading, not the high-gain one. Check the register mapping against the vendor
-  bytecode before using shaper gains for the gain calibration (Step 4).
+- **HG/LG swap (fixed 2026-10-19):** `high_gain_code=15` changed the *low-gain*
+  reading because `set_energy_shaper_gain` had the nibbles reversed. The vendor
+  map is HG gain bits `[3:0]`, LG gain bits `[7:4]`; code and a regression test
+  now follow it. Not yet re-confirmed on the bench (HG response with code 15).
 
 ## 7. Calibration procedure status (plint MVP)
 

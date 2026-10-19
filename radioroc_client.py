@@ -1556,8 +1556,11 @@ class RadiorocDevice:
         **Mapping note**
         - The user guide defines 4-bit high-gain and low-gain shaper codes.
           The default table stores `10001000` at per-channel subaddress 2,
-          consistent with two default code-8 nibbles. We use the upper nibble
-          for high gain and the lower nibble for low gain.
+          consistent with two default code-8 nibbles. The vendor GUI's
+          compiled widget properties put HG gain in bits `[3:0]` (lower
+          nibble) and LG gain in bits `[7:4]` (upper nibble). An earlier
+          version had these swapped; bench evidence (2026-10-16:
+          `high_gain_code=15` moved LG, not HG) agreed with the vendor map.
         """
 
         validate_channels(channels)
@@ -1574,11 +1577,11 @@ class RadiorocDevice:
             if row is None:
                 continue
             current: int = parse_bits(row.data)
-            current_hg: int = (current >> 4) & 0xF
-            current_lg: int = current & 0xF
+            current_hg: int = current & 0xF
+            current_lg: int = (current >> 4) & 0xF
             new_hg: int = high_gain_code if high_gain_code is not None else current_hg
             new_lg: int = low_gain_code if low_gain_code is not None else current_lg
-            new_data = bits((new_hg << 4) | new_lg, 8)
+            new_data = bits((new_lg << 4) | new_hg, 8)
             row.data = new_data
             rows.append(I2CRow(channel, ASIC_SHAPER_GAIN_SUBADDRESS, new_data))
         if not rows:

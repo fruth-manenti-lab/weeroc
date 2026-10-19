@@ -685,6 +685,21 @@ class ConnectionWorkerTests(unittest.TestCase):
             with self.subTest(expected=expected):
                 self.assertIn(expected, ConnectionWorker._threshold_fault(result, None))
 
+    def test_failed_verification_fault_names_the_underlying_error(self):
+        # A failed report with no mismatches/missing entries (e.g. the board
+        # stopped answering during readback) must still say why.
+        result = ThresholdScanResult(
+            Path("run.csv"), status="completed", cleanup_status="restored",
+            verification={
+                "status": "failed", "mismatches": [], "missing": [],
+                "errors": ["read ASIC restoration state: TransportIOError: timeout"],
+                "cleanup": {"errors": ["idle I2C control: TransportIOError: timeout"]},
+            })
+        fault = ConnectionWorker._threshold_fault(result, None)
+        self.assertIn("restoration verification failed", fault)
+        self.assertIn("read ASIC restoration state: TransportIOError: timeout", fault)
+        self.assertIn("cleanup: idle I2C control", fault)
+
 
 if __name__ == "__main__":
     unittest.main()

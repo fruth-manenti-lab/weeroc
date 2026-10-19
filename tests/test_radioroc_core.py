@@ -155,6 +155,24 @@ class RadiorocCoreTests(unittest.TestCase):
         self.assertEqual(after[2:], bits(63, 6))
         self.assertEqual(after[:2], before[:2])
 
+    def test_energy_shaper_gain_nibbles_match_vendor_map(self) -> None:
+        # Vendor GUI (RADIOROC 30 recovery): subadd 2 holds HG gain in bits
+        # [3:0] and LG gain in bits [7:4]. The code originally had them
+        # swapped; bench evidence on 2026-10-16 agreed (high_gain_code=15
+        # moved LG, not HG).
+        device = RadiorocDevice(RadiorocMemoryTransport(), dry_run=True)  # type: ignore[arg-type]
+        device.load_default_config()
+
+        device.set_energy_shaper_gain(channels=[4], high_gain_code=15)
+        data = device.find_i2c_row(4, 2).data
+        self.assertEqual(parse_bits(data) & 0xF, 15)
+        self.assertEqual((parse_bits(data) >> 4) & 0xF, 8)
+
+        device.set_energy_shaper_gain(channels=[4], low_gain_code=3)
+        data = device.find_i2c_row(4, 2).data
+        self.assertEqual(parse_bits(data) & 0xF, 15)
+        self.assertEqual((parse_bits(data) >> 4) & 0xF, 3)
+
     def test_main_tab_per_channel_front_end_bit_positions(self) -> None:
         # Bit positions recovered from radioroc2UI.pyc's retranslateUi
         # tooltips (add: [0:63] - subadd: N - bit: [a:b]); see

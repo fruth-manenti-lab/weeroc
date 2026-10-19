@@ -62,6 +62,24 @@ class ConnectionSnapshot:
     fault: str | None = None
 
 
+def _verification_problem(verification: dict) -> str:
+    """Describe a non-passing restoration report, including why it failed."""
+
+    parts = [f"restoration verification {verification.get('status', 'absent')}"]
+    for key in ("mismatches", "missing"):
+        items = verification.get(key) or []
+        if items:
+            parts.append(f"{len(items)} {key}")
+    errors = list(verification.get("errors") or [])
+    errors += [f"cleanup: {item}" for item in
+               (verification.get("cleanup") or {}).get("errors") or []]
+    if errors:
+        shown = "; ".join(str(item) for item in errors[:3])
+        more = f" (+{len(errors) - 3} more)" if len(errors) > 3 else ""
+        parts.append(f"errors: {shown}{more}")
+    return " - ".join(parts)
+
+
 class ConnectionWorker:
     """A persistent command worker for discovery and one selected session."""
 
@@ -682,9 +700,7 @@ class ConnectionWorker:
         if not verification:
             problems.append("restoration verification is absent")
         elif verification.get("status") != "passed":
-            problems.append(
-                f"restoration verification {verification.get('status', 'absent')}"
-            )
+            problems.append(_verification_problem(verification))
         return "; ".join(problems) or None
 
     @staticmethod
@@ -710,9 +726,7 @@ class ConnectionWorker:
         if not verification:
             problems.append("restoration verification is absent")
         elif verification.get("status") != "passed":
-            problems.append(
-                f"restoration verification {verification.get('status', 'absent')}"
-            )
+            problems.append(_verification_problem(verification))
         return "; ".join(problems) or None
 
     @staticmethod
@@ -738,9 +752,7 @@ class ConnectionWorker:
         if not verification:
             problems.append("restoration verification is absent")
         elif verification.get("status") != "passed":
-            problems.append(
-                f"restoration verification {verification.get('status', 'absent')}"
-            )
+            problems.append(_verification_problem(verification))
         return "; ".join(problems) or None
 
     @staticmethod
@@ -793,9 +805,7 @@ class ConnectionWorker:
         if not verification:
             problems.append("restoration verification is absent")
         elif verification.get("status") != "passed":
-            problems.append(
-                f"restoration verification {verification.get('status', 'absent')}"
-            )
+            problems.append(_verification_problem(verification))
         return "; ".join(problems) or None
 
     def _run_hold_scan(self, operation):

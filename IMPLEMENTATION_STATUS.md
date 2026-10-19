@@ -1,5 +1,38 @@
 # Implementation status
 
+## RADIOROC 43 — HG/LG shaper-gain swap fixed and bench-confirmed; restoration faults now explain themselves; first LED acquisition
+
+Setup: SiPMs on ch 4, 6, 32 flat on the plint, LED through a hole, bias 29 V,
+generator CH1 ON (left ON + LOCAL at end), board powered.
+
+- **HG/LG swap fixed.** `RadiorocDevice.set_energy_shaper_gain` had the nibbles
+  reversed. Vendor map (RADIOROC 30 recovery): subadd 2 HG gain = bits `[3:0]`,
+  LG gain = bits `[7:4]`. Code, docstring and `docs/bench_runbook.md` corrected;
+  regression test `test_energy_shaper_gain_nibbles_match_vendor_map`. Bench
+  confirmation: defaults applied (677/677 verified), ch6 self-triggered hold scan
+  (threshold 480, Ctest/sync off, 20 acq, 0-600 ns) with `high_gain_code=15`:
+  HG now responds (mean ~100-123, sd up to ~49) and LG is flat at ~96 (sd <1);
+  before the fix it was the reverse. `led_selftrig_hold_ch6_hg15_fixed_20261019T000250Z`.
+- **Restoration faults explain themselves.** The verifier already stored the
+  exceptions in `report["errors"]`, but `ConnectionWorker`'s four fault
+  summaries printed only the status word. New `_verification_problem` adds the
+  mismatch/missing counts, the first three errors and cleanup errors; test
+  `test_failed_verification_fault_names_the_underlying_error`.
+- **First LED acquisition** (`led_acq_ch4_6_32_hg15_20261019T000337Z`, harness
+  `acq_led.py`): ch 4/6/32, trigger ch6, threshold 480, hold 70 ns, HG code 15,
+  50 batches x 20 = 1000 events, completed, restored, verification passed. The
+  events are almost all pedestal (HG medians 104/95/107, sd 8/15/11, LG flat
+  ~111/88/120 with sd 0.8); no photoelectron peaks or LED population visible.
+  Threshold 480 was chosen before the power cycle (autocalibration trims are
+  lost), so the trigger is probably firing mostly on noise. LED rate/width/
+  amplitude remain unmeasured.
+- Harness note: `acq_led.py` reports CHECK even on success because it parses the
+  details pane after `open_saved` replaced the JSON; read the first summary.
+
+Next: redo autocalibration with bias on, then choose the threshold from a biased
+LED-on/off threshold scan so the trigger selects LED pulses, repeat the
+acquisition, and scope-check the generator/LED pulse.
+
 ## RADIOROC 42 — Newest app on the bench: Step 1 passed, Step 5 blocked on generator setup
 
 Branch `lab/newest-app-test` from `origin/main` `c1b1993` (same tree as
@@ -224,6 +257,8 @@ wrapped titles, "Keep current" width). 496 tests OK. Real-display 1024x768
 recheck pending. Correction: the earlier claim that the Acquisition plot kept
 its size at 1024x768 rested on offscreen tests and was wrong on the real display
 (the window minimum was ~926 px tall).
+
+Setup clarification (operator, 2026-10-19): channels 4, 6 and 32 are three SiPMs mounted flat on the surface of the plint (plastic scintillator); the LED shines in through a hole in the plint. SiPM bias was 29 V throughout all RADIOROC 42 biased runs. "Plint" is the operator's term for the plastic scintillator. Still unknown: generator rate/width/amplitude and LED brightness (need a scope check).
 
 Operator decisions needed (MVP directive): trigger scheme (the hardware has a fixed
 named pair; options are a fixed pair, OR trigger plus an offline two-channel cut,

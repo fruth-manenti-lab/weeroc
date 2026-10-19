@@ -38,22 +38,20 @@ output path in Simulation); triage it before new work, once the operator asks. I
   bias supply is cabled, even unbiased.
 
 ## State at handoff (2026-10-16 evening)
-SiPMs biased (voltage not recorded), LED on the plint pulsed continuously by
+Setup: SiPMs on ch 4, 6, 32 sit flat on the plint (plastic scintillator); the LED shines through a hole in it. Bias 29 V throughout.
+SiPMs biased (29 V), LED on the plint pulsed continuously by
 generator CH1 (output ON, local). Defaults applied after the last power cycle;
 operator's autocalibration trims were lost and not redone. Board idle,
 disconnected.
 
 ## Next tasks, in order
-1. Offline: check the HG/LG shaper-gain field mapping (`high_gain_code`/
-   `low_gain_code` in `radioroc_client.py`) against the vendor bytecode
-   (`local_artifacts/generated_notes/`) and user guide p.9. Bench hint:
-   `high_gain_code=15` changed LG, not HG. Fix with a regression test if swapped.
-2. Offline: restoration verification reported `failed` with empty mismatches and
-   missing lists at a hang; make it report the underlying exception.
-3. Bench (operator present): defaults, then LED self-triggered hold scan on ch6
-   (threshold ~480) with corrected high HG gain; then an Acquisition run to look
-   for photoelectron peaks (Step 4 SiPM gain), Step 5 timing on real pulses.
-4. Biased Step 1 noise floors, autocalibration, then Step 6 calibration record.
+Done in RADIOROC 43: HG/LG nibble swap fixed and bench-confirmed; restoration
+faults now carry the underlying errors; first LED acquisition (pedestal only).
+1. Bench (operator present, bias 29 V, generator CH1 ON): autocalibration with
+   bias on; biased LED-on/off threshold scan on ch 4, 6, 32 to pick a threshold
+   that selects LED pulses; repeat the Acquisition run (HG code 15) looking for
+   photoelectron peaks; scope-check the generator/LED pulse.
+2. Step 5 timing on real pulses, then biased Step 1 floors and Step 6 record.
 
 ## Operator decisions still needed
 Trigger scheme (fixed pair / OR + offline cut / external coincidence), plint
