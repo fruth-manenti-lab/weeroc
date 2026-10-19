@@ -212,6 +212,16 @@ HG; discrete 2/3 p.e. fingers are NOT resolved on the plint SiPMs at 29 V (more 
 overvoltage than July's old SiPM are candidates). Unresolved: whether autocalibrated trims, a lower bias or a
 different threshold DAC would sharpen it.
 
+Operator note: the July logbook SiPMs may have been 1 or 3 mm devices, where finger plots are far
+easier (fewer cells, lower capacitance, much lower dark rate); the plint SiPMs are probably larger
+(more crosstalk/afterpulsing, higher rate), so resolved fingers may not be attainable on them.
+Relative gain on the three plint SiPMs from dark counts (`dark_series6`, `dark_series5`; LED dark, default HG,
+`rstn_manual` on, self-triggered, 10000 events, thr 300/340): pedestal / FWHM / frac > ped+8 / mean excess (ADC):
+ch4 112.8 / 4.5 / 3-5% / 11.7-13.5; ch6 103.8 / 4.0-4.5 / 16-21% / 13.1-15.1; ch32 128-131 / 9.5 / 7-8% /
+11.4-12.0. So ~12 ADC per p.e. (+-15%) at default HG on all three: a usable relative gain for Step 4 without
+resolved fingers; dark rates differ by 4-6x (ch6 highest); pedestals differ per channel (subtract each);
+ch32 is the noisiest. Not autocalibrated (trims lost at every power cycle).
+
 Next (superseded by the synced scan above): redo autocalibration with bias on, then choose the threshold from a biased
 LED-on/off threshold scan so the trigger selects LED pulses, repeat the
 acquisition, and scope-check the generator/LED pulse.
