@@ -253,6 +253,18 @@ Main-tab threshold DAC setters**: `set_t1_threshold_dac`/`set_t2_threshold_dac`/
 `set_threshold_dac`; scans were never affected (they use `set_threshold_dac`); not re-checked on hardware.
 Also noted: `set_threshold_dac(t1=False)` rewrites all of `(65,2)` and clears `dac1[9:8]`. 504 tests OK.
 
+LED level sweeps with the proper levels (ch6, default HG, ext trigger, hold 35, 2000 events/step, `led_finger2`, `led_finger_order`,
+`led_finger_hg15`): zero-p.e. fraction ("frac<ped+6") stays 28-35% for **every** drive tried: 5/4.5/4/3.6/3.4/3.2/3.0 V at 40 ns
+(0.28/-/0.29/-/0.35/0.29/0.32) and 5 V at 20 ns (0.31); median ~119 in all; an order control (4 V, 5 V) gave identical results
+(0.29 vs 0.28). So the humps do **not** scale with the LED drive over 40 ns x 3-5 V and 20 ns x 5 V: the 10 ns step was rejected by the
+generator (EER -8). Open suspicion: the structure may be partly or wholly independent of the LED light (for example electrical pickup of
+the CH2 trigger pulse into the readout, or the dark-pulse sampling pattern). Decisive control not yet done on this board and used in
+gain2: **LED off (CH1 output off) with CH2 still triggering**; if the same humps appear, they are not LED light. HG 15 (4.5/4/3.6 V, 40 ns):
+pedestal 103, humps at +45..+50 and +155..+160 (and +240 at 3.6 V), not evenly spaced.
+Harness bug fixed (step-numbered output folders), external-trigger rate ~20 events/s, timeout >= 60 s (runbook section 8).
+Handover 17:50: board at verified defaults (ch6 HG default, probe off), generator CH1 0-5 V 100 ns output ON, CH2 trigger running 200 Hz; the
+operator takes the scope and generator.
+
 Next (superseded by the synced scan above): redo autocalibration with bias on, then choose the threshold from a biased
 LED-on/off threshold scan so the trigger selects LED pulses, repeat the
 acquisition, and scope-check the generator/LED pulse.
