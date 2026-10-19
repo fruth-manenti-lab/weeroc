@@ -32,4 +32,4 @@ radioroc = "src/radioroc"
 "radioroc.resources" = "configs"
 
 [tool.setuptools.package-data]
-"radioroc.resources" = ["radio_default_i2c.csv", "presets/*.json"]
+"radioroc.resources" = ["radio_default_i2c.csv", "radioroc_icon.png", "presets/*.json"]

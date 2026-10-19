@@ -45,12 +45,14 @@ operator's autocalibration trims were lost and not redone. Board idle,
 disconnected.
 
 ## Next tasks, in order
-Done in RADIOROC 43: HG/LG nibble swap fixed and bench-confirmed; restoration
-faults now carry the underlying errors; first LED acquisition (pedestal only).
-1. Bench (operator present, bias 29 V, generator CH1 ON): autocalibration with
-   bias on; biased LED-on/off threshold scan on ch 4, 6, 32 to pick a threshold
-   that selects LED pulses; repeat the Acquisition run (HG code 15) looking for
-   photoelectron peaks; scope-check the generator/LED pulse.
+Follow `SOLO_PLAN.md` style: no option menus, execute and log.
+0. FIRST: the board hung during the LED sweep (see the "Solo hour" entry). Ask the
+   operator for a power cycle if not already done, then apply defaults (verify),
+   re-set ch6 HG 15 (`hgcode.py 6 15`) and the probe only if the DSO is still used.
+1. Trigger for a photoelectron spectrum: the ASIC discriminator truncates dim
+   pulses. Ask the operator to cable the generator sync-out to the board's external
+   trigger path (or decide on a threshold below the noise); then dim AMPL/PULSWID with
+   `led_sweep.py` and take the spectrum.
 2. Step 5 timing on real pulses, then biased Step 1 floors and Step 6 record.
 
 ## Operator decisions still needed

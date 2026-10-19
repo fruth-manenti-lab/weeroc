@@ -94,6 +94,34 @@ events above 150. All three SiPMs see the LED. Spectra are single broad humps
 (many p.e. per flash). Resolving p.e. peaks needs a dimmer LED/shorter pulse
 or lower generator amplitude, then a spectrum at the same hold.
 
+Solo hour (operator at lunch): LED drive sweep and desktop launcher.
+- Generator facts (CH1 only): settable by write, no readback; `AMPL` and
+  `PULSWID` are accepted (EER +0), e.g. `AMPL 3.5`, `PULSWID 5.0E-08`; operator's
+  working point is 5 V, 100 ns. `led_sweep.py` (bench harness dir) steps
+  AMPL:WIDTH, runs a short synced acquisition (ch 4/6/32, hold 600, thr 520, HG 15,
+  10 x 20 events), samples the DSO, restores 5 V / 100 ns at the end and stops on a
+  board fault.
+- Results before the fault (`bench_RADIOROC43/sweep2/sweep.jsonl`, HG medians ch4/6/32):
+  5 V 207/195/156; 4.5 V 200/185/151; 4 V 206/181/153; 3.5 V 195/174/149. The
+  event medians barely follow the drive because the ASIC discriminator only
+  accepts the larger pulses (it truncates the spectrum), and the DSO probe peak
+  stayed ~70-110 mV. So dimming through the generator alone does not produce a
+  p.e. spectrum with the ASIC's own trigger; it needs a trigger that does not depend
+  on the pulse (the generator's sync-out into the board's external trigger path,
+  an operator cabling decision) or a lower discriminator threshold than the noise
+  allows.
+- **Board fault at the 3.2 V step** (the 7th hang): first batch's ADC readback
+  truncated (`expected 5380 bytes, received 4080`), then every request timed out and
+  the cleanup failed. Needs an operator power cycle; nothing was done to the board
+  afterwards. Generator was restored to 5 V / 100 ns (EER +0). State unknown until the
+  power cycle: ch6 probe/HG 15 are gone with it, ASIC at power-on values.
+- Desktop launcher: `tools/make_desktop_launcher.py` builds `~/Desktop/RADIOROC.app`
+  (own icon: detector pulse on a scope grid, three SiPMs on the plint, LED flash).
+  The app starts `python -m radioroc.gui` from `.venv-foundation`, logs to
+  `~/Library/Logs/RADIOROC.log`; the GUI also sets its own window/Dock icon from
+  `configs/radioroc_icon.png` (package data). Launch checked; it connects to
+  hardware only on Connect. Re-run the script if the checkout moves. 503 tests OK.
+
 Next (superseded by the synced scan above): redo autocalibration with bias on, then choose the threshold from a biased
 LED-on/off threshold scan so the trigger selects LED pulses, repeat the
 acquisition, and scope-check the generator/LED pulse.
