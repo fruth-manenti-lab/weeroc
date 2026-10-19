@@ -243,6 +243,16 @@ step; the 0.5 p.e. edge is buried in noise below ~270, so no spacing from the pl
 ch32: smooth steep decay, no plateau (its fingers are not supported). Supports ch4/ch6 fingers being p.e. levels (weakly).
 State: board defaults, probe off, LED off (CH1 output off).
 
+Register reference for a collaborator (`docs/register_map.md`, compact: serial frames, I2C row format, per-channel rows,
+common blocks, FPGA words, ADC frame, and an "inversions and conversions" list). Writing it exposed a **bug in the
+Main-tab threshold DAC setters**: `set_t1_threshold_dac`/`set_t2_threshold_dac`/`set_tq_threshold_dac` (called by
+`apply_channel_config`) had the sub-fields of `(65,2)`/`(65,3)` swapped relative to the hardware-validated
+`set_threshold_dac` and to the packaged defaults (which decode to 512 for T1, T2 and TQ only with the validated layout:
+`(65,2)={dac2[5:0],dac1[9:8]}`, `(65,3)={dacQ[3:0],dac2[9:6]}`). Fixed to the validated layout, tests updated
+(`test_radioroc_core`, `test_channel_config`) with a default-decodes-to-512 check and a cross-check against
+`set_threshold_dac`; scans were never affected (they use `set_threshold_dac`); not re-checked on hardware.
+Also noted: `set_threshold_dac(t1=False)` rewrites all of `(65,2)` and clears `dac1[9:8]`. 504 tests OK.
+
 Next (superseded by the synced scan above): redo autocalibration with bias on, then choose the threshold from a biased
 LED-on/off threshold scan so the trigger selects LED pulses, repeat the
 acquisition, and scope-check the generator/LED pulse.

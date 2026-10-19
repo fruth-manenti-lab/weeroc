@@ -230,7 +230,7 @@ class ApplyChannelConfigTests(unittest.TestCase):
             verify=True,
         ))
         self.assertEqual(self.device.find_i2c_row(65, 1).data, bits(0x2AB & 0xFF, 8))
-        self.assertEqual(self.device.find_i2c_row(65, 2).data[0:2], bits((0x2AB >> 8) & 0x3, 2))
+        self.assertEqual(self.device.find_i2c_row(65, 2).data[6:8], bits((0x2AB >> 8) & 0x3, 2))
         self.assertEqual(self.device.find_i2c_row(65, 12).data[4:8], bits(0b0011, 4))
         self.assertEqual(self.device.find_i2c_row(65, 8).data, bits(200, 8))
         self.assertEqual(self.device.find_i2c_row(65, 9).data[0:4], bits(9, 4))
@@ -242,18 +242,18 @@ class ApplyChannelConfigTests(unittest.TestCase):
 
     def test_t1_threshold_dac_alone_does_not_touch_t2_or_tq_independent_bits(self):
         self.device.load_default_config()
-        before_t2_high = self.device.find_i2c_row(65, 3).data[0:4]  # dac2[9:6]
-        before_tq_low = self.device.find_i2c_row(65, 3).data[4:8]  # dacQ[3:0]
+        before_t2_high = self.device.find_i2c_row(65, 3).data[4:8]  # dac2[9:6]
+        before_tq_low = self.device.find_i2c_row(65, 3).data[0:4]  # dacQ[3:0]
         before_tq_high = self.device.find_i2c_row(65, 4).data  # dacQ[9:4]
         result = apply_channel_config(self.device, ChannelConfigOperation(
             t1_threshold_dac=0x155, verify=True,
         ))
         self.assertEqual(self.device.find_i2c_row(65, 1).data, bits(0x155 & 0xFF, 8))
-        self.assertEqual(self.device.find_i2c_row(65, 2).data[0:2], bits((0x155 >> 8) & 0x3, 2))
-        # T2's low 6 bits, sharing subadd 2 with T1's high bits, are untouched.
-        self.assertEqual(self.device.find_i2c_row(65, 2).data[2:8], "000010")
-        self.assertEqual(self.device.find_i2c_row(65, 3).data[0:4], before_t2_high)
-        self.assertEqual(self.device.find_i2c_row(65, 3).data[4:8], before_tq_low)
+        self.assertEqual(self.device.find_i2c_row(65, 2).data[6:8], bits((0x155 >> 8) & 0x3, 2))
+        # T2's low 6 bits (65/2 bits [7:2]), sharing the byte with T1's high bits, are untouched.
+        self.assertEqual(self.device.find_i2c_row(65, 2).data[0:6], "000000")
+        self.assertEqual(self.device.find_i2c_row(65, 3).data[4:8], before_t2_high)
+        self.assertEqual(self.device.find_i2c_row(65, 3).data[0:4], before_tq_low)
         self.assertEqual(self.device.find_i2c_row(65, 4).data, before_tq_high)
         self.assertEqual(result.touched_rows, 2)  # only (65, 1) and (65, 2)
         self.assertEqual(result.verify_mismatches, ())

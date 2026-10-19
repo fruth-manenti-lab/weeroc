@@ -2116,14 +2116,18 @@ class RadiorocDevice:
 
         **Hardware side effects**
         - Writes address 65 subaddresses 1 and 2 if present in the loaded
-          defaults, preserving subaddress 2's T2-DAC low bits.
+          defaults, preserving subaddress 2's T2-DAC bits [7:2].
 
         Register recovered from the vendor GUI's compiled widget properties:
         `Ui_MainWindow.retranslateUi`'s "Threshold1" control pairs with the
         raw-register-view labels at address 65 (`dac1[7:0]` at subadd 1,
-        `dac1[9:8]` sharing subadd 2 with `dac2[5:0]`). Not yet independently
-        verified against real hardware; see `IMPLEMENTATION_STATUS.md`
-        RADIOROC 30.
+        `dac1[9:8]` sharing subadd 2 with `dac2[5:0]`). Bit layout (MSB first):
+        subadd 1 = `dac1[7:0]`; subadd 2 = `{dac2[5:0], dac1[9:8]}`; subadd 3 =
+        `{dacQ[3:0], dac2[9:6]}`; subadd 4 = `{NC*2, dacQ[9:4]}`. This is the
+        layout the hardware-validated `set_threshold_dac` writes, and the
+        packaged defaults decode to 512 for all three DACs with it. (An
+        earlier version of these three setters had the sub-fields swapped;
+        fixed 2026-10-19.)
         """
 
         from radioroc.protocol.frames import validate_integer
@@ -2135,7 +2139,7 @@ class RadiorocDevice:
             self.write_register(65, 1, bits(value & 0xFF, 8))
         if high_row is not None:
             data: list[str] = list(high_row.data)
-            data[0:2] = bits((value >> 8) & 0x3, 2)
+            data[6:8] = bits((value >> 8) & 0x3, 2)
             self.write_register(65, 2, "".join(data))
 
     def set_t2_threshold_dac(self, value: int) -> None:
@@ -2151,8 +2155,8 @@ class RadiorocDevice:
 
         **Hardware side effects**
         - Writes address 65 subaddresses 2 and 3 if present in the loaded
-          defaults, preserving subaddress 2's T1-DAC high bits and
-          subaddress 3's TQ-DAC low bits.
+          defaults, preserving subaddress 2's T1-DAC bits [1:0] and
+          subaddress 3's TQ-DAC bits [7:4].
 
         Register recovered from the vendor GUI's compiled widget properties:
         `Ui_MainWindow.retranslateUi`'s "Threshold2" control pairs with the
@@ -2169,11 +2173,11 @@ class RadiorocDevice:
         high_row: I2CRow | None = self.find_i2c_row(65, 3)
         if low_row is not None:
             data: list[str] = list(low_row.data)
-            data[2:8] = bits(value & 0x3F, 6)
+            data[0:6] = bits(value & 0x3F, 6)
             self.write_register(65, 2, "".join(data))
         if high_row is not None:
             data = list(high_row.data)
-            data[0:4] = bits((value >> 6) & 0xF, 4)
+            data[4:8] = bits((value >> 6) & 0xF, 4)
             self.write_register(65, 3, "".join(data))
 
     def set_tq_threshold_dac(self, value: int) -> None:
@@ -2188,7 +2192,7 @@ class RadiorocDevice:
 
         **Hardware side effects**
         - Writes address 65 subaddresses 3 and 4 if present in the loaded
-          defaults, preserving subaddress 3's T2-DAC high bits and
+          defaults, preserving subaddress 3's T2-DAC bits [3:0] and
           subaddress 4's unused bits.
 
         Register recovered from the vendor GUI's compiled widget properties:
@@ -2206,7 +2210,7 @@ class RadiorocDevice:
         high_row: I2CRow | None = self.find_i2c_row(65, 4)
         if low_row is not None:
             data: list[str] = list(low_row.data)
-            data[4:8] = bits(value & 0xF, 4)
+            data[0:4] = bits(value & 0xF, 4)
             self.write_register(65, 3, "".join(data))
         if high_row is not None:
             data = list(high_row.data)
