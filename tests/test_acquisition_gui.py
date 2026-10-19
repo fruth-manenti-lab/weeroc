@@ -71,6 +71,18 @@ class AcquisitionGuiTests(unittest.TestCase):
         self.assertEqual(operation.acquisition.channels, [1, 3, 6])
         self.assertEqual(operation.acquisition.trigger_channel, 3)
 
+    def test_operation_wires_sync_controls(self):
+        acquisition = self.window.operation().acquisition
+        self.assertFalse(acquisition.synchro_trigger)
+        self.assertIsNone(acquisition.sync_io_mux_index)
+        self.window.synchro_trigger.setChecked(True)
+        self.window.sync_io.setCurrentText("io1")
+        self.window.set_sync_io_mux.setChecked(True)
+        self.window.sync_io_mux_index.setValue(5)
+        acquisition = self.window.operation().acquisition
+        self.assertTrue(acquisition.synchro_trigger)
+        self.assertEqual((acquisition.sync_io, acquisition.sync_io_mux_index), ("io1", 5))
+
     def test_operation_wires_two_channel_coincidence_fields(self):
         self.window.channel_select.set_channels([2, 5])
         self.window.trigger_type.setCurrentIndex(1)  # "2 channels coincidence"

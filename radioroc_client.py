@@ -471,6 +471,9 @@ class AcquisitionConfig:
     - `adc_nb_trig` (`int`): ADC time-window trigger count.
     - `rstn_manual` (`bool`): Vendor ADC reset-n manual bit.
     - `synchro_trigger` (`bool`): Pulse FPGA synchro trigger per ADC batch.
+    - `sync_io` (`str`): FPGA IO name carrying the sync pulse.
+    - `sync_io_mux_index` (`int | None`): Optional FPGA IO mux index to set for `sync_io`
+      before acquiring (for example 5 on `io1` drives an external pulse generator).
     - `out_dir` (`Path`): Run output directory.
     """
 
@@ -497,6 +500,8 @@ class AcquisitionConfig:
     adc_nb_trig: int = 1
     rstn_manual: bool = False
     synchro_trigger: bool = False
+    sync_io: str = "io1"
+    sync_io_mux_index: int | None = None
     out_dir: Path = DEFAULT_RUNS_DIR
 
     def validate(self) -> None:
@@ -556,6 +561,10 @@ class AcquisitionConfig:
         if not 0 <= self.trigger_source_2 <= 7:
             raise ValueError("trigger_source_2 must be in range 0..7")
         validate_channel(self.trigger_channel_2)
+        if self.sync_io not in FPGA_IO_NAMES:
+            raise ValueError(f"sync_io must be one of {FPGA_IO_NAMES}")
+        if self.sync_io_mux_index is not None and not 0 <= self.sync_io_mux_index <= 7:
+            raise ValueError("sync_io_mux_index must be in range 0..7")
         if (self.trigger_type == 1 and self.trigger_source == 3 and self.trigger_source_2 == 3
                 and self.trigger_channel_2 not in self.channels):
             # Mirrors application/acquisition.py's own gating condition for a

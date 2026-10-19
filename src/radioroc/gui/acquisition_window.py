@@ -43,7 +43,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.ticker import NullFormatter
 
-from radioroc_client import AcquisitionConfig
+from radioroc_client import FPGA_IO_NAMES, AcquisitionConfig
 from radioroc.application.acquisition import AcquisitionJob, AcquisitionJobConfig
 from radioroc.application.acquisition_worker import AcquisitionWorker
 from radioroc.application.connection_worker import ConnectionWorker
@@ -458,6 +458,18 @@ class AcquisitionWindow(QMainWindow):
         self.mask = QCheckBox("Mask other channels")
         self.mask.setChecked(True)
         form.addRow(self.mask)
+        self.synchro_trigger = QCheckBox("Pulse FPGA synchro trigger per ADC batch")
+        form.addRow(self.synchro_trigger)
+        self.sync_io = QComboBox()
+        self.sync_io.addItems(list(FPGA_IO_NAMES))
+        self.sync_io.setCurrentText("io1")
+        form.addRow("Sync IO", self.sync_io)
+        self.set_sync_io_mux = QCheckBox("Set sync IO mux index before run")
+        self.sync_io_mux_index = _integer(0, 7, 5)
+        sync_io_mux_row = QHBoxLayout()
+        sync_io_mux_row.addWidget(self.set_sync_io_mux)
+        sync_io_mux_row.addWidget(self.sync_io_mux_index)
+        form.addRow("Sync IO mux index", sync_io_mux_row)
         self.output = QLineEdit(_new_directory("hardware" if self.mode.currentIndex() == 1 else "simulation"))
         self.output.setMinimumWidth(220)
         form.addRow("New run directory", self.output)
@@ -616,6 +628,17 @@ class AcquisitionWindow(QMainWindow):
                           "running; leave at 'Keep current' to leave it alone.")
         self.hint.attach(self.discriminator, "Which ASIC discriminator (T1/T2) the "
                           "threshold DAC and trigger apply to.")
+        self.hint.attach(self.synchro_trigger, "Pulse FPGA synchro trigger per ADC batch: "
+                          "before each batch the FPGA emits a sync pulse on the Sync IO line, "
+                          "used to fire an external pulse generator (set to triggered burst) "
+                          "in lockstep with the read-out, so every event is a real pulse.")
+        self.hint.attach(self.sync_io, "FPGA IO line that carries the synchro trigger pulse "
+                          "to an external pulse generator.")
+        self.hint.attach(self.set_sync_io_mux, "Set the Sync IO mux index below before "
+                          "running, instead of using whatever it is currently set to.")
+        self.hint.attach(self.sync_io_mux_index, "Mux index selecting which internal signal "
+                          "the Sync IO line carries when the checkbox to its left is enabled "
+                          "(5 = the sync pulse).")
         self.hint.attach(self.mask, "Mask every channel except the trigger channel, "
                           "so only its signal is read out.")
         self.hint.attach(self.output, "Directory the run's data and metadata will be saved to.")
@@ -886,6 +909,9 @@ class AcquisitionWindow(QMainWindow):
             trigger_channel_2=self.trigger_channel_2.value(),
             adc_window_ns=self.adc_window_ns.value(),
             adc_nb_trig=self.adc_nb_trig.value(),
+            synchro_trigger=self.synchro_trigger.isChecked(),
+            sync_io=self.sync_io.currentText(),
+            sync_io_mux_index=self.sync_io_mux_index.value() if self.set_sync_io_mux.isChecked() else None,
             out_dir=Path(output).expanduser(),
         )
         return AcquisitionJobConfig(acquisition)

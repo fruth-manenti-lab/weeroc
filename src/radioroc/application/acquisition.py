@@ -30,7 +30,8 @@ from .verification import verify_restoration as run_restoration_check
 # The job's own FPGA state footprint to snapshot/restore/verify: ADC hold/timing
 # control words. Word 2 is excluded: acquire_adc_batch always leaves it exactly
 # where it found it.
-_FPGA_ACQUISITION_ADDRESSES = (21, 22, 23, 24, 25, 26, 27, 30, 31)
+# Words 77/78 are the IO mux words touched when sync_io_mux_index is set.
+_FPGA_ACQUISITION_ADDRESSES = (21, 22, 23, 24, 25, 26, 27, 30, 31, 77, 78)
 
 
 def _now():
@@ -280,6 +281,8 @@ class AcquisitionJob:
                     device.unmask_channel_for_individual_coincidence(acquisition.trigger_channel_2)
             if acquisition.threshold_dac is not None:
                 device.set_threshold_dac(acquisition.threshold_dac, t1=acquisition.t1)
+            if acquisition.sync_io_mux_index is not None:
+                device.write_fpga_io_mux(**{acquisition.sync_io: acquisition.sync_io_mux_index})
             result.status = "running"
             persist()
             emit("state")

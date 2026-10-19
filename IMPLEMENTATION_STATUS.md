@@ -76,6 +76,24 @@ pulses while the board is idle):
   IO-mux (sync_io/sync_io_mux_index) and no GUI control, so a synced acquisition
   cannot be run from the app yet; only the hold scan has them.
 
+Synced acquisition support built (offline, then bench-tested): `AcquisitionConfig`
+gains `sync_io` / `sync_io_mux_index` (validated like the hold scan); the job
+writes `write_fpga_io_mux` after the threshold, and the FPGA footprint now
+includes words 77/78 so the mux is snapshotted, restored and verified; the
+Acquisition page gets "Pulse FPGA synchro trigger", Sync IO and mux-index
+controls wired into `operation()`. Tests: bad sync_io/mux rejected, mux written
+and restored with verification passed, mux words untouched when unset, GUI wiring
+(501 tests OK).
+Bench (`led_sync_acq_ch4_6_32_hold600_*`, generator armed): ch 4/6/32, trigger ch6,
+threshold 520, hold 600 ns, HG code 15, sync on (io1 mux 5), 50 x 20 events:
+completed, restored. 1030 events (the app warned about a few over-count batches,
+as designed; the extra are ASIC-trigger noise events). HG medians 212 / 189 /
+155 (ch4 / ch6 / ch32) against pedestals ~104 / ~95 / ~107; 95% / 81% / 57% of
+events above 150. All three SiPMs see the LED. Spectra are single broad humps
+(~+100 counts, width ~40), no resolved photoelectron peaks: the LED is bright
+(many p.e. per flash). Resolving p.e. peaks needs a dimmer LED/shorter pulse
+or lower generator amplitude, then a spectrum at the same hold.
+
 Next (superseded by the synced scan above): redo autocalibration with bias on, then choose the threshold from a biased
 LED-on/off threshold scan so the trigger selects LED pulses, repeat the
 acquisition, and scope-check the generator/LED pulse.
