@@ -150,6 +150,22 @@ scope first; do not exceed 2.5 V TTL). With it the board records every flash, so
 generator can free-run (internal 1 kHz) and the IO1 -> generator cable is not needed.
 Untested on hardware.
 
+External trigger on hardware (operator cabled generator CH2, 100 ns, 0..2.43 V into 50 Ω
+termination in parallel with the scope, to the board SMA labelled IO6 = IO_FPGA6; CH1
+and CH2 aligned within ~4.5 ns, CH2 later; level at the board 2.42 V with the board
+connected, so its input is high impedance; generator free-running 1 kHz). Hold scan and
+acquisitions with `external_trigger` on: events arrive at the requested rate (50/50,
+1000/1000, no timeouts). `hold_series.py` (one serial connection, many acquisitions):
+ch6 HG median 205/244/229/177/130/88 at holds 0/25/50/75/100/125 ns (pedestal ~95,
+undershoot by 125 ns, 55-67% of events >200); ch4 and ch32 stay at pedestal
+(~105/~109, per-event corr with ch6 0-0.4) at holds 0-125, so they see no LED there
+(earlier discriminator-triggered synced runs at hold 600 showed +100/+50 on them; the
+two hold references are not yet reconciled). The series stopped at 150 ns with the
+**11th board hang** (6 acquisitions on a single connection), so reconnecting is not
+the cause; no pattern across hangs is established.
+Next: after the power cycle, run `hold_series.py` over 150-700 ns to find where (if
+anywhere) ch4/ch32 respond and reconcile the two hold references.
+
 Next (superseded by the synced scan above): redo autocalibration with bias on, then choose the threshold from a biased
 LED-on/off threshold scan so the trigger selects LED pulses, repeat the
 acquisition, and scope-check the generator/LED pulse.
