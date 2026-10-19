@@ -166,6 +166,17 @@ the cause; no pattern across hangs is established.
 Next: after the power cycle, run `hold_series.py` over 150-700 ns to find where (if
 anywhere) ch4/ch32 respond and reconcile the two hold references.
 
+Direct-USB-port session: after the operator moved the board from a shared hub to a port of its
+own, ~34 acquisitions ran clean: `hold_series.py` 150-700 ns on one connection (ch6 undershoot
+min ~40 at ~225 ns, back to pedestal ~575-600 ns; ch4/ch32 flat at pedestal at every hold,
+so they get no LED light with the external trigger), then `amp_series.py` (CH1 5 -> 2.0 V, 300
+events each, hold 35 ns): ch6 HG median 185 -> 137, p10 reaches the pedestal (~95) from 3.5 V,
+p90 stays ~250-300, histograms at 2.4/2.0 V show a pedestal peak and bumps above it (not yet
+resolved), median floor ~137 below 2.4 V (light or pickup unresolved). **12th hang** at the first
+request of the next series (LED-off control, right after a generator `OUTPUT OFF`); generator
+restored to 5 V ON. Pending: LED-off control + 3000-event runs at 2.2/2.0 V
+(`amp_series.py ... 35 3000 0 2.2 2.0`).
+
 Next (superseded by the synced scan above): redo autocalibration with bias on, then choose the threshold from a biased
 LED-on/off threshold scan so the trigger selects LED pulses, repeat the
 acquisition, and scope-check the generator/LED pulse.

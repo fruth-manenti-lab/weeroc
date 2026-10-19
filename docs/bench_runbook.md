@@ -51,15 +51,15 @@ or `i2c FIFO transaction timed out`. Only a power cycle (USB + 5 V) recovers it.
 - Correlations seen, not proven: the first large operation after ≥20 minutes
   idle, and once right after the operator handled the setup near the board.
   Fresh after a power cycle, reads of every size worked.
-- **Likely cause (operator, 19 October): a shared USB hub.** The board was on a
-  hub with other devices, and it hung 11 times that day (during LED sweeps and
-  synced runs, after as few as 1-6 acquisitions, with or without reconnecting).
-  After the operator moved it to a port of its own (USB adapter, nothing else on
-  the hub), the hangs stopped for the rest of the session so far: a 23-point hold
-  series on one connection (`hold_series.py`) ran clean, then an amplitude series.
-  Not proven yet; keep the board on its own port, and record the count of
-  hang-free acquisitions here and in `IMPLEMENTATION_STATUS.md`. If it hangs
-  again on the direct port, that points back at cabling/grounding instead.
+- **Shared USB hub made it much worse (operator, 19 October).** The board was on a
+  hub with other devices and hung 11 times that day, after as few as 1-6
+  acquisitions. After the operator moved it to a port of its own, about 34
+  acquisitions ran clean (a 23-point `hold_series.py` on one connection, then a
+  10-step amplitude series), then it hung a 12th time on the direct port, at the
+  first request after a generator `OUTPUT OFF` (output relay switching). So the hub
+  was a major contributor but not the only one. Keep the board on its own port;
+  suspect electrical transients from the generator (output on/off, remote writes)
+  and ground/cabling next. Count hang-free acquisitions here as they accumulate.
 - The app handles it correctly: a visible fault, cleanup reported, the next run
   blocked until review. Do not retry automatically. Power-cycle, re-apply
   defaults, then continue.
