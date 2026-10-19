@@ -478,6 +478,20 @@ class AcquisitionJobTests(unittest.TestCase):
                   if event[0] == "write" and event[1] in (77, 78)}
         self.assertLessEqual(values, {bits(0)})
 
+    def test_external_trigger_sets_the_adc_control_bit(self):
+        """configure_adc_external_hold's peak-or-external bit (bit 2 of word 25) is set
+        for an external-trigger run and clear for a discriminator run."""
+        def control_words(external):
+            self.device = RadiorocDevice(AcquisitionTransport(nb_acq=2, adc_batches=[
+                adc_payload(2, {4: ([1.0, 2.0], [1.0, 2.0])}), adc_payload(2, {4: ([1.0, 2.0], [1.0, 2.0])})]))
+            self.directory = Path(self.tmp.name) / ("ext" if external else "disc")
+            config = AcquisitionJobConfig(replace(self.acquisition, external_trigger=external,
+                                                  out_dir=self.directory))
+            self.assertEqual(AcquisitionJob().run(self.device, config).status, "completed")
+            return [event for event in self.device.transport.trace if event[0] == "write" and event[1] == 25][0][2]
+        self.assertEqual(control_words(False)[5], "0")
+        self.assertEqual(control_words(True)[5], "1")
+
 
 if __name__ == "__main__":
     unittest.main()

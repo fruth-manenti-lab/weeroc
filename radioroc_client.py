@@ -470,6 +470,9 @@ class AcquisitionConfig:
     - `adc_window_ns` (`int`): ADC coincidence/window width, divisible by 5 ns.
     - `adc_nb_trig` (`int`): ADC time-window trigger count.
     - `rstn_manual` (`bool`): Vendor ADC reset-n manual bit.
+    - `external_trigger` (`bool`): Use the external ASIC acquisition trigger (the board's
+      External Synchro SMA, `IO_FPGA6`, 2.5 V TTL) instead of the discriminator, so every
+      external pulse is recorded whatever its size.
     - `synchro_trigger` (`bool`): Pulse FPGA synchro trigger per ADC batch.
     - `sync_io` (`str`): FPGA IO name carrying the sync pulse.
     - `sync_io_mux_index` (`int | None`): Optional FPGA IO mux index to set for `sync_io`
@@ -500,6 +503,7 @@ class AcquisitionConfig:
     adc_nb_trig: int = 1
     rstn_manual: bool = False
     synchro_trigger: bool = False
+    external_trigger: bool = False
     sync_io: str = "io1"
     sync_io_mux_index: int | None = None
     out_dir: Path = DEFAULT_RUNS_DIR

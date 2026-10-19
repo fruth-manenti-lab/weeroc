@@ -293,7 +293,7 @@ class AcquisitionJob:
                 trigger_channel=acquisition.trigger_channel, hold_delay_ns=acquisition.hold_delay_ns,
                 conversion_delay_ns=acquisition.conversion_delay_ns, nb_acq=acquisition.acquisitions_per_batch,
                 trigger_type=acquisition.trigger_type, trigger_source=acquisition.trigger_source,
-                rstn_manual=acquisition.rstn_manual, ext_trig=False, peak_sensing=acquisition.peak_sensing,
+                rstn_manual=acquisition.rstn_manual, ext_trig=acquisition.external_trigger, peak_sensing=acquisition.peak_sensing,
                 adc_window_ns=acquisition.adc_window_ns, adc_nb_trig=acquisition.adc_nb_trig,
                 trigger_source_2=acquisition.trigger_source_2, trigger_channel_2=acquisition.trigger_channel_2)
             for batch_offset in range(acquisition.batches):

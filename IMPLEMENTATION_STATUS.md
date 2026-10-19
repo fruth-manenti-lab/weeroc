@@ -136,6 +136,20 @@ Synced acquisition without the probe, threshold 480 (`led_sync_acq_noprobe_thr48
 the lower threshold admits smaller pulses. Drive sweep repeated at threshold 470
 (`bench_RADIOROC43/sweep3`).
 
+Hangs 8 and 9 (after the sweep3 run at 3.0 V, then at the very first step of sweep4
+right after a power cycle + defaults): so the earlier "4th step" idea is wrong; no
+confirmed pattern. Sweep3 results before it (threshold 470, probe off, HG medians
+ch4/6/32): 4.0 V 199/173/151, 3.4 V 196/167/147, 3.2 V 187/162/150, i.e. the
+discriminator-selected medians still barely follow the drive.
+External trigger on the Acquisition page (offline, 504 tests OK): `AcquisitionConfig.
+external_trigger` -> `configure_adc_external_hold(ext_trig=...)` (bit 2 of FPGA word 25),
+GUI checkbox "Use external ASIC acquisition trigger (IO_FPGA6)". The board's External
+Synchro SMA is `IO_FPGA6` (2.5 V TTL; External Hold is `IO_FPGA7`), per the user guide
+p.22-23. Operator is cabling the generator sync-out there (level to be checked on the
+scope first; do not exceed 2.5 V TTL). With it the board records every flash, so the
+generator can free-run (internal 1 kHz) and the IO1 -> generator cable is not needed.
+Untested on hardware.
+
 Next (superseded by the synced scan above): redo autocalibration with bias on, then choose the threshold from a biased
 LED-on/off threshold scan so the trigger selects LED pulses, repeat the
 acquisition, and scope-check the generator/LED pulse.
