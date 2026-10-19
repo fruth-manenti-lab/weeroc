@@ -83,6 +83,9 @@ class AcquisitionGuiTests(unittest.TestCase):
         self.assertTrue(acquisition.synchro_trigger)
         self.assertEqual((acquisition.sync_io, acquisition.sync_io_mux_index), ("io1", 5))
         self.assertFalse(acquisition.external_trigger)
+        self.assertFalse(acquisition.rstn_manual)
+        self.window.rstn_manual.setChecked(True)
+        self.assertTrue(self.window.operation().acquisition.rstn_manual)
         self.window.external_trigger.setChecked(True)
         self.assertTrue(self.window.operation().acquisition.external_trigger)
 

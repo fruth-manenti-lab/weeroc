@@ -458,6 +458,8 @@ class AcquisitionWindow(QMainWindow):
         self.mask = QCheckBox("Mask other channels")
         self.mask.setChecked(True)
         form.addRow(self.mask)
+        self.rstn_manual = QCheckBox("Reset-n manual")
+        form.addRow(self.rstn_manual)
         self.external_trigger = QCheckBox("Use external ASIC acquisition trigger (IO_FPGA6)")
         form.addRow(self.external_trigger)
         self.synchro_trigger = QCheckBox("Pulse FPGA synchro trigger per ADC batch")
@@ -630,6 +632,10 @@ class AcquisitionWindow(QMainWindow):
                           "running; leave at 'Keep current' to leave it alone.")
         self.hint.attach(self.discriminator, "Which ASIC discriminator (T1/T2) the "
                           "threshold DAC and trigger apply to.")
+        self.hint.attach(self.rstn_manual, "Drive the ADC reset line manually instead of "
+                          "letting the FPGA sequence it automatically. The July dark-count "
+                          "finger plot (and the October one) needs this on; without it the "
+                          "single-photoelectron peaks did not appear.")
         self.hint.attach(self.external_trigger, "Record on an external pulse (2.5 V TTL into "
                           "the board's External Synchro SMA, IO_FPGA6) instead of the ASIC "
                           "discriminator, so small pulses are not cut off. Without a pulse the "
@@ -916,6 +922,7 @@ class AcquisitionWindow(QMainWindow):
             adc_window_ns=self.adc_window_ns.value(),
             adc_nb_trig=self.adc_nb_trig.value(),
             synchro_trigger=self.synchro_trigger.isChecked(),
+            rstn_manual=self.rstn_manual.isChecked(),
             external_trigger=self.external_trigger.isChecked(),
             sync_io=self.sync_io.currentText(),
             sync_io_mux_index=self.sync_io_mux_index.value() if self.set_sync_io_mux.isChecked() else None,

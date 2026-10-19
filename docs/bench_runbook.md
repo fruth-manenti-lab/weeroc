@@ -60,6 +60,12 @@ or `i2c FIFO transaction timed out`. Only a power cycle (USB + 5 V) recovers it.
   was a major contributor but not the only one. Keep the board on its own port;
   suspect electrical transients from the generator (output on/off, remote writes)
   and ground/cabling next. Count hang-free acquisitions here as they accumulate.
+- **Soft recovery to try first (19 October):** if the board still *answers* but the
+  readback is garbage (a defaults verify with hundreds of mismatches whose values are
+  bit-shifted copies of the expected ones, e.g. `10001000` read as `01000100`), the
+  I2C controller was left in a bad state by an earlier timeout. `initialize_fpga()`
+  followed by `apply_default_config()` cleared it (0 mismatches) without a power cycle.
+  If requests get no response at all, that is the real hang: power-cycle.
 - The app handles it correctly: a visible fault, cleanup reported, the next run
   blocked until review. Do not retry automatically. Power-cycle, re-apply
   defaults, then continue.
