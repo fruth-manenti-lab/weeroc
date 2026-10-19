@@ -235,6 +235,14 @@ FPGA word 4 bit 5 after ~1600 events (cleanup restored). 100k-event dark data: F
 median), ch4/ch32 no detection. Handover to the operator: ch6 HG code 15 and analog probe (ch6 HG shaper) set, generator
 CH1 restored to 0-5 V / 100 ns, scope in NORM; operator takes the scope/generator.
 
+Staircase check on the fingers (operator, citing Alex: fingers vs artefacts need a dark staircase): fine dark threshold
+scan ch4/6/32, DAC 240-460 step 2, 500 ms, LED off (CH1 `OUTPUT OFF`, CH2 trigger still running), probe off, defaults
+(`radioroc_runs/staircase_fine_ch4_6_32_*`). ch4 and ch6: plateau (slope ~ -0.008 dec/DAC) from DAC ~275 to ~375, then a
+steep step (~ -0.025) from ~380 to ~430, with a weak bump near 420-430: consistent with a 1 p.e. plateau and a ~1.5 p.e.
+step; the 0.5 p.e. edge is buried in noise below ~270, so no spacing from the plateau width, and no DAC->ADC conversion yet.
+ch32: smooth steep decay, no plateau (its fingers are not supported). Supports ch4/ch6 fingers being p.e. levels (weakly).
+State: board defaults, probe off, LED off (CH1 output off).
+
 Next (superseded by the synced scan above): redo autocalibration with bias on, then choose the threshold from a biased
 LED-on/off threshold scan so the trigger selects LED pulses, repeat the
 acquisition, and scope-check the generator/LED pulse.
