@@ -66,6 +66,10 @@ or `i2c FIFO transaction timed out`. Only a power cycle (USB + 5 V) recovers it.
   I2C controller was left in a bad state by an earlier timeout. `initialize_fpga()`
   followed by `apply_default_config()` cleared it (0 mismatches) without a power cycle.
   If requests get no response at all, that is the real hang: power-cycle.
+  After a truncated ADC readback (`expected N bytes, received M`) the stream is out of step
+  (replies start with `aa 01 ..` data); wait ~15 s for the dump to drain, then the same
+  recovery works. Dark-count finger plots need `Reset-n manual` ON (hold 110 ns, threshold
+  340-420, LED dark via `AMPL 0.2`, not `OUTPUT OFF`).
 - The app handles it correctly: a visible fault, cleanup reported, the next run
   blocked until review. Do not retry automatically. Power-cycle, re-apply
   defaults, then continue.

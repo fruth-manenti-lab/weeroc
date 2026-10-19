@@ -177,6 +177,25 @@ request of the next series (LED-off control, right after a generator `OUTPUT OFF
 restored to 5 V ON. Pending: LED-off control + 3000-event runs at 2.2/2.0 V
 (`amp_series.py ... 35 3000 0 2.2 2.0`).
 
+Dark-count finger runs (the 2026-07-02 recipe: no LED, self-triggered, hold 110 ns, `rstn_manual` ON;
+LED kept dark by CH1 `AMPL 0.2` instead of switching the output off; `dark_series.py`,
+`radioroc_runs/dark_series1..4`): **`rstn_manual` matters**: with it off the HG pedestal sits ~95 and
+no p.e. structure appears (thresholds 300-380, HG 8 and 15); with it on (thresholds 190-420) the
+pedestal peak is at ~103 and a second hump appears above it. Default HG, ch6: hump centre
+117/121/125 at DAC 340/380/420, i.e. it moves with the trigger threshold (the discriminator cuts the
+1 p.e. distribution), lowest-threshold centre ~+14 ADC above the pedestal. HG 15: hump 177/203/211
+over a pedestal of ~105 (+70..+105), ratio ~8 to the default gain, as expected. **Estimate: ~13 ADC per
+photoelectron at default HG** (hold 110 ns, ch6, 29 V); 2 and 3 p.e. fingers are not resolved
+(noise sd ~3 ADC at default gain, 1 p.e. is ~13), so this is NOT yet a clean finger plot.
+Next for a real finger plot: lower thresholds (300-340) with more events, finer bins, a double-
+Gaussian + step fit, ch4/ch32, and the `Reset-n manual` box on the Acquisition page (added this
+session, tested, committed) — Acquisition page now exposes sync IO, external trigger and reset-n.
+Operations found: after a transport timeout in a cleanup the I2C readback can be bit-shifted
+(456/677 defaults mismatches); `initialize_fpga()` + `apply_default_config()` fixed it without a
+power cycle (runbook updated). A truncated ADC readback (expected 51204, received 23460) leaves the
+stream out of step; waiting a few seconds lets it drain, then the same recovery works. LED left at 5 V
+(restored). 504 tests OK.
+
 Next (superseded by the synced scan above): redo autocalibration with bias on, then choose the threshold from a biased
 LED-on/off threshold scan so the trigger selects LED pulses, repeat the
 acquisition, and scope-check the generator/LED pulse.
