@@ -196,6 +196,22 @@ power cycle (runbook updated). A truncated ADC readback (expected 51204, receive
 stream out of step; waiting a few seconds lets it drain, then the same recovery works. LED left at 5 V
 (restored). 504 tests OK.
 
+**Generator idle level (important, found by the operator's question):** `AMPL x` only changes the pulse
+amplitude around a fixed DC offset. At `AMPL 0.2` CH1's line sat at a steady **+3.14 V**, so the LED was
+glowing continuously in every "dark" run and the earlier amplitude sweeps (median floor ~137) had a DC light
+level underneath. Fix: set the levels explicitly: `LOLVL 0` and `HILVL 0.05` (EER +0; line ~8 mV mean)
+for a dark LED, `LOLVL 0` + `HILVL 5` for the operator's 0-5 V pulse (or `OUTPUT OFF`, which only
+touches CH1). `dark_series.py` now uses the levels.
+Dark-count finger runs with a truly dark LED (`dark_series5`, `dark_hold1`; no hang in ~85k events on the
+direct USB port): same as with the DC light: ch6 pedestal 103.8 (FWHM 3.2 ADC; July's old SiPM: 106.6,
+FWHM 2.0, 7.2 ADC spacing), hump moves with the threshold (114/118/123 at DAC 300/340/380), 15-17% of events
+above ped+8 with mean excess ~15 ADC. **The distribution does not depend on the hold delay at all**
+(40-260 ns identical), i.e. in self-triggered mode the sample is the pulse's true peak, so the broad hump is
+the real amplitude distribution, not timing smear. Conclusion so far: gain ~13-15 ADC per p.e. at default
+HG; discrete 2/3 p.e. fingers are NOT resolved on the plint SiPMs at 29 V (more crosstalk/afterpulsing or
+overvoltage than July's old SiPM are candidates). Unresolved: whether autocalibrated trims, a lower bias or a
+different threshold DAC would sharpen it.
+
 Next (superseded by the synced scan above): redo autocalibration with bias on, then choose the threshold from a biased
 LED-on/off threshold scan so the trigger selects LED pulses, repeat the
 acquisition, and scope-check the generator/LED pulse.
