@@ -222,6 +222,19 @@ ch4 112.8 / 4.5 / 3-5% / 11.7-13.5; ch6 103.8 / 4.0-4.5 / 16-21% / 13.1-15.1; ch
 resolved fingers; dark rates differ by 4-6x (ch6 highest); pedestals differ per channel (subtract each);
 ch32 is the noisiest. Not autocalibrated (trims lost at every power cycle).
 
+gain2-style LED fingers (operator pointed at `cryo_detector/gain2`: LED pulse 40 ns / 2.23 V high / 1 kHz, scope
+triggered on the pulser, narrow gate around the pulse peak, peak-to-peak histogram; plus `rtg/` FFT spacing for
+dark pulses on 6 mm SiPMs). Mapping to RADIOROC: generator CH2 (0-2.4 V, 100 ns) -> board IO6/IO_FPGA6 external
+trigger, CH1 -> LED with explicit levels (`LOLVL 0`, `HILVL h`, `PULSWID 40 ns`), hold 35 ns (peak, measured with
+the external trigger), `led_finger.py`. Result (ch6, default HG, rstn on, 5000 events/step): at 40 ns the light is
+already few-p.e. even at 5 V (46% of events at the pedestal); at 4 / 3.6 / 3.3 V a sharp zero-p.e. peak at 103
+(~45%), a broad first peak ~105-125, a second at ~135 and a weak third ~165: **first LED finger structure on
+this board** (`radioroc_runs/led_finger1`). Spacing not yet settled (16 vs 32 ADC; odd peaks smeared by dark pulses
+landing at random phase); next: HG 15 (8x larger steps) and lower levels. The 3.3 V step timed out waiting for
+FPGA word 4 bit 5 after ~1600 events (cleanup restored). 100k-event dark data: FFT spacing 14.9 ADC on ch6 (6x
+median), ch4/ch32 no detection. Handover to the operator: ch6 HG code 15 and analog probe (ch6 HG shaper) set, generator
+CH1 restored to 0-5 V / 100 ns, scope in NORM; operator takes the scope/generator.
+
 Next (superseded by the synced scan above): redo autocalibration with bias on, then choose the threshold from a biased
 LED-on/off threshold scan so the trigger selects LED pulses, repeat the
 acquisition, and scope-check the generator/LED pulse.
