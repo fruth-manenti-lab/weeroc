@@ -44,6 +44,9 @@ generator CH1 (output ON, local). Defaults applied after the last power cycle;
 operator's autocalibration trims were lost and not redone. Board idle,
 disconnected.
 
+Board USB: keep it on its own port, not a shared hub (hangs stopped after the move on 2026-10-19;
+see `docs/bench_runbook.md` section 3).
+
 ## Next tasks, in order
 Follow `SOLO_PLAN.md` style: no option menus, execute and log.
 0. FIRST: the board hung during the LED sweep (see the "Solo hour" entry). Ask the
