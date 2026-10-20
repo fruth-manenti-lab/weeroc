@@ -91,6 +91,11 @@ class ChannelConfigOperation:
       0..15.
     - `analog_probe_sources` (`dict[int, str] | None`): Per-channel analog
       probe routing (channel -> key of `RadiorocDevice.ANALOG_PROBE_CODES`).
+    - `analog_probe_exclusive` (`bool`): Before routing `analog_probe_sources`,
+      switch off the probe on every other channel that currently has it (the
+      probe pin is one shared output).
+    - `analog_probe_clear_all` (`bool`): Switch off the analog probe on every
+      channel that has it routed (reads all 64 probe rows first).
     - `verify` (`bool`): Independently read back every touched register after
       writing.
     - `restore` (`bool`): Snapshot every touched register before writing and
@@ -134,6 +139,8 @@ class ChannelConfigOperation:
     delay_code: int | None = None
     delay_slope: int | None = None
     analog_probe_sources: dict[int, str] | None = None
+    analog_probe_exclusive: bool = False
+    analog_probe_clear_all: bool = False
     verify: bool = True
     restore: bool = False
     config_path: Path | None = None
@@ -255,7 +262,7 @@ class ChannelConfigOperation:
                    self.t1_threshold_dac is not None, self.t2_threshold_dac is not None,
                    self.tq_threshold_dac is not None, self.trigger_selection is not None,
                    self.delay_code is not None, self.delay_slope is not None,
-                   self.analog_probe_sources]):
+                   self.analog_probe_sources, self.analog_probe_clear_all]):
             raise ValueError("at least one channel-configuration field is required")
 
     @staticmethod
@@ -345,6 +352,14 @@ def apply_channel_config(device: RadiorocDevice, operation: ChannelConfigOperati
     touched.update((ch, 7) for ch in (operation.high_gain_shaping_slow_states or {}))
     touched.update((ch, 7) for ch in (operation.low_gain_shaping_slow_states or {}))
     touched.update((ch, 66) for ch in (operation.analog_probe_sources or {}))
+    probe_cleared: list[int] = []
+    if operation.analog_probe_clear_all or (operation.analog_probe_exclusive
+                                            and operation.analog_probe_sources):
+        keep = None
+        if not operation.analog_probe_clear_all:
+            keep = next(iter(operation.analog_probe_sources))
+        probe_cleared = device.routed_analog_probe_channels(keep=keep)
+        touched.update((ch, 66) for ch in probe_cleared)
     if operation.t1_threshold_dac is not None:
         touched.update({(65, 1), (65, 2)})
     if operation.t2_threshold_dac is not None:
@@ -441,6 +456,9 @@ def apply_channel_config(device: RadiorocDevice, operation: ChannelConfigOperati
     if operation.delay_slope is not None:
         device.set_delay_slope(operation.delay_slope)
         applied.append(f"delay_slope -> {operation.delay_slope}")
+    for channel in probe_cleared:
+        device.clear_analog_probe_channel(channel)
+        applied.append(f"analog_probe channel={channel} -> none (cleared)")
     for channel, source in (operation.analog_probe_sources or {}).items():
         device.set_analog_probe_for_channel(channel, source)
         applied.append(f"analog_probe channel={channel} -> {source}")

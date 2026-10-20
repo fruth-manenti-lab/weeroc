@@ -928,7 +928,7 @@ class AcquisitionWindow(QMainWindow):
             sync_io_mux_index=self.sync_io_mux_index.value() if self.set_sync_io_mux.isChecked() else None,
             out_dir=Path(output).expanduser(),
         )
-        return AcquisitionJobConfig(acquisition)
+        return AcquisitionJobConfig(acquisition, clear_analog_probe=True)
 
     def simulation(self):
         settings = AcquisitionSimulationConfig(

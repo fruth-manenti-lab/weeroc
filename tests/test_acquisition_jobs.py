@@ -154,6 +154,18 @@ class AcquisitionJobTests(unittest.TestCase):
     def manifest(self):
         return json.loads((self.directory / "metadata.json").read_text())
 
+    def test_clear_analog_probe_switches_routed_channels_off_and_warns(self):
+        self.transport.asic.update({(ch, 66): 0 for ch in range(N_CHANNELS)})
+        self.transport.original_asic = dict(self.transport.asic)
+        self.transport.asic[(4, 66)] = 0b00001000
+        self.transport.asic[(9, 66)] = 0b10100010
+        self.config = AcquisitionJobConfig(self.acquisition, clear_analog_probe=True)
+        result = self.run_job()
+        self.assertEqual(result.status, "completed")
+        self.assertTrue(any("analog probe switched off" in w for w in result.warnings))
+        self.assertEqual(self.transport.asic[(4, 66)] & 0xF, 0)
+        self.assertEqual(self.transport.asic[(9, 66)], 0b10100000)
+
     def test_success_values_progress_and_manifest(self):
         events = []
         result = self.run_job(on_event=events.append)

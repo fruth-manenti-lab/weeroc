@@ -176,6 +176,31 @@ class ApplyChannelConfigTests(unittest.TestCase):
         apply_channel_config(self.device, ChannelConfigOperation(analog_probe_sources={6: "none"}))
         self.assertEqual(self.device.read_register_bits(6, 66), "00000000")
 
+    def test_routing_a_probe_switches_the_previous_channel_off(self):
+        self.device.load_default_config()
+        self.add_probe_rows()
+        apply_channel_config(self.device, ChannelConfigOperation(analog_probe_sources={6: "shaper_hg"}))
+        result = apply_channel_config(self.device, ChannelConfigOperation(
+            analog_probe_sources={38: "shaper_hg"}, analog_probe_exclusive=True, verify=True))
+        self.assertEqual(self.device.read_register_bits(6, 66), "00000000")
+        self.assertEqual(self.device.read_register_bits(38, 66), "00001000")
+        self.assertIn("analog_probe channel=6 -> none (cleared)", result.applied)
+        self.assertEqual(result.verify_mismatches, ())
+
+    def add_probe_rows(self):
+        # The fake ASIC memory stops at subaddress 63; the real one has (ch, 66).
+        self.transport.asic.update({(ch, 66): 0 for ch in range(64)})
+
+    def test_clear_all_switches_every_routed_probe_off(self):
+        self.device.load_default_config()
+        self.add_probe_rows()
+        for ch in (6, 38):
+            self.device.set_analog_probe_for_channel(ch, "shaper_lg")
+        result = apply_channel_config(self.device, ChannelConfigOperation(
+            analog_probe_clear_all=True, verify=True))
+        self.assertEqual(self.device.read_analog_probe_routes(), {})
+        self.assertEqual(len([a for a in result.applied if "(cleared)" in a]), 2)
+
     def test_analog_probe_rejects_unknown_source(self):
         with self.assertRaises(ValueError):
             ChannelConfigOperation(analog_probe_sources={6: "bogus"}).validate()

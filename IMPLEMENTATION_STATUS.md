@@ -14,6 +14,11 @@
   (chip defaults decode to 512/512/512), so applying it unedited breaks the trigger; applying the defaults clears the
   per-channel probe route and (66,70) edits. LED run on ch4 at HG 15, hold 110 ns, 1000 events, external trigger:
   ped ~304, median 413, p90 1045 (`radioroc_runs/led_hg15_ch4`). Pedestal rises with gain.
+- **Probe state handling (operator request: never have to remember what is routed).** Routing a probe in the GUI now
+  switches every other routed channel off first (the probe pin is one shared output); new "Off, all channels" button
+  reads all 64 `(ch,66)` rows and clears the routed ones (keeps each row's live high nibble). The Acquisition page now
+  switches any routed probe off before a run (`AcquisitionJobConfig.clear_analog_probe`, set by the GUI, default off for
+  the CLI) and records a warning naming the channels. Offline only (511 tests OK); not yet exercised on the board.
 - **Next:** decide whether the 6 mm SiPMs need HG 15 at all (1 mm fingers are clean); make the Main tab start from the
   real chip defaults and warn before overwriting thresholds.
 

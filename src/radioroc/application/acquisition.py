@@ -48,10 +48,11 @@ class AcquisitionJobConfig:
     config_path: Path | None = None
     initialize_fpga: bool = False
     apply_defaults: bool = False
+    clear_analog_probe: bool = False
 
     def validate(self) -> None:
         self.acquisition.validate()
-        for name in ("initialize_fpga", "apply_defaults"):
+        for name in ("initialize_fpga", "apply_defaults", "clear_analog_probe"):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be boolean")
 
@@ -243,6 +244,12 @@ class AcquisitionJob:
                 device.initialize_fpga()
             if config.apply_defaults:
                 device.apply_default_config()
+            if config.clear_analog_probe:
+                cleared_probes = device.clear_analog_probes()
+                if cleared_probes:
+                    result.warnings.append(
+                        "analog probe switched off before the run on channel(s) "
+                        + ", ".join(str(ch) for ch in cleared_probes))
             preparation_failed = False
             manifest["preparation"]["status"] = "completed"
             # Capture control state before snapshot reads themselves use I2C.

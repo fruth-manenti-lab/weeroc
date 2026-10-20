@@ -1942,6 +1942,103 @@ class RadiorocDevice:
         "preamp_lg": "0001",
     }
 
+    def read_analog_probe_routes(self) -> dict[int, str]:
+        """Read every channel's analog-probe row and report the routed ones.
+
+        **Returns**
+        - `dict[int, str]`: Channel -> low-nibble bits (e.g. `"1000"`) for each
+          channel whose probe nibble is not `0000`; empty when no probe is routed.
+
+        **Hardware side effects**
+        - One 64-row ASIC FIFO read of subaddress 66; no writes.
+        """
+
+        values = self.read_fifo([I2CRow(ch, 66, "00000000") for ch in range(N_CHANNELS)])
+        return {ch: format(v & 0xF, "04b") for ch, v in enumerate(values) if v & 0xF}
+
+    def routed_analog_probe_channels(self, *, keep: int | None = None) -> list[int]:
+        """Channels with the analog probe routed (read-only), excluding `keep`."""
+
+        return [ch for ch in sorted(self.read_analog_probe_routes()) if ch != keep]
+
+    def clear_analog_probe_channel(self, channel: int) -> None:
+        """Switch one channel's analog probe off, keeping its live high nibble.
+
+        **Hardware side effects**
+        - Reads then writes one subaddress-66 row.
+        """
+
+        validate_channel(channel)
+        live = self.read_fifo([I2CRow(channel, 66, "00000000")])[0]
+        self.write_register(channel, 66, format(live & 0xF0, "08b"))
+
+    def clear_analog_probes(self, *, keep: int | None = None) -> list[int]:
+        """Switch off the analog probe on every channel that has it routed.
+
+        **Inputs**
+        - `keep` (`int | None`): Channel to leave untouched (the one about to be
+          routed), if any.
+
+        **Returns**
+        - `list[int]`: Channels that were cleared, in ascending order.
+
+        **Hardware side effects**
+        - Reads all 64 probe rows, then clears only the routed ones (normally
+          zero or one write).
+        """
+
+        cleared = self.routed_analog_probe_channels(keep=keep)
+        for ch in cleared:
+            self.clear_analog_probe_channel(ch)
+        return cleared
+
+    ANALOG_PROBE_CODES = {
+        "none": "0000",
+        "shaper_hg": "1000",
+        "shaper_lg": "0100",
+        "preamp_hg": "0010",
+        "preamp_lg": "0001",
+    }
+
+    def read_analog_probe_routes(self) -> dict[int, str]:
+        """Read every channel's analog-probe row and report the routed ones.
+
+        **Returns**
+        - `dict[int, str]`: Channel -> low-nibble bits (e.g. `"1000"`) for each
+          channel whose probe nibble is not `0000`; empty when no probe is routed.
+
+        **Hardware side effects**
+        - One 64-row ASIC FIFO read of subaddress 66; no writes.
+        """
+
+        values = self.read_fifo([I2CRow(ch, 66, "00000000") for ch in range(N_CHANNELS)])
+        return {ch: format(v & 0xF, "04b") for ch, v in enumerate(values) if v & 0xF}
+
+    def _probe_row_bytes(self) -> bytes:
+        return self.read_fifo([I2CRow(ch, 66, "00000000") for ch in range(N_CHANNELS)])
+
+    def clear_analog_probes(self, *, keep: int | None = None) -> list[int]:
+        """Switch off the analog probe on every channel that has it routed.
+
+        **Inputs**
+        - `keep` (`int | None`): Channel to leave untouched (the one about to be
+          routed), if any.
+
+        **Returns**
+        - `list[int]`: Channels that were cleared, in ascending order.
+
+        **Hardware side effects**
+        - Reads all 64 probe rows, then writes only the routed ones (normally
+          zero or one write), keeping each row's high nibble.
+        """
+
+        values = self._probe_row_bytes()
+        cleared = [ch for ch, v in enumerate(values) if v & 0xF and ch != keep]
+        for ch in cleared:
+            # Keep the live high nibble; only the probe (low) nibble is cleared.
+            self.write_register(ch, 66, format(values[ch] & 0xF0, "08b"))
+        return cleared
+
     def set_analog_probe_for_channel(self, channel: int, source: str) -> None:
         """Route one channel's analog node to the ASIC Analog_Probe output.
 
@@ -1956,7 +2053,7 @@ class RadiorocDevice:
         **Hardware side effects**
         - Writes the channel's subaddress-66 row, replacing its low nibble
           (bit3..0 = shaper HG, shaper LG, preamp HG, preamp LG) and keeping
-          the high nibble. The probe output is shared: route one channel at a
+          the high nibble of the loaded table row. The probe output is shared: route one channel at a
           time. The user guide warns the probe degrades analog performance.
 
         Register from the vendor GUI's `send_aprb` bytecode; node order not

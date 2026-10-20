@@ -91,7 +91,7 @@ class ProbesMasksPanel(QWidget):
         grids_row.addWidget(_build_mask_grid("Enable TQ", "tq", self))
         outer.addLayout(grids_row)
 
-        probe_group = QGroupBox("Analog probe (shared output: one channel at a time)")
+        probe_group = QGroupBox("Analog probe (shared output: routing one channel switches the others off)")
         probe_row = QHBoxLayout(probe_group)
         probe_row.addWidget(QLabel("N° channel"))
         self.probe_channel_spin = QSpinBox()
@@ -104,6 +104,9 @@ class ProbesMasksPanel(QWidget):
         self.probe_apply_button = QPushButton("Apply probe")
         self.probe_apply_button.clicked.connect(self.apply_probe)
         probe_row.addWidget(self.probe_apply_button)
+        self.probe_clear_all_button = QPushButton("Off, all channels")
+        self.probe_clear_all_button.clicked.connect(self.apply_probe_clear_all)
+        probe_row.addWidget(self.probe_clear_all_button)
         probe_row.addStretch(1)
         outer.addWidget(probe_group)
 
@@ -137,10 +140,19 @@ class ProbesMasksPanel(QWidget):
         operation = ChannelConfigOperation(
             analog_probe_sources={self.probe_channel_spin.value():
                                   self.probe_source_combo.currentData()},
+            analog_probe_exclusive=True,
             verify=True,
         )
         operation.validate()
         return operation
+
+    def build_probe_clear_all_operation(self):
+        operation = ChannelConfigOperation(analog_probe_clear_all=True, verify=True)
+        operation.validate()
+        return operation
+
+    def apply_probe_clear_all(self):
+        return self.apply(self.build_probe_clear_all_operation, "probe")
 
     def apply_probe(self):
         return self.apply(self.build_probe_operation, "probe")
@@ -218,6 +230,10 @@ class ProbesMasksPanel(QWidget):
                         "Off clears it. The probe degrades analog performance; reset it "
                         "before real measurements.")
         hint_bar.attach(self.probe_apply_button,
-                        "Write the analog probe routing to the connected hardware.")
+                        "Write the analog probe routing to the connected hardware. Any other "
+                        "channel that still has the probe routed is switched off first.")
+        hint_bar.attach(self.probe_clear_all_button,
+                        "Read all 64 channels and switch off the analog probe on every channel "
+                        "that has it routed. Use this if you don't remember what is routed.")
         hint_bar.attach(self.apply_button,
                         "Apply the T1/T2/TQ enable masks to the connected hardware.")
