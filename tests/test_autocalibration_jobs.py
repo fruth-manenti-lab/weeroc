@@ -200,6 +200,67 @@ class AutocalibrationJobTests(unittest.TestCase):
         self.assertEqual(sub_manifest["status"], "disconnected")
         self.assertEqual(self.manifest()["status"], "disconnected")
 
+    def test_success_persists_results_and_applied_corrections(self):
+        result = self.run_job()
+        self.assertEqual(result.calibration_status, "verified")
+        manifest = self.manifest()
+        self.assertEqual(manifest["calibration_status"], "verified")
+        self.assertEqual(manifest["calibration_before"], {"4": 32, "5": 32})
+        self.assertEqual(manifest["calibration_after"], {"4": 42, "5": 22})
+        self.assertAlmostEqual(manifest["lsb_ratio"], 0.25)
+        self.assertAlmostEqual(manifest["mean_position"], 12.5)
+        self.assertEqual(manifest["crossings"], {"4": 10.0, "5": 15.0})
+        self.assertEqual(manifest["applied_corrections"], [
+            {"channel": 4, "before": 32, "after": 42, "state": "applied"},
+            {"channel": 5, "before": 32, "after": 22, "state": "applied"}])
+
+    def test_cancel_at_final_scan_entry_marks_unverified_and_records_corrections(self):
+        original = AutocalibrationJob._run_sub_scan
+        token = CancellationToken()
+
+        def cancel_at_final(job, device, *, out_dir, **kwargs):
+            if Path(out_dir).name == "final":
+                token.cancel()
+                kwargs["cancellation"].checkpoint()
+            return original(job, device, out_dir=out_dir, **kwargs)
+
+        with patch.object(AutocalibrationJob, "_run_sub_scan", new=cancel_at_final):
+            result = self.run_job(cancellation=token)
+        self.assertEqual(result.status, "cancelled")
+        self.assertEqual(result.calibration_status, "unverified")
+        self.assertTrue(any("UNVERIFIED CALIBRATION" in w for w in result.warnings))
+        manifest = self.manifest()
+        self.assertEqual(manifest["calibration_status"], "unverified")
+        self.assertEqual([(c["channel"], c["before"], c["after"], c["state"])
+                          for c in manifest["applied_corrections"]],
+                         [(4, 32, 42, "applied"), (5, 32, 22, "applied")])
+        self.assertEqual(manifest["calibration_after"], {"4": 42, "5": 22})
+        from radioroc.application.connection_worker import ConnectionWorker
+        fault = ConnectionWorker._autocalibration_fault(result, None)
+        self.assertIn("unverified calibration", fault)
+
+    def test_disconnect_during_second_correction_records_partial_apply(self):
+        original_set = self.device.set_calibration_dac_for_channel
+        calls = {"n": 0}
+
+        def fail_second_correction(channel, *, t1, value):
+            calls["n"] += 1
+            # 3 reference probe/restore writes, then ch4 correction, then ch5.
+            if calls["n"] == 5:
+                raise TransportIOError("unplugged")
+            return original_set(channel, t1=t1, value=value)
+
+        with patch.object(self.device, "set_calibration_dac_for_channel",
+                          side_effect=fail_second_correction):
+            result = self.run_job()
+        self.assertEqual(result.status, "disconnected")
+        self.assertEqual(result.calibration_status, "unverified")
+        manifest = self.manifest()
+        self.assertEqual(manifest["status"], "disconnected")
+        self.assertEqual([(c["channel"], c["state"]) for c in manifest["applied_corrections"]],
+                         [(4, "applied"), (5, "attempted")])
+        self.assertEqual(manifest["calibration_after"], {"4": 42})
+
     def test_saved_run_reader_composes_the_four_sub_scans(self):
         from radioroc.data.autocalibration_reader import read_autocalibration_run
         result = self.run_job()

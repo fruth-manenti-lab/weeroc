@@ -1,5 +1,552 @@
 # Implementation status
 
+## RADIOROC 44 — Analog probe in the GUI; probe enable register; 1 mm SiPM fingers
+
+- **Analog probe selector** on ASIC config. -> Probes/Masks: channel + node (off, shaper HG/LG, preamp HG/LG),
+  own "Apply probe". Backend `RadiorocDevice.set_analog_probe_for_channel` (row `(ch,66)` low nibble, high nibble
+  kept) and `ChannelConfigOperation.analog_probe_sources`; three offline tests added, `tools/check_development.py` passes.
+  Node order is from the vendor `send_aprb` bytecode and still unconfirmed on a scope.
+- **Probe needs the common enables:** `(66,70)` = `{NC*3, ON_outing, ON_aBuffer, EN_probe, EN_aMuxHG, EN_aMuxLG}`.
+  It was found at `00001011` (ON_outing and EN_probe off, cause unknown, not written by this code) with ch38 routed and
+  HG 15 set, and no probe signal. Writing `00011111` (read-back verified) restored it; the operator then saw clean
+  fingers from a 1 mm SiPM on ch38.
+- **Pitfalls found:** the Main tab's Apply writes the whole tab, including thresholds that start at 0/2/520
+  (chip defaults decode to 512/512/512), so applying it unedited breaks the trigger; applying the defaults clears the
+  per-channel probe route and (66,70) edits. LED run on ch4 at HG 15, hold 110 ns, 1000 events, external trigger:
+  ped ~304, median 413, p90 1045 (`radioroc_runs/led_hg15_ch4`). Pedestal rises with gain.
+- **Probe state handling (operator request: never have to remember what is routed).** Routing a probe in the GUI now
+  switches every other routed channel off first (the probe pin is one shared output); new "Off, all channels" button
+  reads all 64 `(ch,66)` rows and clears the routed ones (keeps each row's live high nibble). The Acquisition page now
+  switches any routed probe off before a run (`AcquisitionJobConfig.clear_analog_probe`, set by the GUI, default off for
+  the CLI) and records a warning naming the channels. Offline only (511 tests OK); not yet exercised on the board.
+- **Main tab threshold defaults fixed.** The tab started at 0 / 2 / 520 (an old decode); the packaged defaults decode
+  to 512 / 512 / 512 with the hardware-validated layout (`set_t1_threshold_dac` docstring). Applying the tab unedited
+  wrote T1 = 0 and killed the trigger. Defaults are now 512 each; a test decodes the packaged CSV and compares.
+- **Accessibility for assistive automation (ChatGPT drove the app on hardware: connected, probes off, ch6 selected).**
+  All dropdowns take Tab focus and arrow keys (macOS Qt skips them otherwise); Port selector named; new Page menu
+  (Ctrl+1/2/3) because the sidebar rows are not exposed to macOS accessibility. The Port is still never preselected
+  (explicit-selection tests). The Page menu adds ~23 px of minimum height off macOS (guard 620 -> 650).
+- **Operator scope decisions (2026-10-20):** a good, repeatable HG gain on the 6 mm SiPMs is hard and is recorded as a
+  known limitation for now (1 mm SiPM on ch38 gives clean fingers). Hold scan is done with Ctest, or with the hold
+  scan tab's "Use external ASIC acquisition trigger" checkbox (IO_FPGA6) for LED pulses; threshold scan, S-curve,
+  autocalibration and acquisition are the working workflow. Goal: finish the app for students soon.
+- **ChatGPT hardware run on ch6 (operator-driven app, 2026-10-20), findings:** first threshold run hit a board no-response
+  (power cycle, then defaults+FPGA init, verified clean); threshold scan clean floor DAC 520 (proposed 580); autocalibration
+  skipped (single channel); external-hold scan 0-100 ns completed 21/21 but no clean peak (10 events/point, huge spread);
+  200-event finger acquisition timed out on batch 0 (`ADC acquisition timed out waiting for FPGA word 4 bit 5`, cleanup OK,
+  not retried). Likely cause (unconfirmed): generator CH2 rate too low for 200 pulses in 60 s (operator had slowed CH2
+  to about 0.5 s); the 10-event hold scan fits that. The Acquisition preview now states the pulse rate needed
+  (events per batch / timeout) when the external trigger is on. Also: banners no longer say "USB candidates are
+  unverified" after connecting; channel buttons have accessible names ("Channel N"). Open: spinbox typing appends
+  instead of replacing (automation only), no intermediate progress inside a batch, channel selectors independent per tab.
+- **Next:** decide whether the 6 mm SiPMs need HG 15 at all (1 mm fingers are clean); make the Main tab start from the
+  real chip defaults and warn before overwriting thresholds.
+
+## RADIOROC 43 — HG/LG shaper-gain swap fixed and bench-confirmed; restoration faults now explain themselves; first LED acquisition
+
+Setup: SiPMs on ch 4, 6, 32 flat on the plint, LED through a hole, bias 29 V,
+generator CH1 ON (left ON + LOCAL at end), board powered.
+
+- **HG/LG swap fixed.** `RadiorocDevice.set_energy_shaper_gain` had the nibbles
+  reversed. Vendor map (RADIOROC 30 recovery): subadd 2 HG gain = bits `[3:0]`,
+  LG gain = bits `[7:4]`. Code, docstring and `docs/bench_runbook.md` corrected;
+  regression test `test_energy_shaper_gain_nibbles_match_vendor_map`. Bench
+  confirmation: defaults applied (677/677 verified), ch6 self-triggered hold scan
+  (threshold 480, Ctest/sync off, 20 acq, 0-600 ns) with `high_gain_code=15`:
+  HG now responds (mean ~100-123, sd up to ~49) and LG is flat at ~96 (sd <1);
+  before the fix it was the reverse. `led_selftrig_hold_ch6_hg15_fixed_20261019T000250Z`.
+- **Restoration faults explain themselves.** The verifier already stored the
+  exceptions in `report["errors"]`, but `ConnectionWorker`'s four fault
+  summaries printed only the status word. New `_verification_problem` adds the
+  mismatch/missing counts, the first three errors and cleanup errors; test
+  `test_failed_verification_fault_names_the_underlying_error`.
+- **First LED acquisition** (`led_acq_ch4_6_32_hg15_20261019T000337Z`, harness
+  `acq_led.py`): ch 4/6/32, trigger ch6, threshold 480, hold 70 ns, HG code 15,
+  50 batches x 20 = 1000 events, completed, restored, verification passed. The
+  events are almost all pedestal (HG medians 104/95/107, sd 8/15/11, LG flat
+  ~111/88/120 with sd 0.8); no photoelectron peaks or LED population visible.
+  Threshold 480 was chosen before the power cycle (autocalibration trims are
+  lost), so the trigger is probably firing mostly on noise. LED rate/width/
+  amplitude remain unmeasured.
+- Harness note: `acq_led.py` reports CHECK even on success because it parses the
+  details pane after `open_saved` replaced the JSON; read the first summary.
+
+Scope session (same day): the operator connected the ASIC Analog_Probe to a
+LeCroy WP254HD (USBTMC `USB0::1535::4131::4609N03241`; the scope stalls pyvisa-py's
+REN_CONTROL, so `dso.py` in the bench harness dir skips it; C1 = probe, C2 =
+generator CH1 split, 1 MOhm). Generator per operator: 5 V, 1 kHz, 100 ns pulse
+(its SCPI queries did not answer; not re-read). LED unwrapped for more light.
+- Probe register (vendor `send_aprb`, bytecode): per-channel row `(ch, 66)`, low
+  nibble = shaper HG, shaper LG, preamp HG, preamp LG (bit3..0); common enables
+  `(66,70)` default `00011111`. `aprobe.py 6 1000` routes ch6 HG shaper; reset with
+  `aprobe.py 6 0000`. Probe node order not independently confirmed on the scope.
+- The ASIC had returned to power-on values before this (every channel differed);
+  defaults re-applied (677/677). ch6 HG code set to 15 live (`hgcode.py`).
+  Probe and HG 15 on ch6 are still set at handoff (outside the defaults table).
+- 60 single shots on C2 trigger (TDIV 100 ns, TRDL -300 ns): an LED-induced
+  shaper pulse is present in nearly every shot, peak ~180 ns after the generator
+  edge, 30-260 mV above baseline (median ~100 mV), baseline noise ~5 mV rms.
+  So the earlier ADC runs mostly triggered on noise, not on the LED.
+- Biased ch6 threshold scan, 1 kHz LED on vs off (200 ms windows, DAC 300-700,
+  `led1k_on/off_thr_ch6_*`): trigger noise ~1.3e4 Hz at DAC 480, ~3e3 at 500,
+  ~3e2 at 520; LED adds roughly 0.2-0.65 kHz at 500-520 (about 18-65% of triggers
+  at 510-520). Trigger path is far noisier than the shaper path.
+- Hold scan ch6, threshold 520, 100 acq/point, 0-400 ns
+  (`led1k_hold_ch6_thr520_*`): HG mean rises from ~112 to ~130 with sd up to ~77
+  at 320-400 ns; no sharp peak, mixed with noise triggers. Needs finer/longer
+  hold range and an offline amplitude cut.
+
+Synced LED scan (generator corrected from internal to external-triggered burst by
+the operator; board IO1 -> generator trigger in; verified on the scope: no
+pulses while the board is idle):
+- The generator had been on internal trigger all along; that explains the
+  earlier "~90 events per 50 requested", the flat HG ~220 sd ~125 and LG > HG
+  in the synced scans (free-running LED pulses, not a framing bug).
+- First synced scan after the generator change hung the board 13 s in
+  (`led_sync2_*`: TransportTimeoutError, restore failed, "1 mismatches"; the
+  new fault text listed every timeout). Power cycle, defaults (677/677), HG 15
+  and probe re-applied, then it ran cleanly twice. Root cause of the hang still
+  unknown (sixth hang; no new pattern beyond handling/cabling changes).
+- Ch6, threshold 520, sync on (IO1 mux 5), HG code 15, 50 acq/point
+  (`led_sync3_*`, `led_sync4_*`): the HG shaper pulse is traced out by the hold
+  delay: pedestal ~99 up to 475 ns, rise from ~500 ns, **peak ~200 at ~600 ns
+  (+100 counts)**, undershoot to ~47 at 800-850 ns, back to pedestal ~1050 ns.
+  sd 35-60 at the peak (amplitude spread, candidate p.e. structure). LG flat at
+  ~89 (default gain). Events 50-53 per 50 requested. Matches the scope (~100 mV
+  median). So for this plint/LED setup the sync-referenced hold delay is ~600 ns.
+- App gap: the Acquisition page/`AcquisitionConfig` has `synchro_trigger` but no
+  IO-mux (sync_io/sync_io_mux_index) and no GUI control, so a synced acquisition
+  cannot be run from the app yet; only the hold scan has them.
+
+Synced acquisition support built (offline, then bench-tested): `AcquisitionConfig`
+gains `sync_io` / `sync_io_mux_index` (validated like the hold scan); the job
+writes `write_fpga_io_mux` after the threshold, and the FPGA footprint now
+includes words 77/78 so the mux is snapshotted, restored and verified; the
+Acquisition page gets "Pulse FPGA synchro trigger", Sync IO and mux-index
+controls wired into `operation()`. Tests: bad sync_io/mux rejected, mux written
+and restored with verification passed, mux words untouched when unset, GUI wiring
+(501 tests OK).
+Bench (`led_sync_acq_ch4_6_32_hold600_*`, generator armed): ch 4/6/32, trigger ch6,
+threshold 520, hold 600 ns, HG code 15, sync on (io1 mux 5), 50 x 20 events:
+completed, restored. 1030 events (the app warned about a few over-count batches,
+as designed; the extra are ASIC-trigger noise events). HG medians 212 / 189 /
+155 (ch4 / ch6 / ch32) against pedestals ~104 / ~95 / ~107; 95% / 81% / 57% of
+events above 150. All three SiPMs see the LED. Spectra are single broad humps
+(~+100 counts, width ~40), no resolved photoelectron peaks: the LED is bright
+(many p.e. per flash). Resolving p.e. peaks needs a dimmer LED/shorter pulse
+or lower generator amplitude, then a spectrum at the same hold.
+
+Solo hour (operator at lunch): LED drive sweep and desktop launcher.
+- Generator facts (CH1 only): settable by write, no readback; `AMPL` and
+  `PULSWID` are accepted (EER +0), e.g. `AMPL 3.5`, `PULSWID 5.0E-08`; operator's
+  working point is 5 V, 100 ns. `led_sweep.py` (bench harness dir) steps
+  AMPL:WIDTH, runs a short synced acquisition (ch 4/6/32, hold 600, thr 520, HG 15,
+  10 x 20 events), samples the DSO, restores 5 V / 100 ns at the end and stops on a
+  board fault.
+- Results before the fault (`bench_RADIOROC43/sweep2/sweep.jsonl`, HG medians ch4/6/32):
+  5 V 207/195/156; 4.5 V 200/185/151; 4 V 206/181/153; 3.5 V 195/174/149. The
+  event medians barely follow the drive because the ASIC discriminator only
+  accepts the larger pulses (it truncates the spectrum), and the DSO probe peak
+  stayed ~70-110 mV. So dimming through the generator alone does not produce a
+  p.e. spectrum with the ASIC's own trigger; it needs a trigger that does not depend
+  on the pulse (the generator's sync-out into the board's external trigger path,
+  an operator cabling decision) or a lower discriminator threshold than the noise
+  allows.
+- **Board fault at the 3.2 V step** (the 7th hang): first batch's ADC readback
+  truncated (`expected 5380 bytes, received 4080`), then every request timed out and
+  the cleanup failed. Needs an operator power cycle; nothing was done to the board
+  afterwards. Generator was restored to 5 V / 100 ns (EER +0). State unknown until the
+  power cycle: ch6 probe/HG 15 are gone with it, ASIC at power-on values.
+- Desktop launcher: `tools/make_desktop_launcher.py` builds `~/Desktop/RADIOROC.app`
+  (own icon: detector pulse on a scope grid, three SiPMs on the plint, LED flash).
+  The app starts `python -m radioroc.gui` from `.venv-foundation`, logs to
+  `~/Library/Logs/RADIOROC.log`; the GUI also sets its own window/Dock icon from
+  `configs/radioroc_icon.png` (package data). Launch checked; it connects to
+  hardware only on Connect. Re-run the script if the checkout moves. 503 tests OK.
+
+After the power cycle (operator back): defaults applied (677/677), generator OFF for
+Step 1. **Biased Step 1** (`step1_biased_dark_ch4_6_32_*`, SiPMs 29 V, LED off, DAC 0-1023
+step 10, 100 ms, gain 1): clean floor (<= 20 Hz from there on) at DAC **450 (ch4), 500
+(ch6), 500 (ch32)**; at DAC 0-300 the rates are 1e5-9e7 Hz (electronic noise peak).
+**Important:** the ~1.3e4 Hz noise at DAC 480 seen in the earlier LED on/off scans was
+with the analog probe enabled on ch6 (and the scope cabled); with the probe off the
+ASIC trigger is clean down to ~DAC 450-500. The guide warns the probe degrades the
+analog performance; treat probe use as a diagnostic, not an operating mode, and reset
+it (`aprobe.py 6 0000`) before any measurement that matters.
+Synced acquisition without the probe, threshold 480 (`led_sync_acq_noprobe_thr480_*`):
+1128 events (2.8% extra), HG medians 212 / 184 / 153, p10 108-117 (near pedestal), so
+the lower threshold admits smaller pulses. Drive sweep repeated at threshold 470
+(`bench_RADIOROC43/sweep3`).
+
+Hangs 8 and 9 (after the sweep3 run at 3.0 V, then at the very first step of sweep4
+right after a power cycle + defaults): so the earlier "4th step" idea is wrong; no
+confirmed pattern. Sweep3 results before it (threshold 470, probe off, HG medians
+ch4/6/32): 4.0 V 199/173/151, 3.4 V 196/167/147, 3.2 V 187/162/150, i.e. the
+discriminator-selected medians still barely follow the drive.
+External trigger on the Acquisition page (offline, 504 tests OK): `AcquisitionConfig.
+external_trigger` -> `configure_adc_external_hold(ext_trig=...)` (bit 2 of FPGA word 25),
+GUI checkbox "Use external ASIC acquisition trigger (IO_FPGA6)". The board's External
+Synchro SMA is `IO_FPGA6` (2.5 V TTL; External Hold is `IO_FPGA7`), per the user guide
+p.22-23. Operator is cabling the generator sync-out there (level to be checked on the
+scope first; do not exceed 2.5 V TTL). With it the board records every flash, so the
+generator can free-run (internal 1 kHz) and the IO1 -> generator cable is not needed.
+Untested on hardware.
+
+External trigger on hardware (operator cabled generator CH2, 100 ns, 0..2.43 V into 50 Ω
+termination in parallel with the scope, to the board SMA labelled IO6 = IO_FPGA6; CH1
+and CH2 aligned within ~4.5 ns, CH2 later; level at the board 2.42 V with the board
+connected, so its input is high impedance; generator free-running 1 kHz). Hold scan and
+acquisitions with `external_trigger` on: events arrive at the requested rate (50/50,
+1000/1000, no timeouts). `hold_series.py` (one serial connection, many acquisitions):
+ch6 HG median 205/244/229/177/130/88 at holds 0/25/50/75/100/125 ns (pedestal ~95,
+undershoot by 125 ns, 55-67% of events >200); ch4 and ch32 stay at pedestal
+(~105/~109, per-event corr with ch6 0-0.4) at holds 0-125, so they see no LED there
+(earlier discriminator-triggered synced runs at hold 600 showed +100/+50 on them; the
+two hold references are not yet reconciled). The series stopped at 150 ns with the
+**11th board hang** (6 acquisitions on a single connection), so reconnecting is not
+the cause; no pattern across hangs is established.
+Next: after the power cycle, run `hold_series.py` over 150-700 ns to find where (if
+anywhere) ch4/ch32 respond and reconcile the two hold references.
+
+Direct-USB-port session: after the operator moved the board from a shared hub to a port of its
+own, ~34 acquisitions ran clean: `hold_series.py` 150-700 ns on one connection (ch6 undershoot
+min ~40 at ~225 ns, back to pedestal ~575-600 ns; ch4/ch32 flat at pedestal at every hold,
+so they get no LED light with the external trigger), then `amp_series.py` (CH1 5 -> 2.0 V, 300
+events each, hold 35 ns): ch6 HG median 185 -> 137, p10 reaches the pedestal (~95) from 3.5 V,
+p90 stays ~250-300, histograms at 2.4/2.0 V show a pedestal peak and bumps above it (not yet
+resolved), median floor ~137 below 2.4 V (light or pickup unresolved). **12th hang** at the first
+request of the next series (LED-off control, right after a generator `OUTPUT OFF`); generator
+restored to 5 V ON. Pending: LED-off control + 3000-event runs at 2.2/2.0 V
+(`amp_series.py ... 35 3000 0 2.2 2.0`).
+
+Dark-count finger runs (the 2026-07-02 recipe: no LED, self-triggered, hold 110 ns, `rstn_manual` ON;
+LED kept dark by CH1 `AMPL 0.2` instead of switching the output off; `dark_series.py`,
+`radioroc_runs/dark_series1..4`): **`rstn_manual` matters**: with it off the HG pedestal sits ~95 and
+no p.e. structure appears (thresholds 300-380, HG 8 and 15); with it on (thresholds 190-420) the
+pedestal peak is at ~103 and a second hump appears above it. Default HG, ch6: hump centre
+117/121/125 at DAC 340/380/420, i.e. it moves with the trigger threshold (the discriminator cuts the
+1 p.e. distribution), lowest-threshold centre ~+14 ADC above the pedestal. HG 15: hump 177/203/211
+over a pedestal of ~105 (+70..+105), ratio ~8 to the default gain, as expected. **Estimate: ~13 ADC per
+photoelectron at default HG** (hold 110 ns, ch6, 29 V); 2 and 3 p.e. fingers are not resolved
+(noise sd ~3 ADC at default gain, 1 p.e. is ~13), so this is NOT yet a clean finger plot.
+Next for a real finger plot: lower thresholds (300-340) with more events, finer bins, a double-
+Gaussian + step fit, ch4/ch32, and the `Reset-n manual` box on the Acquisition page (added this
+session, tested, committed) — Acquisition page now exposes sync IO, external trigger and reset-n.
+Operations found: after a transport timeout in a cleanup the I2C readback can be bit-shifted
+(456/677 defaults mismatches); `initialize_fpga()` + `apply_default_config()` fixed it without a
+power cycle (runbook updated). A truncated ADC readback (expected 51204, received 23460) leaves the
+stream out of step; waiting a few seconds lets it drain, then the same recovery works. LED left at 5 V
+(restored). 504 tests OK.
+
+**Generator idle level (important, found by the operator's question):** `AMPL x` only changes the pulse
+amplitude around a fixed DC offset. At `AMPL 0.2` CH1's line sat at a steady **+3.14 V**, so the LED was
+glowing continuously in every "dark" run and the earlier amplitude sweeps (median floor ~137) had a DC light
+level underneath. Fix: set the levels explicitly: `LOLVL 0` and `HILVL 0.05` (EER +0; line ~8 mV mean)
+for a dark LED, `LOLVL 0` + `HILVL 5` for the operator's 0-5 V pulse (or `OUTPUT OFF`, which only
+touches CH1). `dark_series.py` now uses the levels.
+Dark-count finger runs with a truly dark LED (`dark_series5`, `dark_hold1`; no hang in ~85k events on the
+direct USB port): same as with the DC light: ch6 pedestal 103.8 (FWHM 3.2 ADC; July's old SiPM: 106.6,
+FWHM 2.0, 7.2 ADC spacing), hump moves with the threshold (114/118/123 at DAC 300/340/380), 15-17% of events
+above ped+8 with mean excess ~15 ADC. **The distribution does not depend on the hold delay at all**
+(40-260 ns identical), i.e. in self-triggered mode the sample is the pulse's true peak, so the broad hump is
+the real amplitude distribution, not timing smear. Conclusion so far: gain ~13-15 ADC per p.e. at default
+HG; discrete 2/3 p.e. fingers are NOT resolved on the plint SiPMs at 29 V (more crosstalk/afterpulsing or
+overvoltage than July's old SiPM are candidates). Unresolved: whether autocalibrated trims, a lower bias or a
+different threshold DAC would sharpen it.
+
+Operator note: the July logbook SiPMs may have been 1 or 3 mm devices, where finger plots are far
+easier (fewer cells, lower capacitance, much lower dark rate); the plint SiPMs are probably larger
+(more crosstalk/afterpulsing, higher rate), so resolved fingers may not be attainable on them.
+Relative gain on the three plint SiPMs from dark counts (`dark_series6`, `dark_series5`; LED dark, default HG,
+`rstn_manual` on, self-triggered, 10000 events, thr 300/340): pedestal / FWHM / frac > ped+8 / mean excess (ADC):
+ch4 112.8 / 4.5 / 3-5% / 11.7-13.5; ch6 103.8 / 4.0-4.5 / 16-21% / 13.1-15.1; ch32 128-131 / 9.5 / 7-8% /
+11.4-12.0. So ~12 ADC per p.e. (+-15%) at default HG on all three: a usable relative gain for Step 4 without
+resolved fingers; dark rates differ by 4-6x (ch6 highest); pedestals differ per channel (subtract each);
+ch32 is the noisiest. Not autocalibrated (trims lost at every power cycle).
+
+gain2-style LED fingers (operator pointed at `cryo_detector/gain2`: LED pulse 40 ns / 2.23 V high / 1 kHz, scope
+triggered on the pulser, narrow gate around the pulse peak, peak-to-peak histogram; plus `rtg/` FFT spacing for
+dark pulses on 6 mm SiPMs). Mapping to RADIOROC: generator CH2 (0-2.4 V, 100 ns) -> board IO6/IO_FPGA6 external
+trigger, CH1 -> LED with explicit levels (`LOLVL 0`, `HILVL h`, `PULSWID 40 ns`), hold 35 ns (peak, measured with
+the external trigger), `led_finger.py`. Result (ch6, default HG, rstn on, 5000 events/step): at 40 ns the light is
+already few-p.e. even at 5 V (46% of events at the pedestal); at 4 / 3.6 / 3.3 V a sharp zero-p.e. peak at 103
+(~45%), a broad first peak ~105-125, a second at ~135 and a weak third ~165: **first LED finger structure on
+this board** (`radioroc_runs/led_finger1`). Spacing not yet settled (16 vs 32 ADC; odd peaks smeared by dark pulses
+landing at random phase); next: HG 15 (8x larger steps) and lower levels. The 3.3 V step timed out waiting for
+FPGA word 4 bit 5 after ~1600 events (cleanup restored). 100k-event dark data: FFT spacing 14.9 ADC on ch6 (6x
+median), ch4/ch32 no detection. Handover to the operator: ch6 HG code 15 and analog probe (ch6 HG shaper) set, generator
+CH1 restored to 0-5 V / 100 ns, scope in NORM; operator takes the scope/generator.
+
+Staircase check on the fingers (operator, citing Alex: fingers vs artefacts need a dark staircase): fine dark threshold
+scan ch4/6/32, DAC 240-460 step 2, 500 ms, LED off (CH1 `OUTPUT OFF`, CH2 trigger still running), probe off, defaults
+(`radioroc_runs/staircase_fine_ch4_6_32_*`). ch4 and ch6: plateau (slope ~ -0.008 dec/DAC) from DAC ~275 to ~375, then a
+steep step (~ -0.025) from ~380 to ~430, with a weak bump near 420-430: consistent with a 1 p.e. plateau and a ~1.5 p.e.
+step; the 0.5 p.e. edge is buried in noise below ~270, so no spacing from the plateau width, and no DAC->ADC conversion yet.
+ch32: smooth steep decay, no plateau (its fingers are not supported). Supports ch4/ch6 fingers being p.e. levels (weakly).
+State: board defaults, probe off, LED off (CH1 output off).
+
+Register reference for a collaborator (`docs/register_map.md`, compact: serial frames, I2C row format, per-channel rows,
+common blocks, FPGA words, ADC frame, and an "inversions and conversions" list). Writing it exposed a **bug in the
+Main-tab threshold DAC setters**: `set_t1_threshold_dac`/`set_t2_threshold_dac`/`set_tq_threshold_dac` (called by
+`apply_channel_config`) had the sub-fields of `(65,2)`/`(65,3)` swapped relative to the hardware-validated
+`set_threshold_dac` and to the packaged defaults (which decode to 512 for T1, T2 and TQ only with the validated layout:
+`(65,2)={dac2[5:0],dac1[9:8]}`, `(65,3)={dacQ[3:0],dac2[9:6]}`). Fixed to the validated layout, tests updated
+(`test_radioroc_core`, `test_channel_config`) with a default-decodes-to-512 check and a cross-check against
+`set_threshold_dac`; scans were never affected (they use `set_threshold_dac`); not re-checked on hardware.
+Also noted: `set_threshold_dac(t1=False)` rewrites all of `(65,2)` and clears `dac1[9:8]`. 504 tests OK.
+
+LED level sweeps with the proper levels (ch6, default HG, ext trigger, hold 35, 2000 events/step, `led_finger2`, `led_finger_order`,
+`led_finger_hg15`): zero-p.e. fraction ("frac<ped+6") stays 28-35% for **every** drive tried: 5/4.5/4/3.6/3.4/3.2/3.0 V at 40 ns
+(0.28/-/0.29/-/0.35/0.29/0.32) and 5 V at 20 ns (0.31); median ~119 in all; an order control (4 V, 5 V) gave identical results
+(0.29 vs 0.28). So the humps do **not** scale with the LED drive over 40 ns x 3-5 V and 20 ns x 5 V: the 10 ns step was rejected by the
+generator (EER -8). Open suspicion: the structure may be partly or wholly independent of the LED light (for example electrical pickup of
+the CH2 trigger pulse into the readout, or the dark-pulse sampling pattern). Decisive control not yet done on this board and used in
+gain2: **LED off (CH1 output off) with CH2 still triggering**; if the same humps appear, they are not LED light. HG 15 (4.5/4/3.6 V, 40 ns):
+pedestal 103, humps at +45..+50 and +155..+160 (and +240 at 3.6 V), not evenly spaced.
+Harness bug fixed (step-numbered output folders), external-trigger rate ~20 events/s, timeout >= 60 s (runbook section 8).
+Handover 17:50: board at verified defaults (ch6 HG default, probe off), generator CH1 0-5 V 100 ns output ON, CH2 trigger running 200 Hz; the
+operator takes the scope and generator.
+
+Next (superseded by the synced scan above): redo autocalibration with bias on, then choose the threshold from a biased
+LED-on/off threshold scan so the trigger selects LED pulses, repeat the
+acquisition, and scope-check the generator/LED pulse.
+
+## RADIOROC 42 — Newest app on the bench: Step 1 passed, Step 5 blocked on generator setup
+
+Branch `lab/newest-app-test` from `origin/main` `c1b1993` (same tree as
+`feat/daq-results-gui` `a24172d`). Correction: the first `tools/check_development.py`
+run used `.conda-radioroc`, which has no PySide6 on this Mac, so it exited 0 with
+148 GUI tests skipped. Use `.venv-foundation` (PySide6 6.11.2) with
+`PYTHONPATH=src` here. Hardware driven through the real `MainWindow`
+(offscreen harness, shared `ConnectionPanel`, `/dev/cu.usbserial-RD3_320`,
+115200, 0.5 s); the operator closed their own desktop instance first. Bench
+per operator: SiPMs connected but unbiased; generator set up for Ctest.
+
+- Step 1 (Threshold scan tab), ch 4,6,32, T1, gain 1, DAC 0-1023 step 10,
+  100 ms, mask on, Ctest off, defaults off (keeps the operator's
+  autocalibration trims): completed, 103 points/309 windows, restored,
+  verification passed. Pedestal peak DAC 110 on all three; zero rate above
+  DAC 320 (ch4, ch6) and 450 (ch32), unbiased.
+  `radioroc_runs/step1_pedestal_ch4_6_32_20261016T052958Z/`.
+- Step 5 (Hold scan tab), ch4, external hold 100-900 ns step 50, 10 acq,
+  threshold 450, Ctest on, sync pulse on IO1 mux 5, conversion 400 ns,
+  trigger type 0/source 3, rstn manual, gain 1, defaults off: app run
+  completed and restored, but data not acceptable: HG mean ~520-780 with
+  stdev ~420-460 at every delay, 14-17 events per 10 acquisitions, no peak.
+  Controls: Ctest off -> HG 103.7 +/- 0.7, exactly 10 events (clean);
+  Ctest on with sync off -> HG 1016 +/- 1 (raw ~4066, HG saturated), LG 223,
+  at every delay. So the generator fires without the IO1 trigger and the
+  pulse at the board is far above ~50 mV (attenuator missing or amplitude
+  too high). Not a software finding. Runs:
+  `step5_hold_ctest_ch4_20261016T053208Z`,
+  `step5_hold_ctestoff_control_ch4_20261016T053251Z`,
+  `step5_hold_ctest_nosync_control_ch4_20261016T053320Z`.
+- App observation: `ConnectionPanel.connect_to()` issued while the
+  start-up port discovery is still running is silently dropped (state stays
+  idle, no error shown). Harness worked after waiting for the port list.
+  Not yet reproduced offline.
+
+- Generator incident: my earlier `CHN 2`/`OUTPUT OFF` left the TGF4162
+  front panel on channel 2 and in remote; the operator noticed. Restored
+  with `CHN 1` + `LOCAL`. Ctest is generator channel 1 only.
+- Controls after the operator's channel-1 setup (Ctest on, sync off):
+  CH1 output OFF -> no triggers, ADC acquisition timeout, app faulted
+  visibly with cleanup restored (correct behavior); CH1 output ON -> clean
+  decaying hold curve. So events are triggered by ch4's discriminator on the
+  generator's own (free-running) pulses, not by IO1; the earlier saturation
+  had gone after the operator's setup.
+- Step 5, self-triggered (sync off), hold 0-600 ns step 20, otherwise as
+  above: completed, 31 points, restored, 10 events/point. Clear peak: HG
+  981 +/- 1.5 at 60-80 ns (LG 212 at 60 ns), falling to 98 at 400 ns and
+  undershooting to ~37 (below the 104 pedestal) by 500-600 ns.
+  `radioroc_runs/step5_hold_selftrig_ctest_ch4_20261016T054013Z/` with
+  `hold_curve.png`. Candidate `hold_delay_ns` 70 (peak-plateau centre,
+  smallest spread), conversion 400 ns. Discriminator-referenced timing
+  matches how the plint experiment will trigger (SiPM discriminators).
+  Caveats: HG peak is ~96% of the ~1016 saturation level, so this pulse is
+  too large for amplitude (Step 4) work; hold timing should be confirmed with
+  real biased-SiPM pulses and the experiment's coincidence trigger setting.
+
+Offline MVP-review fixes (delegated to two workers in separate worktrees,
+diffs reviewed and checks rerun by the lead, cherry-picked here):
+- `a24a18c` review finding 7: Acquisition counts physical events as
+  distinct (batch, event) groups ("15 events (120 channel rows)"), live and on
+  reopen; plot and text panes are in a vertical splitter with a compact legend,
+  so the axes keep their size at 1024x768 with 8 channels. Vendor-file import
+  still reports rows.
+- `440865c` review findings 4/5 and record validation: autocalibration logs each
+  trim write (`attempted` then `applied`) and persists computed results and
+  `applied_corrections` in `autocalibration_metadata.json`.
+  `calibration_status` is not_applied/unverified/verified, where verified means
+  the final scan completed (no alignment-tolerance check yet; tolerance is
+  operator-defined). An unverified ending latches a ConnectionWorker fault.
+  No restoration writes added. The calibration record accepts autocalibration
+  run directories, rejects failed verification, out-of-range values and empty
+  evidence; the CLI gains `--shaper-gain HG=n/LG=n`. Upper bounds of 255 and
+  1,000,000 for gain codes and delays are loose guesses. Not done: replacing
+  the reference-restoration cache check with real readback.
+- Combined check: `PYTHONPATH=src .venv-foundation/bin/python
+  tools/check_development.py` exit 0, 471 tests OK, none skipped.
+- `f953301` connect-during-discovery: `MainWindow` refreshes ports at
+  start-up; `ConnectionWorker.connect()` during "discovering" raised
+  `JobBusyError`, whose message `ConnectionPanel` then overwrote with the next
+  snapshot, so Connect looked silently dropped. A connect issued during
+  discovery is now queued and runs when discovery ends (discarded on shutdown
+  or existing session). The worker test fails without the fix.
+  Residual, not fixed: panel errors can still be overwritten by the next poll.
+- `873287c` review finding 6: Acquisition live display reads `events.csv`
+  incrementally (byte offset, torn-line and replace/truncate handling,
+  20k lines per tick) into fixed 4096-bin HG/LG histograms per channel; the
+  bins control re-bins at draw time. Display floors the x0.25-scaled values to
+  whole bins (display only; saved data untouched). Synthetic 800k-row tick
+  takes ~0.012 s (was 6.1 s); display memory is channels x 2 x 4096.
+- Combined after all four: exit 0, 474 tests OK, none skipped. A real on-screen
+  visual check at 1024x768 is still pending (offscreen tests only).
+
+- `3ed90b2` review finding 8: append keeps a per-segment manifest list
+  (`segments`, same schema_version; top level still describes the latest
+  segment; an old single-segment run converts to `segments[0]`). Segments are
+  identified by batch range (no CSV column change); an append whose batch range
+  overlaps an earlier segment is rejected without touching files. Mixed
+  channel sets are allowed and recorded per segment. The reader exposes
+  `segments`. The GUI has no append path; CLI `--append` is unchanged.
+  Combined: exit 0, 478 tests OK.
+
+Bench, operator busy (pre-authorized board use): Acquisition rehearsal via
+`MainWindow` stopped before any write: Registers tab "Read all" raised
+`TimeoutError: i2c FIFO transaction timed out`; worker closed the session to
+`error` (register (4,7) untouched; word0 restored `00111111`, status 5).
+Read-only probe (`RadiorocDevice.read_fifo` over the 677-row default table):
+11 single-chunk transactions of 64 rows (256 bytes) all OK (~0.064 s each);
+a 128-row (two-chunk) transaction then left the board unresponsive on USB
+(status read times out; needs power cycle). Consistent with every hang seen
+(full-table defaults write, full read-all): multi-chunk FIFO transactions in
+`i2c_fifo_transaction` are unreliable; single-chunk ones are not observed to
+fail. Vendor bytecode (`local_artifacts/generated_notes/radioroc_i2c_pydisasm.txt`,
+i2c.py:143-309) shows our `i2c_fifo_transaction` matches the vendor sequence
+exactly (256-byte chunks, word 60 0/2/4, poll word 4 bit [7] x1000 with no
+sleep, word 0 bit 1, one drain of word 55 at the end), and the vendor also
+reads and writes the whole table in one multi-chunk call. So "multi-chunk is
+unsupported" is NOT established. The only certain difference is that on poll
+timeout the vendor prints and continues (still writing 60=`00000100`), while we
+raise and skip it. The vendor also checks a D2XX event status before each USB
+request; we reset the input buffer before reads. Root cause open. Next: after
+a power cycle, run a request-level trace of one 128-row read (scratchpad
+`i2c_trace_probe.py`) to find the exact request that stalls. No fix until
+then.
+Evidence: `radioroc_runs/acq_ctest_selftrig_ch4_20261016T061806Z/`.
+
+After operator power-cycle (SiPMs unbiased): single-row reads OK (ch4
+sub7 `00001111`). Acquisition tab rehearsal via `MainWindow`, Ctest enabled through
+the Registers tab single write (4,7) `00011111` (verified), ch4 simple
+trigger, threshold 450, hold 70, conv 400, 5x20: completed, restored; reopened
+"100 events (100 channel rows)"; 1024x768 screenshots usable; (4,7) restored
+to `00001111` (verified). `radioroc_runs/acq_ctest_selftrig_ch4_20261016T062341Z/`.
+But HG 270 +/- 6.6, inconsistent with the earlier 981 at 70 ns. Cause found:
+power cycles reset the ASIC to power-on values (not defaults), so post-cycle
+scans ran on an undefined configuration (the operator's autocalibration trims
+were also lost). A hold recheck without defaults gave a flat HG 704 at 20-200 ns.
+Defaults then applied with a request trace: one vendor-identical write, 70 requests OK,
+677/677 verified by 64-row reads. Hold recheck with defaults: HG saturated
+~1017 at 80-600 ns (as in the first Ctest attempt). The good decaying curve was
+seen only right after `OUTPUT ON` was sent to CH1, so the Ctest result depends
+on generator state that I cannot observe; generator-dependent work is paused
+pending the operator's check of CH1 pulse width/amplitude/trigger (scope).
+I2C hang: with a fresh power cycle plus defaults, 64-, 128- and 677-row traced reads
+all OK (677: 71 requests, max 17 ms). All three hangs today were the first
+large I2C operation after >= 20 min idle (00:14 overnight, 04:35 after
+20 min, 06:18 after 38 min). Testing: 25 min idle then a traced 677-row read.
+Lesson for the procedure: after every power cycle, apply defaults (and redo
+autocalibration) before any scan.
+
+LED test (operator later corrected: SiPMs were NOT biased during any LED run;
+LED pulsed by generator CH1, brightness unknown): threshold scans ch 4,6,32 (DAC 0-1023 step 10, 100 ms, gain 1) with
+CH1 on, then CH1 off (LED dark), then CH1 back on; both completed, restored,
+verified. `led_on_threshold_ch4_6_32_20261016T*`, `led_off_threshold_*`.
+No LED-attributable rate above the pedestal (on/off equal within scan noise
+at DAC 200-600 on all three channels): LED too dim or its pulse rate small
+against a dark rate of ~1e5 Hz. Biased curves again show ~2-3e5 Hz below the
+pedestal (DAC 0) with the SiPMs unbiased, i.e. the cabling/ground-path
+interference identified this morning, not SiPM dark counts. These are
+unbiased scans; the biased Step 1 floor has still not been measured.
+
+LED brightness raised by operator: threshold on/off pair again equal within
+noise (`led_bright_on_*`, `led_bright_off_*`). Synced hold scan (IO1 mux 5
+sync on, Ctest off, ch4, threshold 450, 0-900 ns step 50, 20 acq):
+completed and restored, but HG ~190-235 (sd 105-130) flat over delay, LG mean
+above HG, and 38-41 events per 20 requested acquisitions
+(`led_sync_hold_ch4_*`). No LED-correlated signal, as expected with unbiased SiPMs (explains all LED
+nulls; repeat with bias on). The
+event-count excess (about 2x requested) is unexplained and should be checked
+against the acquisition short/over-batch accounting gap in the review. Stopped
+generator/LED experiments: the generator's actual mode, rate, width and amplitude
+are unobservable from here; they need an operator scope check.
+
+Biased (operator confirmed; voltage not stated): LED on/off threshold pair
+ch 4,6,32: rates above the pedestal 2-5x the unbiased values (bias effective; e.g. ch4
+DAC 400 1.4e5 vs 3e4 Hz) but LED on/off still equal. Synced hold scan (sync
+on, Ctest off): identical to unbiased (HG ~220 +/- 115, LG > HG, 40-41 events
+per 20 requested), so it is not SiPM signal. App gap confirmed in code:
+`RadiorocDevice.acquire_adc_batch` (radioroc_client.py ~2593) takes the FPGA
+count (words 29/28 / 256) and decodes that many events with a channel counter
+reset at 0, never comparing with the requested `nb_acq`; the hold scan stores
+`len(high_gain[ch])` as count. Requested-vs-received mismatches are silently
+accepted (review "short batches" gap, here over-count); misframed payloads
+would also explain LG > HG. Offline fix started: record requested/received per
+batch and surface mismatches (landed as the next commit: `last_adc_batch` {requested, received, count_word, payload_bytes, warnings}; non-multiple-of-256 count words warned; payload-length mismatch raises; hold CSV gains trailing `requested`/`received` columns; acquisition manifest gains `batch_counts`; mismatches become result warnings; 487 tests OK). Bench signal path (generator/LED/IO1) needs an
+operator scope check; no further guessing.
+
+LED re-seated flush to the scintillator by the operator: LED-on threshold scan
+ch 4,6,32 collected 103 points but ended `failed`/faulted: restoration
+verification status failed with no mismatches or missing entries (cleanup
+`restored`), then the board stopped answering USB (status reads time out). The
+LED-off scan could not connect. CH1 restored ON + LOCAL. LED-on data are
+untrusted (all channels cut off sharply near DAC 520, unlike every other
+scan). Hang occurred about 8 min after the previous board activity, right after
+the operator handled the setup near the board. Needs power cycle, then
+defaults, before any further scan. `led_flush_on_threshold_ch4_6_32_20261016T070312Z`.
+Gap to check offline: why verification reports failed with empty mismatch and
+missing lists (likely an exception during readback; should say so).
+
+After power cycle + defaults (677/677 verified), operator confirmed generator
+pulsing. LED on/off threshold pair ch 4,6,32 (both PASSED): LED clearly visible
+above the pedestal, e.g. DAC 480 ch4 4.8e4 vs 2.3e3, ch6 1.5e5 vs 230, ch32
+4.2e4 vs 4.9e3 Hz; LED-on curves non-monotonic in places (LED output
+fluctuating; operator reported a loose LED connection).
+`led_pulsing_on/off_threshold_ch4_6_32_*`.
+LED self-triggered hold scans, ch6, threshold 480 (LED-dominated), Ctest off,
+sync off, 20 acq: requested == received 20 at every point. Default gains: HG
+~110-123 (sd 7-45) vs pedestal ~104, LG flat 98, no peak over 0-600 ns.
+With `high_gain_code=15`: LG rose to ~104-120 with sd up to 47 and tracked the
+pulses, while HG barely changed. First bench evidence that the HG/LG
+shaper-gain fields may be swapped (the existing "HG/LG nibble mapping" concern);
+not resolved, needs a register-level check against the vendor UI before Step 4
+relies on it. LED signals are only ~5-15 counts above the pedestal, so p.e. peaks
+are not resolvable at these settings.
+`led_selftrig_hold_ch6_20261016T*`, `led_selftrig_hold_ch6_hg15_*`.
+Accounting fix: the count-word low byte is constant 254 with exact counts and the
+vendor divides by 256 too, so the "not a multiple of 256" warning was a false
+alarm; removed (raw word still recorded), test updated.
+
+Offline app test (ChatGPT, no hardware, `docs/app_test_report_2026-10-16.md`):
+5 findings, all fixed offline and merged (`fe70dc2` behaviour: sim/hardware output
+paths, autocal reopen, hold labels; layout commit: minimum window size 834x603,
+wrapped titles, "Keep current" width). 496 tests OK. Real-display 1024x768
+recheck pending. Correction: the earlier claim that the Acquisition plot kept
+its size at 1024x768 rested on offscreen tests and was wrong on the real display
+(the window minimum was ~926 px tall).
+
+Setup clarification (operator, 2026-10-19): channels 4, 6 and 32 are three SiPMs mounted flat on the surface of the plint (plastic scintillator); the LED shines in through a hole in the plint. SiPM bias was 29 V throughout all RADIOROC 42 biased runs. "Plint" is the operator's term for the plastic scintillator. Still unknown: generator rate/width/amplitude and LED brightness (need a scope check).
+
+Operator decisions needed (MVP directive): trigger scheme (the hardware has a fixed
+named pair; options are a fixed pair, OR trigger plus an offline two-channel cut,
+or external coincidence); plint channel-to-position map; calibration
+acceptance tolerances; student machine/OS; confirm the 70 ns hold.
+
+Next: operator confirms 70 ns; then write the Step 6 record with
+`scripts/radioroc_save_calibration_record.py` (Step 1 rerun with bias on
+first, since the procedure requires biased floors).
+
 ## Independent plint MVP sanity review — 24 September 2026 (Astra)
 
 Reviewed `feat/daq-results-gui` at `4435584`, at the operator's request,

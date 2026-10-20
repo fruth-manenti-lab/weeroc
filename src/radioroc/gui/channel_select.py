@@ -75,6 +75,7 @@ class ChannelSelectGrid(QWidget):
         for channel in range(N_CHANNELS):
             button = QPushButton(str(channel))
             button.setCheckable(True)
+            button.setAccessibleName(f"Channel {channel}")
             button.setStyleSheet(CHANNEL_BUTTON_STYLE)
             button.toggled.connect(self._update_summary)
             grid.addWidget(button, channel // _GRID_COLUMNS, channel % _GRID_COLUMNS)

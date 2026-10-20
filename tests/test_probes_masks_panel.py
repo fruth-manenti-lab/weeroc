@@ -95,6 +95,26 @@ class ProbesMasksPanelTests(unittest.TestCase):
         self.assertTrue(panel.status_label.text())
         self.assertIn("bus busy", panel.status_label.text())
 
+    def test_apply_probe_submits_only_the_selected_channel_routing(self):
+        worker = FakeWorker()
+        panel = self.make_panel(worker)
+        panel.probe_channel_spin.setValue(6)
+        panel.probe_source_combo.setCurrentIndex(1)
+
+        operation = panel.apply_probe()
+
+        self.assertEqual(operation.analog_probe_sources, {6: "shaper_hg"})
+        self.assertIsNone(operation.tq_mask_states)
+        self.assertEqual(worker.channel_config_calls, [operation])
+
+    def test_probe_routing_is_exclusive_and_clear_all_button_submits_clear_all(self):
+        worker = FakeWorker()
+        panel = self.make_panel(worker)
+        panel.probe_source_combo.setCurrentIndex(1)
+        self.assertTrue(panel.build_probe_operation().analog_probe_exclusive)
+        panel.apply_probe_clear_all()
+        self.assertTrue(worker.channel_config_calls[-1].analog_probe_clear_all)
+
     def test_attach_hints_wires_the_three_grids_and_the_apply_button(self):
         from PySide6.QtCore import QEvent
         from PySide6.QtWidgets import QMainWindow

@@ -154,6 +154,18 @@ class AcquisitionJobTests(unittest.TestCase):
     def manifest(self):
         return json.loads((self.directory / "metadata.json").read_text())
 
+    def test_clear_analog_probe_switches_routed_channels_off_and_warns(self):
+        self.transport.asic.update({(ch, 66): 0 for ch in range(N_CHANNELS)})
+        self.transport.original_asic = dict(self.transport.asic)
+        self.transport.asic[(4, 66)] = 0b00001000
+        self.transport.asic[(9, 66)] = 0b10100010
+        self.config = AcquisitionJobConfig(self.acquisition, clear_analog_probe=True)
+        result = self.run_job()
+        self.assertEqual(result.status, "completed")
+        self.assertTrue(any("analog probe switched off" in w for w in result.warnings))
+        self.assertEqual(self.transport.asic[(4, 66)] & 0xF, 0)
+        self.assertEqual(self.transport.asic[(9, 66)], 0b10100000)
+
     def test_success_values_progress_and_manifest(self):
         events = []
         result = self.run_job(on_event=events.append)
@@ -362,7 +374,8 @@ class AcquisitionJobTests(unittest.TestCase):
                         # unmasks trigger_channel_2, but only ever writes rows
                         # for channels in `channels`.
                         {"trigger_channel": 7},  # channels=[4], trigger_channel not among them
-                        {"trigger_type": 1, "trigger_source_2": 3, "trigger_channel_2": 7}):
+                        {"trigger_type": 1, "trigger_source_2": 3, "trigger_channel_2": 7},
+                        {"sync_io": "bogus"}, {"sync_io_mux_index": 8}, {"sync_io_mux_index": -1}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 AcquisitionJob().run(self.device, AcquisitionJobConfig(replace(self.acquisition, **changes)))
         self.assertEqual(self.transport.trace, [])
@@ -451,6 +464,45 @@ class AcquisitionJobTests(unittest.TestCase):
         self.assertIn((65, 1), set(self.config.registers()))
         self.assertEqual(self.transport.asic[65, 2], self.transport.original_asic[65, 2])
         self.assertEqual(self.transport.asic[65, 1], self.transport.original_asic[65, 1])
+
+    def test_sync_io_mux_is_written_and_restored_with_synchro_trigger(self):
+        """A synced acquisition (generator in triggered burst, board IO1 -> its
+        trigger input) needs IO1 mux 5 set for the run and put back after."""
+        self.config = AcquisitionJobConfig(replace(
+            self.acquisition, synchro_trigger=True, sync_io="io1", sync_io_mux_index=5))
+        before = self.device.read_fpga_io_mux()
+        self.transport.trace.clear()
+        result = self.run_job(verify_restoration=True)
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.verification["status"], "passed")
+        mux_writes = [event for event in self.transport.trace
+                      if event[0] == "write" and event[1] in (77, 78)]
+        self.assertTrue(mux_writes, "IO mux words were never written")
+        self.assertEqual(self.device.read_fpga_io_mux(), before)
+        self.assertTrue({77, 78} <= {item["address"] for item in result.verification["expected"]["fpga"]})
+
+    def test_mux_words_are_never_changed_when_sync_io_mux_index_is_unset(self):
+        # Cleanup rewrites the snapshotted words; with no mux index requested
+        # they must be rewritten with their original (all-zero) value only.
+        self.transport.trace.clear()
+        self.run_job()
+        values = {event[2] for event in self.transport.trace
+                  if event[0] == "write" and event[1] in (77, 78)}
+        self.assertLessEqual(values, {bits(0)})
+
+    def test_external_trigger_sets_the_adc_control_bit(self):
+        """configure_adc_external_hold's peak-or-external bit (bit 2 of word 25) is set
+        for an external-trigger run and clear for a discriminator run."""
+        def control_words(external):
+            self.device = RadiorocDevice(AcquisitionTransport(nb_acq=2, adc_batches=[
+                adc_payload(2, {4: ([1.0, 2.0], [1.0, 2.0])}), adc_payload(2, {4: ([1.0, 2.0], [1.0, 2.0])})]))
+            self.directory = Path(self.tmp.name) / ("ext" if external else "disc")
+            config = AcquisitionJobConfig(replace(self.acquisition, external_trigger=external,
+                                                  out_dir=self.directory))
+            self.assertEqual(AcquisitionJob().run(self.device, config).status, "completed")
+            return [event for event in self.device.transport.trace if event[0] == "write" and event[1] == 25][0][2]
+        self.assertEqual(control_words(False)[5], "0")
+        self.assertEqual(control_words(True)[5], "1")
 
 
 if __name__ == "__main__":

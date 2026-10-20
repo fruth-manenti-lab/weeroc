@@ -25,11 +25,13 @@ from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.application.hold_scan import HoldScanJob, HoldScanJobConfig
 from radioroc.application.hold_scan_worker import HoldScanWorker
 from radioroc.data.hold_reader import read_hold_run
+from radioroc.gui.layout_util import fit_controls_pane, fit_special_text, wrap_plot_title
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
 from radioroc.gui.channel_select import ChannelSelectGrid
 from radioroc.gui.connection_panel import ConnectionPanel
 from radioroc.gui.hint_bar import HintBar
 from radioroc.transport.hold_scan_simulator import HoldSimulationConfig
+from radioroc.gui.output_paths import guard_output, refresh_auto_output
 
 
 def _integer(low, high, value):
@@ -213,10 +215,13 @@ class HoldScanWindow(QMainWindow):
         gain_form = QFormLayout(self.gain_group)
         self.trigger_preamp_gain = _integer(0, 63, 0)
         self.trigger_preamp_gain.setSpecialValueText("Keep current")
+        fit_special_text(self.trigger_preamp_gain)
         self.high_gain_code = _integer(0, 15, 0)
         self.high_gain_code.setSpecialValueText("Keep current")
+        fit_special_text(self.high_gain_code)
         self.low_gain_code = _integer(0, 15, 0)
         self.low_gain_code.setSpecialValueText("Keep current")
+        fit_special_text(self.low_gain_code)
         for label, field in [("Trigger preamp gain code", self.trigger_preamp_gain),
                              ("High-gain shaper code", self.high_gain_code),
                              ("Low-gain shaper code", self.low_gain_code)]:
@@ -259,7 +264,7 @@ class HoldScanWindow(QMainWindow):
         self.details.setPlaceholderText("Preview, run provenance and cleanup details appear here.")
         right_layout.addWidget(self.details, 2)
         split.addWidget(right)
-        split.setSizes([410, 750])
+        fit_controls_pane(split, scroll, self.controls)
 
         buttons = QHBoxLayout()
         self.preview_button = QPushButton("Preview")
@@ -435,8 +440,8 @@ class HoldScanWindow(QMainWindow):
         if not simulation and previous_mode != self._accepted_mode:
             self.initialize.setChecked(False)
             self.defaults.setChecked(False)
-            if "radioroc_runs" in Path(self.output.text()).parts:
-                self.output.setText(_new_directory("hardware"))
+        if previous_mode != self._accepted_mode:
+            refresh_auto_output(self.output, "simulation" if simulation else "hardware", _new_directory)
         self.run_button.setText("Run simulation" if simulation else "Run hardware hold scan")
         self.sim_group.setEnabled(simulation and self.worker is None)
         self._update_connection_controls()
@@ -455,12 +460,20 @@ class HoldScanWindow(QMainWindow):
         else:
             self.hold_min.setRange(0, 20475)
             self.hold_max.setRange(0, 20475)
+        unit = "code (0-255)" if internal else "delay (ns)"
+        form = self.controls.layout()
+        for field, text in ((self.hold_min, f"First hold {unit}"), (self.hold_max, f"Last hold {unit}"),
+                            (self.hold_step, "Hold step (codes)" if internal else "Hold step (ns)")):
+            label = form.labelForField(field)
+            if label is not None:
+                label.setText(text)
+            field.setSuffix("" if internal else " ns")
 
     def _show_mode_banner(self):
         self.banner.setText(
             "SIMULATION · Synthetic ADC counts, not measured lab data. No board connection."
             if self.mode.currentIndex() == 0 else
-            "HARDWARE · USB candidates are unverified. FPGA initialization and apply-defaults "
+            "HARDWARE · USB candidates are unverified until you connect; the firmware status then confirms the board. FPGA initialization and apply-defaults "
             "are off by default; masking/Ctest/gain are temporary scan settings. Restoration readback "
             "verification is mandatory. Initialization and defaults are persistent changes.")
 
@@ -632,6 +645,8 @@ class HoldScanWindow(QMainWindow):
         output = self.output.text().strip()
         if not output:
             raise ValueError("choose a new run directory")
+        output = guard_output(self.output, "hardware" if self.mode.currentIndex() == 1 else "simulation",
+                              _new_directory)
         mode = "internal" if self.hold_mode.currentIndex() == 0 else "external"
         scan = HoldScanConfig(
             mode=mode, channels=channels, trigger_channel=self.trigger_channel.value(),
@@ -844,7 +859,7 @@ class HoldScanWindow(QMainWindow):
 
     def _plot(self, rows, x_name, title):
         self.axes.clear()
-        self.axes.set_title(title, fontsize=11)
+        self.axes.set_title(wrap_plot_title(title), fontsize=10)
         self.axes.set_xlabel("Internal hold code" if x_name == "hold_code" else "External hold delay (ns)")
         self.axes.set_ylabel("ADC counts")
         self.axes.grid(True, alpha=0.2)
@@ -887,7 +902,7 @@ class HoldScanWindow(QMainWindow):
         try:
             saved = read_hold_run(Path(path))
             label = saved.execution_mode.upper()
-            self.banner.setText(f"SAVED RESULT · {label} · {saved.status} · {saved.directory}")
+            self.banner.setText(f"SAVED RESULT · {label} · {saved.status} · {saved.directory} · Controls show current settings, not this run's")
             self._plot(saved.rows, saved.x_name, f"{label} · {saved.status} · {len(saved.rows)} saved points")
             status = f"{label} · {saved.status} · {len(saved.rows)} points"
             self.status.setText(status + (" · " + "; ".join(saved.warnings) if saved.warnings else ""))

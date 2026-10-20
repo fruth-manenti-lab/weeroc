@@ -22,6 +22,7 @@ class HintBar(QObject):
 
     def show_default(self):
         self._bar.showMessage(self._default_text)
+        self._bar.setToolTip(self._default_text)  # full text when the bar clips it
 
     def attach(self, widget, text):
         """Show `text` in the bar whenever the mouse hovers `widget`."""
@@ -33,6 +34,7 @@ class HintBar(QObject):
             text = obj.property("_hint_text")
             if text:
                 self._bar.showMessage(text)
+                self._bar.setToolTip(text)
         elif event.type() == QEvent.Type.Leave:
             self.show_default()
         return False

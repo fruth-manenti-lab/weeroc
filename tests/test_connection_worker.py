@@ -258,6 +258,24 @@ class ConnectionWorkerTests(unittest.TestCase):
         self.assertEqual(worker.snapshot().state, "stopped")
         self.assertIn("close", session.calls)
 
+    def test_connect_issued_during_discovery_is_queued_not_dropped(self):
+        discovering, release = threading.Event(), threading.Event()
+        def slow_discovery():
+            discovering.set()
+            release.wait(3)
+            return [PORT]
+        session = FakeSession()
+        worker = self.started(discovery=slow_discovery,
+                              session_factory=lambda config: session)
+        worker.refresh()
+        self.assertTrue(discovering.wait(3))
+        self.assertEqual(worker.snapshot().state, "discovering")
+        worker.connect(RadiorocConnectionConfig(port="fake-control"))
+        release.set()
+        snap = self.wait_for(worker, "connected")
+        self.assertEqual(snap.ports, (PORT,))
+        self.assertIn("enter", session.calls)
+
     def test_overlapping_commands_are_rejected_after_busy_state_is_published(self):
         entered, release = threading.Event(), threading.Event()
         worker = self.started(session_factory=lambda config: FakeSession(entered=entered, release=release))
@@ -403,6 +421,41 @@ class ConnectionWorkerTests(unittest.TestCase):
         self.assertEqual(outcome.step, "final")
         self.assertEqual(set(session.thread_ids), {worker._thread.ident})
         self.assertEqual(session.close_calls, 0)
+
+    def test_autocalibration_cancelled_after_corrections_latches_unverified_fault(self):
+        from radioroc.application.autocalibration import AutocalibrationJob
+        readings = [
+            (200, 200), (200, 0), (200, 0), (200, 200), (200, 200), (200, 0),
+            (200, 200), (200, 200), (200, 100), (200, 200), (200, 0), (200, 0),
+        ]
+        transport = ScurveTransport(point_readings=list(readings))
+        session = ThresholdSession(transport)
+        worker = self.started(session_factory=lambda config: session)
+        worker.connect(RadiorocConnectionConfig(port="fake-control"))
+        self.wait_for(worker, "connected")
+        original = AutocalibrationJob._run_sub_scan
+
+        def cancel_at_final(job, device, *, out_dir, **kwargs):
+            if Path(out_dir).name == "final":
+                worker._autocalibration_token.cancel()
+                kwargs["cancellation"].checkpoint()
+            return original(job, device, out_dir=out_dir, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(AutocalibrationJob, "_run_sub_scan", new=cancel_at_final):
+            operation = AutocalibrationJobConfig(
+                channels=[4, 5], t1=True, out_dir=Path(tmp) / "run",
+                probe_dac_min=0, probe_dac_max=20, probe_dac_step=10,
+                transition_dac_step=10, transition_margin=5,
+                transition_dac_floor=20, transition_dac_cap=20,
+                final_window_before=5, final_window_after=5, final_dac_step=5,
+            )
+            worker.run_autocalibration(operation)
+            snap = self.wait_for(worker, "faulted", timeout=10)
+            result = worker.autocalibration_snapshot().outcome.result
+        self.assertEqual(result.status, "cancelled")
+        self.assertEqual(result.calibration_status, "unverified")
+        self.assertIn("unverified calibration", snap.fault)
 
     def test_channel_config_applies_verifies_restores_and_stays_on_worker_thread(self):
         transport = OwnedThresholdTransport()
@@ -631,6 +684,21 @@ class ConnectionWorkerTests(unittest.TestCase):
         for result, expected in cases:
             with self.subTest(expected=expected):
                 self.assertIn(expected, ConnectionWorker._threshold_fault(result, None))
+
+    def test_failed_verification_fault_names_the_underlying_error(self):
+        # A failed report with no mismatches/missing entries (e.g. the board
+        # stopped answering during readback) must still say why.
+        result = ThresholdScanResult(
+            Path("run.csv"), status="completed", cleanup_status="restored",
+            verification={
+                "status": "failed", "mismatches": [], "missing": [],
+                "errors": ["read ASIC restoration state: TransportIOError: timeout"],
+                "cleanup": {"errors": ["idle I2C control: TransportIOError: timeout"]},
+            })
+        fault = ConnectionWorker._threshold_fault(result, None)
+        self.assertIn("restoration verification failed", fault)
+        self.assertIn("read ASIC restoration state: TransportIOError: timeout", fault)
+        self.assertIn("cleanup: idle I2C control", fault)
 
 
 if __name__ == "__main__":

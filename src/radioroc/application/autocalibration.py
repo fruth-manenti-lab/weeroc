@@ -207,6 +207,12 @@ class AutocalibrationResult:
     - `reference_restored` (`bool | None`): Whether the reference channel's
       probed-away calibration trim was confirmed restored (only checked when
       `verify_restoration` is requested).
+    - `applied_corrections` (`list[dict]`): Each persistent trim write, in
+      order, as `{channel, before, after, state}`; `state` is `"attempted"`
+      (write issued, outcome uncertain if it raised) or `"applied"`.
+    - `calibration_status` (`str`): `"not_applied"` (no trim written),
+      `"unverified"` (a trim write was attempted but final verification did
+      not pass) or `"verified"`.
     - `warnings` (`list[str]`): Non-fatal warnings.
     - `error` (`BaseException | None`): The exception that ended the run, if any.
     - `execution_mode` (`str`): `"hardware"`, `"simulation"` or `"dry-run"`.
@@ -223,6 +229,8 @@ class AutocalibrationResult:
     calibration_after: dict = field(default_factory=dict)
     sub_runs: dict = field(default_factory=dict)
     reference_restored: bool | None = None
+    applied_corrections: list = field(default_factory=list)
+    calibration_status: str = "not_applied"
     warnings: list = field(default_factory=list)
     error: BaseException | None = None
     execution_mode: str = "hardware"
@@ -308,8 +316,18 @@ class AutocalibrationJob:
 
         def persist():
             if writer is not None:
-                manifest.update(status=result.status, error=_describe(result.error),
-                                warnings=list(result.warnings))
+                manifest.update(
+                    status=result.status, error=_describe(result.error),
+                    warnings=list(result.warnings),
+                    calibration_status=result.calibration_status,
+                    reference_channel=result.reference_channel,
+                    reference_restored=result.reference_restored,
+                    lsb_ratio=result.lsb_ratio,
+                    mean_position=result.mean_position,
+                    crossings={str(k): v for k, v in result.crossings.items()},
+                    calibration_before={str(k): v for k, v in result.calibration_before.items()},
+                    calibration_after={str(k): v for k, v in result.calibration_after.items()},
+                    applied_corrections=[dict(item) for item in result.applied_corrections])
                 manifest["sub_runs"] = {name: str(path) for name, path in result.sub_runs.items()}
                 writer.update(manifest)
 
@@ -429,7 +447,7 @@ class AutocalibrationJob:
 
             # -- Step 3: apply corrected calibration trim DACs --------------
             token.checkpoint()
-            applied = {}
+            applied = result.calibration_after
             for channel in config.channels:
                 current = original_calibration.get(channel)
                 if current is None:
@@ -437,10 +455,15 @@ class AutocalibrationJob:
                 position = positions.get(channel)
                 correction = 0 if position is None else round((position - mean_position) / lsb_ratio)
                 value = min(63, max(0, current - correction))
+                entry = {"channel": channel, "before": current, "after": value,
+                         "state": "attempted"}
+                result.applied_corrections.append(entry)
+                result.calibration_status = "unverified"
+                persist()
                 device.set_calibration_dac_for_channel(channel, t1=config.t1, value=value)
+                entry["state"] = "applied"
                 applied[channel] = value
-            result.calibration_after = applied
-            persist()
+                persist()
 
             # -- Step 5: final verification scan -----------------------------
             token.checkpoint()
@@ -455,6 +478,7 @@ class AutocalibrationJob:
             if final_result.status != "completed":
                 return self._finish(result, final_result.status, final_result.error, persist)
 
+            result.calibration_status = "verified"
             return self._finish(result, "completed", None, persist)
         except (JobCancelled, KeyboardInterrupt) as exc:
             return self._finish(result, "cancelled", exc, persist)
@@ -464,6 +488,10 @@ class AutocalibrationJob:
 
     @staticmethod
     def _finish(result, status, error, persist):
+        if status != "completed" and result.calibration_status == "unverified":
+            result.warnings.append(
+                "UNVERIFIED CALIBRATION: trim corrections were written but final "
+                f"verification did not pass (status={status}); see applied_corrections")
         result.status = status
         result.error = error
         persist()

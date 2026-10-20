@@ -75,7 +75,7 @@ def read_hold_run(path: Path) -> SavedHoldRun:
             try:
                 parsed = {x_name: int(row[x_name])}
                 for field in fields[1:]:
-                    parsed[field] = int(row[field]) if field.endswith("_count") else float(row[field])
+                    parsed[field] = int(row[field]) if field.endswith("_count") or field in ("requested", "received") else float(row[field])
             except ValueError as exc:
                 warnings.append(f"invalid CSV row skipped: {exc}")
                 continue

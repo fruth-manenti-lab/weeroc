@@ -89,6 +89,13 @@ class ChannelConfigOperation:
       delay code, 0..255.
     - `delay_slope` (`int | None`): Common (ASIC-wide) delay-slope trim code,
       0..15.
+    - `analog_probe_sources` (`dict[int, str] | None`): Per-channel analog
+      probe routing (channel -> key of `RadiorocDevice.ANALOG_PROBE_CODES`).
+    - `analog_probe_exclusive` (`bool`): Before routing `analog_probe_sources`,
+      switch off the probe on every other channel that currently has it (the
+      probe pin is one shared output).
+    - `analog_probe_clear_all` (`bool`): Switch off the analog probe on every
+      channel that has it routed (reads all 64 probe rows first).
     - `verify` (`bool`): Independently read back every touched register after
       writing.
     - `restore` (`bool`): Snapshot every touched register before writing and
@@ -131,6 +138,9 @@ class ChannelConfigOperation:
     trigger_selection: str | None = None
     delay_code: int | None = None
     delay_slope: int | None = None
+    analog_probe_sources: dict[int, str] | None = None
+    analog_probe_exclusive: bool = False
+    analog_probe_clear_all: bool = False
     verify: bool = True
     restore: bool = False
     config_path: Path | None = None
@@ -233,6 +243,12 @@ class ChannelConfigOperation:
             raise ValueError("delay_code must be in range 0..255")
         if self.delay_slope is not None and not 0 <= self.delay_slope <= 15:
             raise ValueError("delay_slope must be in range 0..15")
+        for channel, source in (self.analog_probe_sources or {}).items():
+            if not 0 <= channel < N_CHANNELS:
+                raise ValueError(f"channel must be in range 0..{N_CHANNELS - 1}")
+            if source not in RadiorocDevice.ANALOG_PROBE_CODES:
+                raise ValueError(
+                    f"analog probe source must be one of {sorted(RadiorocDevice.ANALOG_PROBE_CODES)}")
         if not any([self.tq_mask_channels, self.input_dac_enable_channels,
                    self.input_dac_value_channels, self.input_dac_values,
                    self.t1_mask_channels, self.t2_mask_channels,
@@ -245,7 +261,8 @@ class ChannelConfigOperation:
                    self.high_gain_shaping_slow_states, self.low_gain_shaping_slow_states,
                    self.t1_threshold_dac is not None, self.t2_threshold_dac is not None,
                    self.tq_threshold_dac is not None, self.trigger_selection is not None,
-                   self.delay_code is not None, self.delay_slope is not None]):
+                   self.delay_code is not None, self.delay_slope is not None,
+                   self.analog_probe_sources, self.analog_probe_clear_all]):
             raise ValueError("at least one channel-configuration field is required")
 
     @staticmethod
@@ -334,6 +351,15 @@ def apply_channel_config(device: RadiorocDevice, operation: ChannelConfigOperati
     touched.update((ch, 3) for ch in (operation.low_gain_shaping_values or {}))
     touched.update((ch, 7) for ch in (operation.high_gain_shaping_slow_states or {}))
     touched.update((ch, 7) for ch in (operation.low_gain_shaping_slow_states or {}))
+    touched.update((ch, 66) for ch in (operation.analog_probe_sources or {}))
+    probe_cleared: list[int] = []
+    if operation.analog_probe_clear_all or (operation.analog_probe_exclusive
+                                            and operation.analog_probe_sources):
+        keep = None
+        if not operation.analog_probe_clear_all:
+            keep = next(iter(operation.analog_probe_sources))
+        probe_cleared = device.routed_analog_probe_channels(keep=keep)
+        touched.update((ch, 66) for ch in probe_cleared)
     if operation.t1_threshold_dac is not None:
         touched.update({(65, 1), (65, 2)})
     if operation.t2_threshold_dac is not None:
@@ -430,6 +456,12 @@ def apply_channel_config(device: RadiorocDevice, operation: ChannelConfigOperati
     if operation.delay_slope is not None:
         device.set_delay_slope(operation.delay_slope)
         applied.append(f"delay_slope -> {operation.delay_slope}")
+    for channel in probe_cleared:
+        device.clear_analog_probe_channel(channel)
+        applied.append(f"analog_probe channel={channel} -> none (cleared)")
+    for channel, source in (operation.analog_probe_sources or {}).items():
+        device.set_analog_probe_for_channel(channel, source)
+        applied.append(f"analog_probe channel={channel} -> {source}")
 
     verify_mismatches: list[RegisterMismatch] = []
     if operation.verify:

@@ -114,6 +114,29 @@ class MainWindowTests(unittest.TestCase):
         for index in range(window.calibration_tabs.count()):
             self.assertIsNot(window.calibration_tabs.widget(index), window.acquisition_window)
 
+    def test_every_dropdown_takes_keyboard_focus_and_arrow_keys_change_it(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QComboBox
+        window = self._make_window()
+        combos = window.findChildren(QComboBox)
+        self.assertTrue(combos)
+        self.assertTrue(all(c.focusPolicy() == Qt.StrongFocus for c in combos))
+        combo = next(c for c in combos if c.count() > 1)
+        combo.setCurrentIndex(0)
+        QTest.keyClick(combo, Qt.Key_Down)
+        self.assertEqual(combo.currentIndex(), 1)
+
+    def test_page_menu_switches_the_sidebar_page(self):
+        window = self._make_window()
+        self.assertEqual([a.text() for a in window.page_actions],
+                         ["ASIC config.", "Acquisition", "Calibration"])
+        window.page_actions[2].trigger()
+        self.assertEqual(window.sidebar.currentRow(), 2)
+        self.assertEqual(window.pages.currentIndex(), 2)
+        window.page_actions[0].trigger()
+        self.assertEqual(window.pages.currentIndex(), 0)
+
     def test_main_panel_is_the_first_asic_config_tab(self):
         window = self._make_window()
         # Each ASIC-config tab wraps its panel in a QScrollArea (see
@@ -429,6 +452,43 @@ class MainWindowTests(unittest.TestCase):
         self.assertEqual(window.statusBar().currentMessage(), default_message)
         window.hint.eventFilter(window.main_panel.apply_button, QEvent(QEvent.Type.Enter))
         self.assertNotEqual(window.statusBar().currentMessage(), default_message)
+
+    def test_minimum_size_fits_1024x768_display(self):
+        window = self._make_window()
+        hint = window.minimumSizeHint()
+        self.assertLessEqual(hint.width(), 1000)
+        # 620 plus the in-window Page menu bar (~23 px; on macOS it is the native bar).
+        self.assertLessEqual(hint.height(), 650)
+
+    def test_every_page_keeps_a_usable_plot_at_1024x700(self):
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+        window = self._make_window()
+        window.show()
+        pages = [(1, None), (2, 0), (2, 1), (2, 2), (2, 3)]
+        for row, tab in pages:
+            window.sidebar.setCurrentRow(row)
+            if tab is not None:
+                window.calibration_tabs.setCurrentIndex(tab)
+            window.resize(1024, 700)
+            _app().processEvents()
+            canvases = [c for c in window.pages.currentWidget().findChildren(FigureCanvasQTAgg)
+                        if c.isVisible()]
+            self.assertTrue(canvases, (row, tab))
+            for canvas in canvases:
+                self.assertGreater(canvas.width(), 200, (row, tab))
+                self.assertGreater(canvas.height(), 150, (row, tab))
+
+    def test_keep_current_spinbox_is_wide_enough_for_its_text(self):
+        window = self._make_window()
+        spins = [window.scurve_window.trigger_preamp_gain,
+                 window.autocalibration_window.trigger_preamp_gain,
+                 window.threshold_window.gain,
+                 window.hold_scan_window.trigger_preamp_gain]
+        for spin in spins:
+            text = spin.specialValueText()
+            self.assertEqual(text, "Keep current")
+            self.assertGreaterEqual(
+                spin.sizeHint().width(), spin.fontMetrics().horizontalAdvance(text) + 20)
 
 
 if __name__ == "__main__":

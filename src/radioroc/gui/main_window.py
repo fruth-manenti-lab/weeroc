@@ -11,9 +11,10 @@ then collect). The remaining scan workflows are sub-tabs of one "Calibration"
 area, not independent top-level windows each owning their own connection.
 """
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
+    QApplication, QComboBox, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QMainWindow, QScrollArea, QStackedWidget, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -101,6 +102,19 @@ class MainWindow(QMainWindow):
         """)
         for label in ("ASIC config.", "Acquisition", "Calibration"):
             QListWidgetItem(label, self.sidebar)
+        self.sidebar.setFocusPolicy(Qt.StrongFocus)
+        self.sidebar.setAccessibleName("Page navigation")
+        self.sidebar.setAccessibleDescription(
+            "Pages: ASIC config., Acquisition, Calibration. Also in the Page menu (Ctrl+1, Ctrl+2, Ctrl+3).")
+        # The sidebar's rows are not exposed to macOS accessibility tools, so the same
+        # three pages are also in a real menu (accessible, and with keyboard shortcuts).
+        page_menu = self.menuBar().addMenu("Page")
+        self.page_actions = []
+        for row, label in enumerate(("ASIC config.", "Acquisition", "Calibration")):
+            action = page_menu.addAction(label)
+            action.setShortcut(QKeySequence(f"Ctrl+{row + 1}"))
+            action.triggered.connect(lambda _checked=False, r=row: self.sidebar.setCurrentRow(r))
+            self.page_actions.append(action)
         body_layout.addWidget(self.sidebar)
 
         self.pages = QStackedWidget()
@@ -223,6 +237,12 @@ class MainWindow(QMainWindow):
 
         self.sidebar.setCurrentRow(0)
 
+        # macOS Qt dropdowns skip Tab focus by default (unless the system's Full
+        # Keyboard Access is on), so keyboard-only users and assistive automation
+        # cannot reach them. Make every dropdown focusable and arrow-key selectable.
+        for combo in self.findChildren(QComboBox):
+            combo.setFocusPolicy(Qt.StrongFocus)
+
         # -- Persistent connection status strip (mirrors the vendor app's
         # bottom power-button/status bar, visible regardless of the active
         # sidebar page) -------------------------------------------------------
@@ -236,7 +256,7 @@ class MainWindow(QMainWindow):
         self.status_strip = QLabel("Not connected")
         self.status_strip.setWordWrap(True)
         status_layout.addWidget(self.status_strip, 1)
-        status_row.setMinimumHeight(40)
+        status_row.setMinimumHeight(28)
         outer.addWidget(status_row)
         self.connection_panel.status_changed.connect(self._refresh_status_strip)
         self._refresh_status_strip()

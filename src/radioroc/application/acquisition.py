@@ -30,7 +30,8 @@ from .verification import verify_restoration as run_restoration_check
 # The job's own FPGA state footprint to snapshot/restore/verify: ADC hold/timing
 # control words. Word 2 is excluded: acquire_adc_batch always leaves it exactly
 # where it found it.
-_FPGA_ACQUISITION_ADDRESSES = (21, 22, 23, 24, 25, 26, 27, 30, 31)
+# Words 77/78 are the IO mux words touched when sync_io_mux_index is set.
+_FPGA_ACQUISITION_ADDRESSES = (21, 22, 23, 24, 25, 26, 27, 30, 31, 77, 78)
 
 
 def _now():
@@ -47,10 +48,11 @@ class AcquisitionJobConfig:
     config_path: Path | None = None
     initialize_fpga: bool = False
     apply_defaults: bool = False
+    clear_analog_probe: bool = False
 
     def validate(self) -> None:
         self.acquisition.validate()
-        for name in ("initialize_fpga", "apply_defaults"):
+        for name in ("initialize_fpga", "apply_defaults", "clear_analog_probe"):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be boolean")
 
@@ -188,6 +190,9 @@ class AcquisitionJob:
         # without_truncating), an appended segment's manifest reflects only
         # that segment's own batches, same as everything else in it.
         manifest.setdefault("batch_received_at", [])
+        # Per-batch requested/received event accounting (FPGA may return a
+        # different count than requested; see MVP_SANITY_REVIEW).
+        manifest.setdefault("batch_counts", [])
         writer = AcquisitionRunWriter(Path(acquisition.out_dir), manifest, append=append)
         result.metadata_path = writer.metadata_path
         fpga = {}
@@ -239,6 +244,12 @@ class AcquisitionJob:
                 device.initialize_fpga()
             if config.apply_defaults:
                 device.apply_default_config()
+            if config.clear_analog_probe:
+                cleared_probes = device.clear_analog_probes()
+                if cleared_probes:
+                    result.warnings.append(
+                        "analog probe switched off before the run on channel(s) "
+                        + ", ".join(str(ch) for ch in cleared_probes))
             preparation_failed = False
             manifest["preparation"]["status"] = "completed"
             # Capture control state before snapshot reads themselves use I2C.
@@ -277,6 +288,8 @@ class AcquisitionJob:
                     device.unmask_channel_for_individual_coincidence(acquisition.trigger_channel_2)
             if acquisition.threshold_dac is not None:
                 device.set_threshold_dac(acquisition.threshold_dac, t1=acquisition.t1)
+            if acquisition.sync_io_mux_index is not None:
+                device.write_fpga_io_mux(**{acquisition.sync_io: acquisition.sync_io_mux_index})
             result.status = "running"
             persist()
             emit("state")
@@ -287,7 +300,7 @@ class AcquisitionJob:
                 trigger_channel=acquisition.trigger_channel, hold_delay_ns=acquisition.hold_delay_ns,
                 conversion_delay_ns=acquisition.conversion_delay_ns, nb_acq=acquisition.acquisitions_per_batch,
                 trigger_type=acquisition.trigger_type, trigger_source=acquisition.trigger_source,
-                rstn_manual=acquisition.rstn_manual, ext_trig=False, peak_sensing=acquisition.peak_sensing,
+                rstn_manual=acquisition.rstn_manual, ext_trig=acquisition.external_trigger, peak_sensing=acquisition.peak_sensing,
                 adc_window_ns=acquisition.adc_window_ns, adc_nb_trig=acquisition.adc_nb_trig,
                 trigger_source_2=acquisition.trigger_source_2, trigger_channel_2=acquisition.trigger_channel_2)
             for batch_offset in range(acquisition.batches):
@@ -298,6 +311,19 @@ class AcquisitionJob:
                     synchro_trigger=acquisition.synchro_trigger)
                 manifest["batch_received_at"].append({"batch": batch, "received_at": _now()})
                 token.checkpoint()
+                accounting = getattr(device, "last_adc_batch", None) or {}
+                requested = acquisition.acquisitions_per_batch
+                received = accounting.get("received", len(high_gain[0]) if high_gain else 0)
+                manifest["batch_counts"].append({
+                    "batch": batch, "requested": requested, "received": received,
+                    "count_word": accounting.get("count_word"), "payload_bytes": accounting.get("payload_bytes"),
+                    "mismatch": received != requested})
+                for note in accounting.get("warnings", ()):
+                    warning = f"batch {batch}: {note}"
+                    if warning not in result.warnings:
+                        result.warnings.append(warning)
+                if received != requested:
+                    result.warnings.append(f"batch {batch}: requested {requested} events but received {received}")
                 event_rows = []
                 for channel in acquisition.channels:
                     for event, (hg, lg) in enumerate(zip(high_gain[channel], low_gain[channel])):

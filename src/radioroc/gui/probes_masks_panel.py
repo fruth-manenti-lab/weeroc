@@ -1,10 +1,9 @@
 """Trigger-mask grids from the vendor "ASIC config. / Probes/Masks" tab.
 
-Covers only the three 64-channel mask toggle grids (Enable T1 / Enable T2 /
-Enable TQ) plus their per-grid "Enable all"/"Enable none" buttons. Does not
-cover that tab's "Analog probe" / "Digital probe" routing radio-button
-groups: there is no backend support for probe routing in this codebase yet,
-so building it would mean guessing at unconfirmed register behavior.
+Covers the three 64-channel mask toggle grids (Enable T1 / Enable T2 /
+Enable TQ) plus their per-grid "Enable all"/"Enable none" buttons, and a
+single-channel "Analog probe" routing selector (channel + node, own Apply
+button). The "Digital probe" routing is not covered.
 
 Each grid cell is a checkable button styled with
 ``radioroc.gui.channel_select.CHANNEL_BUTTON_STYLE`` -- solid blue when
@@ -16,7 +15,8 @@ of a plain tickmark checkbox.
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QComboBox, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QSpinBox,
+    QVBoxLayout, QWidget,
 )
 
 from radioroc_client import N_CHANNELS
@@ -24,6 +24,13 @@ from radioroc.application.channel_config import ChannelConfigOperation
 from radioroc.gui.channel_select import CHANNEL_BUTTON_STYLE
 
 _GRID_COLUMNS = 8
+PROBE_SOURCES = (
+    ("none", "Off (no probe)"),
+    ("shaper_hg", "Shaper output, high gain"),
+    ("shaper_lg", "Shaper output, low gain"),
+    ("preamp_hg", "Preamp output, high gain"),
+    ("preamp_lg", "Preamp output, low gain"),
+)
 
 
 def _build_mask_grid(title, prefix, panel):
@@ -84,6 +91,25 @@ class ProbesMasksPanel(QWidget):
         grids_row.addWidget(_build_mask_grid("Enable TQ", "tq", self))
         outer.addLayout(grids_row)
 
+        probe_group = QGroupBox("Analog probe (shared output: routing one channel switches the others off)")
+        probe_row = QHBoxLayout(probe_group)
+        probe_row.addWidget(QLabel("N° channel"))
+        self.probe_channel_spin = QSpinBox()
+        self.probe_channel_spin.setRange(0, N_CHANNELS - 1)
+        probe_row.addWidget(self.probe_channel_spin)
+        self.probe_source_combo = QComboBox()
+        for key, label in PROBE_SOURCES:
+            self.probe_source_combo.addItem(label, key)
+        probe_row.addWidget(self.probe_source_combo)
+        self.probe_apply_button = QPushButton("Apply probe")
+        self.probe_apply_button.clicked.connect(self.apply_probe)
+        probe_row.addWidget(self.probe_apply_button)
+        self.probe_clear_all_button = QPushButton("Off, all channels")
+        self.probe_clear_all_button.clicked.connect(self.apply_probe_clear_all)
+        probe_row.addWidget(self.probe_clear_all_button)
+        probe_row.addStretch(1)
+        outer.addWidget(probe_group)
+
         self.apply_button = QPushButton("Apply masks")
         self.apply_button.clicked.connect(self.apply)
         outer.addWidget(self.apply_button)
@@ -110,21 +136,44 @@ class ProbesMasksPanel(QWidget):
         operation.validate()
         return operation
 
-    def apply(self):
+    def build_probe_operation(self):
+        operation = ChannelConfigOperation(
+            analog_probe_sources={self.probe_channel_spin.value():
+                                  self.probe_source_combo.currentData()},
+            analog_probe_exclusive=True,
+            verify=True,
+        )
+        operation.validate()
+        return operation
+
+    def build_probe_clear_all_operation(self):
+        operation = ChannelConfigOperation(analog_probe_clear_all=True, verify=True)
+        operation.validate()
+        return operation
+
+    def apply_probe_clear_all(self):
+        return self.apply(self.build_probe_clear_all_operation, "probe")
+
+    def apply_probe(self):
+        return self.apply(self.build_probe_operation, "probe")
+
+    def apply(self, builder=None, what="masks"):
+        if not isinstance(what, str):
+            what = "masks"
         if self.connection_worker is None or self._applying:
             return None
         try:
-            operation = self.build_operation()
+            operation = (builder or self.build_operation)()
         except ValueError as exc:
-            self.status_label.setText(f"Invalid mask configuration: {exc}")
+            self.status_label.setText(f"Invalid {what} configuration: {exc}")
             return None
         try:
             self.connection_worker.apply_channel_config(operation)
         except Exception as exc:
-            self.status_label.setText(f"Mask apply error · {type(exc).__name__}: {exc}")
+            self.status_label.setText(f"{what.capitalize()} apply error · {type(exc).__name__}: {exc}")
             return None
         self._applying = True
-        self.status_label.setText("Applying masks…")
+        self.status_label.setText(f"Applying {what}…")
         self.timer.start()
         return operation
 
@@ -175,5 +224,16 @@ class ProbesMasksPanel(QWidget):
         hint_bar.attach(self.t2_enable_none_button, "Disable T2 for every channel.")
         hint_bar.attach(self.tq_enable_all_button, "Enable TQ for every channel.")
         hint_bar.attach(self.tq_enable_none_button, "Disable TQ for every channel.")
+        hint_bar.attach(self.probe_channel_spin, "Channel whose analog node is routed to the probe.")
+        hint_bar.attach(self.probe_source_combo,
+                        "Which analog node of that channel drives the Analog_Probe output. "
+                        "Off clears it. The probe degrades analog performance; reset it "
+                        "before real measurements.")
+        hint_bar.attach(self.probe_apply_button,
+                        "Write the analog probe routing to the connected hardware. Any other "
+                        "channel that still has the probe routed is switched off first.")
+        hint_bar.attach(self.probe_clear_all_button,
+                        "Read all 64 channels and switch off the analog probe on every channel "
+                        "that has it routed. Use this if you don't remember what is routed.")
         hint_bar.attach(self.apply_button,
                         "Apply the T1/T2/TQ enable masks to the connected hardware.")

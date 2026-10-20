@@ -75,6 +75,9 @@ class ConnectionPanel(QWidget):
         connection_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         self.port_select = QComboBox()
         self.port_select.addItem("Select a USB port candidate…", None)
+        self.port_select.setAccessibleName("Port")
+        self.port_select.setAccessibleDescription(
+            "USB serial port of the board. Focus it with Tab and use the Up and Down keys to choose.")
         connection_form.addRow("Port", self.port_select)
         self.baud = _integer(1, 100_000_000, DEFAULT_BAUD)
         self.timeout_s = _decimal(0.001, 3600, DEFAULT_TIMEOUT_SECONDS)

@@ -77,6 +77,13 @@ class ConnectionPanelTests(unittest.TestCase):
             time.sleep(.005)
         self.fail("condition was not reached before timeout")
 
+    def test_port_select_is_never_preselected_but_is_keyboard_reachable_and_named(self):
+        from PySide6.QtCore import Qt
+        panel = self.make_panel()
+        panel.sync_ports([self.candidate])
+        self.assertIsNone(panel.port_select.currentData())  # explicit selection is required
+        self.assertEqual(panel.port_select.accessibleName(), "Port")
+
     def test_worker_is_created_lazily_on_first_use(self):
         panel = self.make_panel()
         self.assertIsNone(panel.connection_worker)

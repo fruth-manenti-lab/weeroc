@@ -19,11 +19,13 @@ from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.application.threshold import ThresholdJob, ThresholdJobConfig
 from radioroc.application.threshold_worker import ThresholdWorker
 from radioroc.data.threshold_reader import read_threshold_run
+from radioroc.gui.layout_util import fit_controls_pane, fit_special_text, wrap_plot_title
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
 from radioroc.gui.channel_select import ChannelSelectGrid
 from radioroc.gui.connection_panel import ConnectionPanel
 from radioroc.gui.hint_bar import HintBar
 from radioroc.transport.threshold_simulator import ThresholdSimulationConfig
+from radioroc.gui.output_paths import guard_output, refresh_auto_output
 
 
 def _integer(low, high, value):
@@ -142,6 +144,7 @@ class ThresholdWindow(QMainWindow):
         self.discriminator.addItems(["T1", "T2"])
         self.gain = _integer(0, 63, 0)
         self.gain.setSpecialValueText("Keep current")
+        fit_special_text(self.gain)
         form.addRow(self.channel_select)
         for label, field in [("First DAC", self.dac_min), ("Last DAC", self.dac_max),
                              ("DAC step", self.dac_step), ("Counter window (ms)", self.window_ms),
@@ -194,7 +197,7 @@ class ThresholdWindow(QMainWindow):
         self.details.setPlaceholderText("Preview, run provenance and cleanup details appear here.")
         right_layout.addWidget(self.details, 2)
         split.addWidget(right)
-        split.setSizes([410, 750])
+        fit_controls_pane(split, scroll, self.controls)
 
         buttons = QHBoxLayout()
         self.preview_button = QPushButton("Preview")
@@ -328,8 +331,8 @@ class ThresholdWindow(QMainWindow):
         if not simulation and previous_mode != self._accepted_mode:
             self.initialize.setChecked(False)
             self.defaults.setChecked(False)
-            if "radioroc_runs" in Path(self.output.text()).parts:
-                self.output.setText(_new_directory("hardware"))
+        if previous_mode != self._accepted_mode:
+            refresh_auto_output(self.output, "simulation" if simulation else "hardware", _new_directory)
         self.run_button.setText("Run simulation" if simulation else "Run hardware threshold")
         self.sim_group.setEnabled(simulation and self.worker is None)
         self._update_connection_controls()
@@ -338,7 +341,7 @@ class ThresholdWindow(QMainWindow):
         self.banner.setText(
             "SIMULATION · Synthetic counts, not measured lab data. No board connection."
             if self.mode.currentIndex() == 0 else
-            "HARDWARE · USB candidates are unverified. FPGA initialization and apply-defaults "
+            "HARDWARE · USB candidates are unverified until you connect; the firmware status then confirms the board. FPGA initialization and apply-defaults "
             "are off by default; masking/Ctest/gain are temporary scan settings. Restoration readback "
             "verification is mandatory. Initialization and defaults are persistent changes.")
 
@@ -510,6 +513,8 @@ class ThresholdWindow(QMainWindow):
         output = self.output.text().strip()
         if not output:
             raise ValueError("choose a new run directory")
+        output = guard_output(self.output, "hardware" if self.mode.currentIndex() == 1 else "simulation",
+                              _new_directory)
         scan = ThresholdScanConfig(
             channels, dac_min=self.dac_min.value(), dac_max=self.dac_max.value(),
             dac_step=self.dac_step.value(), trigger_window_ms=self.window_ms.value(),
@@ -706,7 +711,7 @@ class ThresholdWindow(QMainWindow):
     def _plot(self, rows, title):
         self._last_rows, self._last_title = rows, title
         self.axes.clear()
-        self.axes.set_title(title, fontsize=11)
+        self.axes.set_title(wrap_plot_title(title), fontsize=10)
         self.axes.set_xlabel("Threshold DAC code")
         self.axes.set_ylabel("Trigger rate (Hz)")
         # Threshold rates span many orders of magnitude (a noise-dominated
@@ -741,7 +746,7 @@ class ThresholdWindow(QMainWindow):
         try:
             saved = read_threshold_run(Path(path))
             label = saved.execution_mode.upper()
-            self.banner.setText(f"SAVED RESULT · {label} · {saved.status} · {saved.directory}")
+            self.banner.setText(f"SAVED RESULT · {label} · {saved.status} · {saved.directory} · Controls show current settings, not this run's")
             self._plot(saved.rows, f"{label} · {saved.status} · {len(saved.rows)} saved points")
             status = f"{label} · {saved.status} · {len(saved.rows)} points"
             self.status.setText(status + (" · " + "; ".join(saved.warnings) if saved.warnings else ""))

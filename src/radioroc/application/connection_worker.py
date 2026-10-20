@@ -62,6 +62,24 @@ class ConnectionSnapshot:
     fault: str | None = None
 
 
+def _verification_problem(verification: dict) -> str:
+    """Describe a non-passing restoration report, including why it failed."""
+
+    parts = [f"restoration verification {verification.get('status', 'absent')}"]
+    for key in ("mismatches", "missing"):
+        items = verification.get(key) or []
+        if items:
+            parts.append(f"{len(items)} {key}")
+    errors = list(verification.get("errors") or [])
+    errors += [f"cleanup: {item}" for item in
+               (verification.get("cleanup") or {}).get("errors") or []]
+    if errors:
+        shown = "; ".join(str(item) for item in errors[:3])
+        more = f" (+{len(errors) - 3} more)" if len(errors) > 3 else ""
+        parts.append(f"errors: {shown}{more}")
+    return " - ".join(parts)
+
+
 class ConnectionWorker:
     """A persistent command worker for discovery and one selected session."""
 
@@ -116,6 +134,7 @@ class ConnectionWorker:
         self._raw_register_write_result = None
         self._hold_shutdown_for_job_fault = False
         self._pending = False
+        self._queued_connect = None
         self._shutdown_queued = False
         self._started = False
         self._thread = Thread(target=self._run, name="radioroc-connection", daemon=False)
@@ -191,6 +210,15 @@ class ConnectionWorker:
     def connect(self, config: RadiorocConnectionConfig):
         config = deepcopy(config)
         config.validate()
+        with self._lock:
+            # A connect issued while discovery is running (e.g. right after the
+            # window's startup refresh) is queued, not dropped: it runs as soon
+            # as discovery finishes, unless shutdown intervenes.
+            if (self._started and self._state == "discovering" and self._pending
+                    and not self._shutdown_queued and self._fault is None
+                    and self._queued_connect is None):
+                self._queued_connect = config
+                return
         self._submit("connect", config, "connecting", {"idle", "error"})
 
     def read_status(self):
@@ -581,14 +609,33 @@ class ConnectionWorker:
                 with self._lock:
                     self._shutdown_queued = False
 
+    def _take_queued_connect(self):
+        """Hand a connect queued during discovery straight to the worker.
+
+        Returns True if state moved atomically to "connecting" (pending stays
+        set so no other command can interleave).
+        """
+        with self._lock:
+            config, self._queued_connect = self._queued_connect, None
+            if config is None or self._shutdown_queued or self._session is not None:
+                return False
+            self._state = "connecting"
+            self._error = None
+            self._close_error = None
+            self._commands.put(("connect", config))
+            return True
+
     def _refresh(self):
         try:
             ports = tuple(self._discovery())
         except Exception as exc:
-            self._publish("error", error=self._describe(exc))
+            if not self._take_queued_connect():
+                self._publish("error", error=self._describe(exc))
             return
         with self._lock:
             self._ports = ports
+        if self._take_queued_connect():
+            return
         self._publish("connected" if self._session is not None else "idle")
 
     def _connect(self, config):
@@ -653,9 +700,7 @@ class ConnectionWorker:
         if not verification:
             problems.append("restoration verification is absent")
         elif verification.get("status") != "passed":
-            problems.append(
-                f"restoration verification {verification.get('status', 'absent')}"
-            )
+            problems.append(_verification_problem(verification))
         return "; ".join(problems) or None
 
     @staticmethod
@@ -681,9 +726,7 @@ class ConnectionWorker:
         if not verification:
             problems.append("restoration verification is absent")
         elif verification.get("status") != "passed":
-            problems.append(
-                f"restoration verification {verification.get('status', 'absent')}"
-            )
+            problems.append(_verification_problem(verification))
         return "; ".join(problems) or None
 
     @staticmethod
@@ -709,9 +752,7 @@ class ConnectionWorker:
         if not verification:
             problems.append("restoration verification is absent")
         elif verification.get("status") != "passed":
-            problems.append(
-                f"restoration verification {verification.get('status', 'absent')}"
-            )
+            problems.append(_verification_problem(verification))
         return "; ".join(problems) or None
 
     @staticmethod
@@ -731,6 +772,14 @@ class ConnectionWorker:
             problems.append(f"autocalibration status: {result.status}")
         if result.reference_restored is False:
             problems.append("reference channel calibration DAC restoration was not confirmed")
+        if getattr(result, "calibration_status", None) == "unverified":
+            changed = ", ".join(
+                f"ch{item['channel']} {item['before']}->{item['after']} ({item['state']})"
+                for item in result.applied_corrections)
+            problems.append(
+                "unverified calibration: trim corrections were applied but final "
+                f"verification did not pass ({changed}); re-run autocalibration "
+                "or restore trims before acquiring")
         return "; ".join(problems) or None
 
     @staticmethod
@@ -756,9 +805,7 @@ class ConnectionWorker:
         if not verification:
             problems.append("restoration verification is absent")
         elif verification.get("status") != "passed":
-            problems.append(
-                f"restoration verification {verification.get('status', 'absent')}"
-            )
+            problems.append(_verification_problem(verification))
         return "; ".join(problems) or None
 
     def _run_hold_scan(self, operation):

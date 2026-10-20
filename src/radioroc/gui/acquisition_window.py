@@ -17,8 +17,8 @@ only the bounded batch summary above, because every raw sample is already
 durably written to the run's own ``events.csv`` by the job. Spectra
 rendering therefore does not add a second in-memory raw-sample buffer to
 route around that: it periodically re-reads the run's own ``events.csv``
-from disk (see ``_read_live_events``/``_refresh_live_spectra`` below) and
-re-renders the histogram from the file, throttled to roughly once per
+from disk (incrementally, by byte offset: ``_LiveEventsReader``) and
+accumulates bounded fixed-bin histograms, throttled to roughly once per
 second (``_LIVE_REFRESH_EVERY_TICKS`` poll ticks) rather than on every
 100ms timer tick, so a long run doesn't spend all its time re-parsing a
 growing CSV. The same histogram also renders a previously saved run
@@ -26,6 +26,7 @@ growing CSV. The same histogram also renders a previously saved run
 """
 
 import csv
+import os
 from datetime import datetime
 import json
 from pathlib import Path
@@ -37,21 +38,24 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPlainTextEdit, QProgressBar,
     QPushButton, QScrollArea, QSpinBox, QSplitter, QVBoxLayout, QWidget,
 )
+import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.ticker import NullFormatter
 
-from radioroc_client import AcquisitionConfig
+from radioroc_client import FPGA_IO_NAMES, AcquisitionConfig
 from radioroc.application.acquisition import AcquisitionJob, AcquisitionJobConfig
 from radioroc.application.acquisition_worker import AcquisitionWorker
 from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.data.acquisition_reader import read_acquisition_run
 from radioroc.data.vendor_acquisition import read_vendor_acquisition_file
+from radioroc.gui.layout_util import fit_controls_pane, fit_special_text, wrap_plot_title
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
 from radioroc.gui.channel_select import ChannelSelectGrid
 from radioroc.gui.connection_panel import ConnectionPanel
 from radioroc.gui.hint_bar import HintBar
 from radioroc.transport.acquisition_simulator import AcquisitionSimulationConfig
+from radioroc.gui.output_paths import guard_output, refresh_auto_output
 
 # The filename `AcquisitionRunWriter`/`AcquisitionJob` write events to inside
 # a run's `out_dir` (see `radioroc/data/acquisition.py`'s `self.csv_path` and
@@ -106,6 +110,164 @@ def _format_batch_summary(mode, row):
     return "\n".join(lines)
 
 
+def _count_events(rows):
+    """Physical events = distinct (batch, event); the CSV has one row per channel."""
+    return len({(row["batch"], row["event"]) for row in rows
+                if "batch" in row and "event" in row})
+
+
+def _events_text(rows):
+    if isinstance(rows, _SpectraData):
+        return f"{rows.events} events ({rows.rows} channel rows)"
+    events = _count_events(rows)
+    return f"{events} events ({len(rows)} channel rows)"
+
+
+# ADC values are 12-bit; the display histograms use one fixed bin per ADC
+# count (out-of-range values clamp into the edge bins) and are re-binned to
+# the user's "bins" setting only at draw time, so memory is
+# O(channels x 2 x 4096) regardless of run length. No existing display
+# feature needs raw rows, so no row ring buffer is kept.
+_ADC_BINS = 4096
+# Cap on CSV lines parsed per refresh tick so a tick never blocks the GUI
+# for long; the remainder is picked up on the following ticks.
+_MAX_LINES_PER_TICK = 20_000
+
+
+class _SpectraData:
+    """Bounded display state: fixed-bin HG/LG counts per channel plus counts."""
+
+    def __init__(self):
+        self.hg = {}
+        self.lg = {}
+        self.rows = 0
+        self._finished_events = 0
+        self._batch = None
+        self._batch_events = set()
+
+    @property
+    def events(self):
+        """Physical events = distinct (batch, event).
+
+        Rows are channel-major within a batch (every event of ch0, then ch1,
+        ...) but a batch's rows are appended contiguously, so only the
+        current batch's event ids are kept in memory (bounded by the
+        acquisitions-per-batch setting).
+        """
+        return self._finished_events + len(self._batch_events)
+
+    def __bool__(self):
+        return self.rows > 0
+
+    def _note_event(self, batch, event):
+        if batch != self._batch:
+            self._finished_events += len(self._batch_events)
+            self._batch_events = set()
+            self._batch = batch
+        self._batch_events.add(event)
+
+    def add_arrays(self, channels, hg, lg):
+        channels = np.asarray(channels)
+        hg_bins = np.clip(np.floor(np.asarray(hg, dtype=float)), 0, _ADC_BINS - 1).astype(np.int64)
+        lg_bins = np.clip(np.floor(np.asarray(lg, dtype=float)), 0, _ADC_BINS - 1).astype(np.int64)
+        for channel in np.unique(channels):
+            mask = channels == channel
+            key = int(channel)
+            if key not in self.hg:
+                self.hg[key] = np.zeros(_ADC_BINS, dtype=np.int64)
+                self.lg[key] = np.zeros(_ADC_BINS, dtype=np.int64)
+            self.hg[key] += np.bincount(hg_bins[mask], minlength=_ADC_BINS)
+            self.lg[key] += np.bincount(lg_bins[mask], minlength=_ADC_BINS)
+        self.rows += len(channels)
+
+    def add_rows(self, rows):
+        """Add dict rows (saved-run / vendor shapes); used for one-shot loads."""
+        rows = list(rows)
+        if not rows:
+            return
+        for row in rows:
+            if "batch" in row and "event" in row:
+                self._note_event(row["batch"], row["event"])
+        self.add_arrays([r["channel"] for r in rows], [r["hg"] for r in rows],
+                        [r["lg"] for r in rows])
+
+
+class _LiveEventsReader:
+    """Incremental tail reader for a run's ``events.csv``.
+
+    Remembers the byte offset and header; each ``poll`` parses only newly
+    appended *complete* lines (a partially written last line is left for the
+    next poll), at most ``_MAX_LINES_PER_TICK`` of them. A truncated or
+    replaced file (smaller size or different inode) resets the state.
+    """
+
+    def __init__(self, path):
+        self.path = path
+        self._reset()
+
+    def _reset(self):
+        self.data = _SpectraData()
+        self._offset = 0
+        self._header = None
+        self._ident = None
+
+    def poll(self, max_lines=None):
+        """Parse newly appended lines; return True if the data changed."""
+        max_lines = max_lines or _MAX_LINES_PER_TICK
+        try:
+            stat = os.stat(self.path)
+            ident = (stat.st_dev, stat.st_ino)
+            if (self._ident is not None and ident != self._ident) or stat.st_size < self._offset:
+                self._reset()
+            self._ident = ident
+            if stat.st_size == self._offset:
+                return False
+            with open(self.path, "rb") as stream:
+                stream.seek(self._offset)
+                lines = []
+                offset = self._offset
+                while len(lines) < max_lines:
+                    line = stream.readline()
+                    if not line.endswith(b"\n"):
+                        break  # EOF or torn last line: retry next poll
+                    offset += len(line)
+                    lines.append(line)
+        except OSError:
+            return False
+        self._offset = offset
+        if not lines:
+            return False
+        text = [line.decode("utf-8", "replace") for line in lines]
+        if self._header is None:
+            self._header = next(csv.reader([text[0]]), [])
+            text = text[1:]
+        try:
+            index = {name: self._header.index(name) for name in ("channel", "hg", "lg")}
+        except ValueError:
+            return False
+        b_idx = self._header.index("batch") if "batch" in self._header else None
+        e_idx = self._header.index("event") if "event" in self._header else None
+        channels, hgs, lgs = [], [], []
+        for fields in csv.reader(text):
+            try:
+                channel = int(fields[index["channel"]])
+                hg = float(fields[index["hg"]])
+                lg = float(fields[index["lg"]])
+                key = None
+                if b_idx is not None and e_idx is not None and fields[b_idx] and fields[e_idx]:
+                    key = (int(fields[b_idx]), int(fields[e_idx]))
+            except (IndexError, ValueError):
+                continue
+            if key is not None:
+                self.data._note_event(*key)
+            channels.append(channel)
+            hgs.append(hg)
+            lgs.append(lg)
+        if channels:
+            self.data.add_arrays(channels, hgs, lgs)
+        return True
+
+
 def _read_live_events(path):
     """Re-read a run's ``events.csv`` for display, tolerating a concurrent writer.
 
@@ -122,11 +284,15 @@ def _read_live_events(path):
         with path.open(newline="", encoding="utf-8") as stream:
             for row in csv.DictReader(stream):
                 try:
-                    rows.append({
+                    entry = {
                         "channel": int(row["channel"]),
                         "hg": float(row["hg"]),
                         "lg": float(row["lg"]),
-                    })
+                    }
+                    if row.get("batch") not in (None, "") and row.get("event") not in (None, ""):
+                        entry["batch"] = int(row["batch"])
+                        entry["event"] = int(row["event"])
+                    rows.append(entry)
                 except (KeyError, TypeError, ValueError):
                     continue
     except OSError:
@@ -161,7 +327,8 @@ class AcquisitionWindow(QMainWindow):
         self._hardware_running = False
         self._live_csv_path = None
         self._live_refresh_tick = 0
-        self._spectra_rows = ()
+        self._spectra = _SpectraData()
+        self._live_reader = None
         self._spectra_title = "No data yet"
         self.spectra_channel_checks = {}
 
@@ -169,11 +336,11 @@ class AcquisitionWindow(QMainWindow):
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
         title = QLabel("RADIOROC  |  Acquisition workflow")
-        title.setStyleSheet("font-size: 22px; font-weight: 600; padding: 8px 0")
+        title.setStyleSheet("font-size: 18px; font-weight: 600; padding: 2px 0")
         layout.addWidget(title)
         self.banner = QLabel()
         self.banner.setWordWrap(True)
-        self.banner.setStyleSheet("background: #173e58; color: white; padding: 10px; border-radius: 5px")
+        self.banner.setStyleSheet("background: #173e58; color: white; padding: 4px 8px; border-radius: 5px")
         layout.addWidget(self.banner)
         split = QSplitter(Qt.Orientation.Horizontal)
         layout.addWidget(split, 1)
@@ -233,6 +400,7 @@ class AcquisitionWindow(QMainWindow):
         self.trigger_channel = _integer(0, 63, 4)
         self.threshold_dac = _integer(0, 1023, 0)
         self.threshold_dac.setSpecialValueText("Keep current")
+        fit_special_text(self.threshold_dac)
         self.hold_delay_ns = _integer(0, 100000, 530)
         self.hold_delay_ns.setSingleStep(5)
         self.conversion_delay_ns = _integer(0, 100000, 400)
@@ -242,10 +410,13 @@ class AcquisitionWindow(QMainWindow):
         self.timeout_s = _decimal(0.001, 3600, 5.0)
         self.trigger_preamp_gain = _integer(0, 63, 0)
         self.trigger_preamp_gain.setSpecialValueText("Keep current")
+        fit_special_text(self.trigger_preamp_gain)
         self.high_gain_code = _integer(0, 15, 0)
         self.high_gain_code.setSpecialValueText("Keep current")
+        fit_special_text(self.high_gain_code)
         self.low_gain_code = _integer(0, 15, 0)
         self.low_gain_code.setSpecialValueText("Keep current")
+        fit_special_text(self.low_gain_code)
         self.discriminator = QComboBox()
         self.discriminator.addItems(["T1", "T2"])
         # Vendor ADC DAQ tab combo items, recovered from radioroc2UI.pyc/
@@ -287,6 +458,22 @@ class AcquisitionWindow(QMainWindow):
         self.mask = QCheckBox("Mask other channels")
         self.mask.setChecked(True)
         form.addRow(self.mask)
+        self.rstn_manual = QCheckBox("Reset-n manual")
+        form.addRow(self.rstn_manual)
+        self.external_trigger = QCheckBox("Use external ASIC acquisition trigger (IO_FPGA6)")
+        form.addRow(self.external_trigger)
+        self.synchro_trigger = QCheckBox("Pulse FPGA synchro trigger per ADC batch")
+        form.addRow(self.synchro_trigger)
+        self.sync_io = QComboBox()
+        self.sync_io.addItems(list(FPGA_IO_NAMES))
+        self.sync_io.setCurrentText("io1")
+        form.addRow("Sync IO", self.sync_io)
+        self.set_sync_io_mux = QCheckBox("Set sync IO mux index before run")
+        self.sync_io_mux_index = _integer(0, 7, 5)
+        sync_io_mux_row = QHBoxLayout()
+        sync_io_mux_row.addWidget(self.set_sync_io_mux)
+        sync_io_mux_row.addWidget(self.sync_io_mux_index)
+        form.addRow("Sync IO mux index", sync_io_mux_row)
         self.output = QLineEdit(_new_directory("hardware" if self.mode.currentIndex() == 1 else "simulation"))
         self.output.setMinimumWidth(220)
         form.addRow("New run directory", self.output)
@@ -313,9 +500,12 @@ class AcquisitionWindow(QMainWindow):
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
 
         self.spectra_group = QGroupBox("Spectra display")
         spectra_layout = QVBoxLayout(self.spectra_group)
+        spectra_layout.setContentsMargins(6, 4, 6, 4)
+        spectra_layout.setSpacing(2)
         spectra_controls = QHBoxLayout()
         spectra_controls.addWidget(QLabel("Gain:"))
         self.spectra_gain = QComboBox()
@@ -326,12 +516,15 @@ class AcquisitionWindow(QMainWindow):
         spectra_controls.addWidget(self.spectra_bins)
         self.spectra_log_y = QCheckBox("Log Y")
         spectra_controls.addWidget(self.spectra_log_y)
-        self.spectra_clear_button = QPushButton("Clear plot")
-        spectra_controls.addWidget(self.spectra_clear_button)
-        self.import_vendor_button = QPushButton("Import vendor file…")
-        spectra_controls.addWidget(self.import_vendor_button)
         spectra_controls.addStretch(1)
         spectra_layout.addLayout(spectra_controls)
+        spectra_buttons = QHBoxLayout()
+        self.spectra_clear_button = QPushButton("Clear plot")
+        spectra_buttons.addWidget(self.spectra_clear_button)
+        self.import_vendor_button = QPushButton("Import vendor file…")
+        spectra_buttons.addWidget(self.import_vendor_button)
+        spectra_buttons.addStretch(1)
+        spectra_layout.addLayout(spectra_buttons)
         self.spectra_channels_widget = QWidget()
         self.spectra_channels_layout = QHBoxLayout(self.spectra_channels_widget)
         self.spectra_channels_layout.setContentsMargins(0, 0, 0, 0)
@@ -341,20 +534,33 @@ class AcquisitionWindow(QMainWindow):
         self.figure = Figure(figsize=(6, 4), layout="constrained")
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.axes = self.figure.add_subplot(111)
-        right_layout.addWidget(self.canvas, 3)
+        self.canvas.setMinimumHeight(180)
+        # Vertical splitter: the plot gets priority; the text panes below are
+        # user-resizable and collapsible so they cannot squeeze the axes.
+        self.right_split = QSplitter(Qt.Orientation.Vertical)
+        self.right_split.addWidget(self.canvas)
 
         self.batch_summary = QPlainTextEdit()
         self.batch_summary.setReadOnly(True)
         self.batch_summary.setPlaceholderText(
             "The most recent batch's per-channel event count/min/max/mean "
             "appears here while a run is in progress.")
-        right_layout.addWidget(self.batch_summary, 1)
+        self.right_split.addWidget(self.batch_summary)
         self.details = QPlainTextEdit()
         self.details.setReadOnly(True)
         self.details.setPlaceholderText("Preview, run provenance and cleanup details appear here.")
-        right_layout.addWidget(self.details, 1)
+        self.right_split.addWidget(self.details)
+        # Let the text panes shrink so the window can fit a 1024x768 display.
+        self.batch_summary.setMinimumHeight(28)
+        self.details.setMinimumHeight(28)
+        self.right_split.setChildrenCollapsible(True)
+        self.right_split.setStretchFactor(0, 6)
+        self.right_split.setStretchFactor(1, 1)
+        self.right_split.setStretchFactor(2, 1)
+        self.right_split.setSizes([420, 80, 80])
+        right_layout.addWidget(self.right_split, 1)
         split.addWidget(right)
-        split.setSizes([410, 750])
+        fit_controls_pane(split, scroll, self.controls)
 
         buttons = QHBoxLayout()
         self.preview_button = QPushButton("Preview")
@@ -426,6 +632,25 @@ class AcquisitionWindow(QMainWindow):
                           "running; leave at 'Keep current' to leave it alone.")
         self.hint.attach(self.discriminator, "Which ASIC discriminator (T1/T2) the "
                           "threshold DAC and trigger apply to.")
+        self.hint.attach(self.rstn_manual, "Drive the ADC reset line manually instead of "
+                          "letting the FPGA sequence it automatically. The July dark-count "
+                          "finger plot (and the October one) needs this on; without it the "
+                          "single-photoelectron peaks did not appear.")
+        self.hint.attach(self.external_trigger, "Record on an external pulse (2.5 V TTL into "
+                          "the board's External Synchro SMA, IO_FPGA6) instead of the ASIC "
+                          "discriminator, so small pulses are not cut off. Without a pulse the "
+                          "run times out.")
+        self.hint.attach(self.synchro_trigger, "Pulse FPGA synchro trigger per ADC batch: "
+                          "before each batch the FPGA emits a sync pulse on the Sync IO line, "
+                          "used to fire an external pulse generator (set to triggered burst) "
+                          "in lockstep with the read-out, so every event is a real pulse.")
+        self.hint.attach(self.sync_io, "FPGA IO line that carries the synchro trigger pulse "
+                          "to an external pulse generator.")
+        self.hint.attach(self.set_sync_io_mux, "Set the Sync IO mux index below before "
+                          "running, instead of using whatever it is currently set to.")
+        self.hint.attach(self.sync_io_mux_index, "Mux index selecting which internal signal "
+                          "the Sync IO line carries when the checkbox to its left is enabled "
+                          "(5 = the sync pulse).")
         self.hint.attach(self.mask, "Mask every channel except the trigger channel, "
                           "so only its signal is read out.")
         self.hint.attach(self.output, "Directory the run's data and metadata will be saved to.")
@@ -495,9 +720,8 @@ class AcquisitionWindow(QMainWindow):
             self._accepted_mode = requested
         simulation = self.mode.currentIndex() == 0
         self._show_mode_banner()
-        if not simulation and previous_mode != self._accepted_mode:
-            if "radioroc_runs" in Path(self.output.text()).parts:
-                self.output.setText(_new_directory("hardware"))
+        if previous_mode != self._accepted_mode:
+            refresh_auto_output(self.output, "simulation" if simulation else "hardware", _new_directory)
         self.run_button.setText("Run simulation" if simulation else "Run hardware acquisition")
         self.sim_group.setEnabled(simulation and self.worker is None)
         self._update_connection_controls()
@@ -506,7 +730,7 @@ class AcquisitionWindow(QMainWindow):
         self.banner.setText(
             "SIMULATION · Synthetic ADC response, not measured lab data. No board connection."
             if self.mode.currentIndex() == 0 else
-            "HARDWARE · USB candidates are unverified. Masking/gain/threshold overrides are "
+            "HARDWARE · USB candidates are unverified until you connect; the firmware status then confirms the board. Masking/gain/threshold overrides are "
             "temporary scan settings, restored after the run. Restoration readback "
             "verification is mandatory.")
 
@@ -678,6 +902,8 @@ class AcquisitionWindow(QMainWindow):
         output = self.output.text().strip()
         if not output:
             raise ValueError("choose a new run directory")
+        output = guard_output(self.output, "hardware" if self.mode.currentIndex() == 1 else "simulation",
+                              _new_directory)
         acquisition = AcquisitionConfig(
             channels, trigger_channel=self.trigger_channel.value(),
             threshold_dac=self.threshold_dac.value() or None,
@@ -695,9 +921,14 @@ class AcquisitionWindow(QMainWindow):
             trigger_channel_2=self.trigger_channel_2.value(),
             adc_window_ns=self.adc_window_ns.value(),
             adc_nb_trig=self.adc_nb_trig.value(),
+            synchro_trigger=self.synchro_trigger.isChecked(),
+            rstn_manual=self.rstn_manual.isChecked(),
+            external_trigger=self.external_trigger.isChecked(),
+            sync_io=self.sync_io.currentText(),
+            sync_io_mux_index=self.sync_io_mux_index.value() if self.set_sync_io_mux.isChecked() else None,
             out_dir=Path(output).expanduser(),
         )
-        return AcquisitionJobConfig(acquisition)
+        return AcquisitionJobConfig(acquisition, clear_analog_probe=True)
 
     def simulation(self):
         settings = AcquisitionSimulationConfig(
@@ -727,8 +958,18 @@ class AcquisitionWindow(QMainWindow):
                                                   not getattr(self.connection_worker.snapshot(), "fault", None)),
                     "restoration_verification": "mandatory",
                 }
+            note = ""
+            if not simulation and operation.acquisition.external_trigger:
+                per_batch = operation.acquisition.acquisitions_per_batch
+                timeout = operation.acquisition.timeout_s
+                min_rate = per_batch / timeout
+                data["external_trigger_note"] = (
+                    f"Each batch waits for {per_batch} pulses on IO6. The pulse source must deliver at "
+                    f"least {min_rate:.1f} pulses/s, or the batch times out after {timeout:g} s. "
+                    "The board itself handles at most about 20 events/s.")
+                note = f" · IO6 pulses needed: at least {min_rate:.1f}/s"
             self.details.setPlainText(json.dumps(data, indent=2))
-            self.status.setText(f"Preview valid · {data['total_points']} batches · no output created")
+            self.status.setText(f"Preview valid · {data['total_points']} batches · no output created{note}")
             return operation
         except Exception as exc:
             self.status.setText(f"Preview failed: {exc}")
@@ -901,7 +1142,8 @@ class AcquisitionWindow(QMainWindow):
         self._live_csv_path = self._active_directory / _EVENTS_CSV_NAME
         self._live_refresh_tick = 0
         self._set_spectra_channels(channels)
-        self._spectra_rows = ()
+        self._live_reader = _LiveEventsReader(self._live_csv_path)
+        self._spectra = self._live_reader.data
         self._spectra_title = f"{mode} · running · waiting for the first batch"
         self._refresh_spectra()
 
@@ -909,11 +1151,18 @@ class AcquisitionWindow(QMainWindow):
         path = self._live_csv_path
         if path is None or not path.exists():
             return
-        rows = _read_live_events(path)
-        self._spectra_rows = rows
+        if self._live_reader is None or self._live_reader.path != path:
+            self._live_reader = _LiveEventsReader(path)
+        changed = self._live_reader.poll()
+        if not running:
+            # Final refresh: drain whatever the per-tick cap left behind.
+            while self._live_reader.poll():
+                changed = True
+        self._spectra = self._live_reader.data
         state = "running" if running else "finished"
-        self._spectra_title = f"{mode} · {state} · {len(rows)} events on disk"
-        self._refresh_spectra()
+        if changed or not running:
+            self._spectra_title = f"{mode} · {state} · {_events_text(self._spectra)} on disk"
+            self._refresh_spectra()
 
     def _set_spectra_channels(self, channels):
         while self.spectra_channels_layout.count():
@@ -933,11 +1182,11 @@ class AcquisitionWindow(QMainWindow):
         self.spectra_channels_layout.addStretch(1)
 
     def _refresh_spectra(self):
-        self._render_spectra(self._spectra_rows, self._spectra_title)
+        self._render_spectra(self._spectra, self._spectra_title)
 
     def _render_spectra(self, rows, title):
         self.axes.clear()
-        self.axes.set_title(title, fontsize=11)
+        self.axes.set_title(wrap_plot_title(title), fontsize=10)
         gain_field = "hg" if self.spectra_gain.currentIndex() == 0 else "lg"
         gain_label = "HG" if gain_field == "hg" else "LG"
         self.axes.set_xlabel(f"{gain_label} (ADC counts)")
@@ -955,25 +1204,33 @@ class AcquisitionWindow(QMainWindow):
                    if box.isChecked()]
         plotted = False
         if rows and selected:
-            by_channel: dict[int, list[float]] = {}
-            for row in rows:
-                by_channel.setdefault(row["channel"], []).append(row[gain_field])
+            table = rows.hg if gain_field == "hg" else rows.lg
             for channel in selected:
-                values = by_channel.get(channel)
-                if values:
-                    self.axes.hist(values, bins=bins, alpha=0.55, label=f"ch{channel}")
-                    plotted = True
+                counts = table.get(channel)
+                if counts is None:
+                    continue
+                nonzero = np.flatnonzero(counts)
+                if not len(nonzero):
+                    continue
+                lo, hi = int(nonzero[0]), int(nonzero[-1]) + 1
+                edges = np.linspace(lo, hi, bins + 1)
+                weights, _ = np.histogram(np.arange(lo, hi) + 0.5, bins=edges,
+                                          weights=counts[lo:hi])
+                self.axes.hist(edges[:-1] + np.diff(edges) / 2, bins=edges, weights=weights,
+                               alpha=0.55, label=f"ch{channel}")
+                plotted = True
         if plotted:
             # Fixed outside-axes placement instead of loc="best": "best"
             # re-picks a position from the current data shape on every
             # redraw, which visibly jumps around during a live run and can
             # land the legend box on top of the title above it.
-            self.axes.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0),
+            self.axes.legend(fontsize=7, ncol=1, handlelength=1.0, labelspacing=0.3, loc="upper left", bbox_to_anchor=(1.02, 1.0),
                              borderaxespad=0.0)
         self.canvas.draw_idle()
 
     def clear_spectra(self):
-        self._spectra_rows = ()
+        self._spectra = _SpectraData()
+        self._live_reader = None
         self._spectra_title = "Cleared — no data displayed (saved data is untouched)"
         self._refresh_spectra()
 
@@ -992,7 +1249,9 @@ class AcquisitionWindow(QMainWindow):
             channels = sorted({row["channel"] for row in vendor.rows})
             self.banner.setText(f"VENDOR FILE · {path}")
             self._set_spectra_channels(channels)
-            self._spectra_rows = vendor.rows
+            self._live_reader = None
+            self._spectra = _SpectraData()
+            self._spectra.add_rows(vendor.rows)
             self._spectra_title = f"VENDOR FILE · {Path(path).name} · {len(vendor.rows)} rows"
             self._refresh_spectra()
             status = f"Imported vendor file · {len(vendor.rows)} rows · channels {channels}"
@@ -1023,17 +1282,19 @@ class AcquisitionWindow(QMainWindow):
         try:
             saved = read_acquisition_run(Path(path))
             label = saved.execution_mode.upper()
-            self.banner.setText(f"SAVED RUN · {label} · {saved.status} · {saved.directory}")
+            self.banner.setText(f"SAVED RUN · {label} · {saved.status} · {saved.directory} · Controls show current settings, not this run's")
             manifest_batches = None
             if saved.manifest:
                 manifest_batches = saved.manifest.get("operation", {}).get("acquisition", {}).get("batches")
-            status = (f"{label} · {saved.status} · {len(saved.current_segment_rows)} events in this "
-                     f"run's segment ({len(saved.rows)} total in file) · channels {saved.channels}")
+            status = (f"{label} · {saved.status} · {_events_text(saved.current_segment_rows)} in this "
+                     f"run's segment ({_events_text(saved.rows)} total in file) · channels {saved.channels}")
             self.status.setText(status + (" · " + "; ".join(saved.warnings) if saved.warnings else ""))
             self.details.setPlainText(json.dumps({
                 "status": saved.status, "execution_mode": saved.execution_mode,
                 "channels": saved.channels, "row_count": len(saved.rows),
                 "current_segment_row_count": len(saved.current_segment_rows),
+                "event_count": _count_events(saved.rows),
+                "current_segment_event_count": _count_events(saved.current_segment_rows),
                 "warnings": saved.warnings, "manifest": saved.manifest,
             }, indent=2))
             completed = (saved.manifest.get("completed_points") if saved.manifest else None) or 0
@@ -1044,9 +1305,11 @@ class AcquisitionWindow(QMainWindow):
             # append-mode CSV history) matches the manifest's declared
             # channels -- see read_acquisition_run's module docstring.
             self._set_spectra_channels(saved.channels)
-            self._spectra_rows = saved.current_segment_rows
+            self._live_reader = None
+            self._spectra = _SpectraData()
+            self._spectra.add_rows(saved.current_segment_rows)
             self._spectra_title = (f"{label} · {saved.status} · "
-                                   f"{len(saved.current_segment_rows)} events in this run's segment")
+                                   f"{_events_text(saved.current_segment_rows)} in this run's segment")
             self._refresh_spectra()
         except Exception as exc:
             self.status.setText(f"Cannot open result: {exc}")

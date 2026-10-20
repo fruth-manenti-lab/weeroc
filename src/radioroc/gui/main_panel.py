@@ -34,12 +34,15 @@ _DEFAULT_CHANNEL_VALUES = {
     "low_gain_shaping_slow": False,
 }
 
-# Packaged default config's address-65 values, decoded the same way (subadd
-# 1/2 -> T1=0; subadd 2/3 -> T2=2; subadd 3/4 -> TQ=520; subadd 8 -> delay=255;
-# subadd 9 -> slope=4).
-_DEFAULT_T1_THRESHOLD_DAC = 0
-_DEFAULT_T2_THRESHOLD_DAC = 2
-_DEFAULT_TQ_THRESHOLD_DAC = 520
+# Packaged default config's address-65 values. The threshold DACs use the
+# hardware-validated layout (subadd 1 = dac1[7:0]; subadd 2 = {dac2[5:0],
+# dac1[9:8]}; subadd 3 = {dacQ[3:0], dac2[9:6]}; subadd 4 = {NC*2, dacQ[9:4]}),
+# which decodes the defaults to 512 for all three. (An earlier decode gave
+# 0 / 2 / 520, and applying the tab unedited then wrote those and broke the
+# trigger.) subadd 8 -> delay=255; subadd 9 -> slope=4.
+_DEFAULT_T1_THRESHOLD_DAC = 512
+_DEFAULT_T2_THRESHOLD_DAC = 512
+_DEFAULT_TQ_THRESHOLD_DAC = 512
 _DEFAULT_DELAY_CODE = 255
 _DEFAULT_DELAY_SLOPE = 4
 

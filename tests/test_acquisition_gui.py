@@ -64,12 +64,45 @@ class AcquisitionGuiTests(unittest.TestCase):
         self.assertIn("at least one channel is required", self.window.status.text())
         self.assertFalse(self.directory.exists())
 
+    def test_hardware_preview_with_external_trigger_states_the_pulse_rate_needed(self):
+        self.window.mode.setCurrentIndex(1)
+        self.window.external_trigger.setChecked(True)
+        self.window.acquisitions_per_batch.setValue(200)
+        self.window.timeout_s.setValue(60.0)
+        self.assertIsNotNone(self.window.preview())
+        self.assertIn("at least 3.3/s", self.window.status.text())
+        self.assertIn("external_trigger_note", self.window.details.toPlainText())
+
+    def test_channel_buttons_have_accessible_names(self):
+        buttons = self.window.channel_select.channel_buttons
+        self.assertEqual([b.accessibleName() for b in buttons[:3]],
+                         ["Channel 0", "Channel 1", "Channel 2"])
+        self.assertEqual(buttons[63].accessibleName(), "Channel 63")
+
     def test_operation_uses_selected_channels(self):
         self.window.channel_select.set_channels([1, 3, 6])
         self.window.trigger_channel.setValue(3)
         operation = self.window.operation()
         self.assertEqual(operation.acquisition.channels, [1, 3, 6])
         self.assertEqual(operation.acquisition.trigger_channel, 3)
+
+    def test_operation_wires_sync_controls(self):
+        acquisition = self.window.operation().acquisition
+        self.assertFalse(acquisition.synchro_trigger)
+        self.assertIsNone(acquisition.sync_io_mux_index)
+        self.window.synchro_trigger.setChecked(True)
+        self.window.sync_io.setCurrentText("io1")
+        self.window.set_sync_io_mux.setChecked(True)
+        self.window.sync_io_mux_index.setValue(5)
+        acquisition = self.window.operation().acquisition
+        self.assertTrue(acquisition.synchro_trigger)
+        self.assertEqual((acquisition.sync_io, acquisition.sync_io_mux_index), ("io1", 5))
+        self.assertFalse(acquisition.external_trigger)
+        self.assertFalse(acquisition.rstn_manual)
+        self.window.rstn_manual.setChecked(True)
+        self.assertTrue(self.window.operation().acquisition.rstn_manual)
+        self.window.external_trigger.setChecked(True)
+        self.assertTrue(self.window.operation().acquisition.external_trigger)
 
     def test_operation_wires_two_channel_coincidence_fields(self):
         self.window.channel_select.set_channels([2, 5])
@@ -173,7 +206,7 @@ class AcquisitionGuiTests(unittest.TestCase):
         self.window.channel_select.set_channels([2, 4])
         self.window.start_run()
         self.wait_idle()
-        self.assertTrue(self.window._spectra_rows)
+        self.assertTrue(self.window._spectra)
         self.assertGreater(len(self.window.axes.patches), 0)
 
     def test_channel_visibility_toggle_changes_what_is_plotted(self):
@@ -212,7 +245,7 @@ class AcquisitionGuiTests(unittest.TestCase):
         self.assertTrue((self.directory / "events.csv").exists())
 
         self.window.clear_spectra()
-        self.assertEqual(self.window._spectra_rows, ())
+        self.assertFalse(self.window._spectra)
         self.assertEqual(len(self.window.axes.patches), 0)
         self.assertTrue((self.directory / "events.csv").exists())
 
@@ -224,8 +257,39 @@ class AcquisitionGuiTests(unittest.TestCase):
         self.assertEqual(len(self.window.axes.patches), 0)
 
         self.window.open_saved(self.directory)
-        self.assertTrue(self.window._spectra_rows)
+        self.assertTrue(self.window._spectra)
         self.assertGreater(len(self.window.axes.patches), 0)
+
+    def _run_eight_channels(self):
+        self.window.channel_select.set_channels(list(range(8)))
+        self.window.batches.setValue(3)
+        self.window.acquisitions_per_batch.setValue(5)
+        self.window.start_run()
+        self.wait_idle()
+
+    def test_event_count_is_physical_events_not_channel_rows(self):
+        from radioroc.gui.acquisition_window import _count_events, _read_live_events
+        self._run_eight_channels()
+        live = _read_live_events(self.directory / "events.csv")
+        self.assertEqual(len(live), 120)
+        self.assertEqual(_count_events(live), 15)
+        self.window._refresh_live_spectra("Simulation", False)
+        self.assertIn("15 events (120 channel rows)", self.window._spectra_title)
+        self.window.open_saved(self.directory)
+        self.assertIn("15 events (120 channel rows)", self.window._spectra_title)
+        self.assertIn("15 events (120 channel rows)", self.window.status.text())
+
+    def test_plot_keeps_size_at_1024x768_with_eight_channels(self):
+        self.window.resize(1024, 768)
+        self.window.show()
+        self._run_eight_channels()
+        self.window.open_saved(self.directory)
+        self.app.processEvents()
+        self.window.canvas.draw()
+        box = self.window.axes.get_window_extent()
+        self.assertGreater(box.width, 100)
+        self.assertGreater(box.height, 100)
+        self.assertEqual(len(self.window.axes.get_legend().get_texts()), 8)
 
     def test_import_vendor_file_renders_through_the_same_path(self):
         fixture = (Path(__file__).parent / "fixtures" /
@@ -263,14 +327,71 @@ class AcquisitionGuiTests(unittest.TestCase):
         self.window._live_refresh_tick = 0
         self.window.worker = _FakeWorker()
         try:
-            with patch("radioroc.gui.acquisition_window._read_live_events",
-                      return_value=()) as reread:
+            with patch("radioroc.gui.acquisition_window._LiveEventsReader.poll",
+                      return_value=False) as reread:
                 ticks = self.window._LIVE_REFRESH_EVERY_TICKS
                 for _ in range(3 * ticks - 1):
                     self.window.poll_worker()
                 self.assertEqual(reread.call_count, 2)
         finally:
             self.window.worker = None
+
+    # -- incremental, bounded live reading. ----------------------------
+
+    @staticmethod
+    def _csv_text(batches, events, channels):
+        lines = ["batch,event,channel,hg,lg"]
+        for batch in range(batches):
+            for channel in range(channels):
+                for event in range(events):
+                    lines.append(f"{batch},{event},{channel},{(batch * 7 + event * 3 + channel) % 4000},"
+                                 f"{(event * 5 + channel) % 4000}")
+        return "\n".join(lines) + "\n"
+
+    def test_incremental_reader_matches_full_read_with_partial_line(self):
+        import numpy as np
+        from radioroc.gui.acquisition_window import _LiveEventsReader, _SpectraData, _read_live_events
+        self.directory.mkdir(parents=True, exist_ok=True)
+        path = self.directory / "events.csv"
+        text = self._csv_text(3, 5, 4)
+        cut = len(text) // 2
+        path.write_text(text[:cut])           # ends mid-line
+        reader = _LiveEventsReader(path)
+        reader.poll()
+        self.assertLess(reader.data.rows, 60)
+        with path.open("a") as stream:
+            stream.write(text[cut:])
+        reader.poll()
+        full = _SpectraData()
+        full.add_rows(_read_live_events(path))
+        self.assertEqual(reader.data.rows, 60)
+        self.assertEqual(reader.data.events, 15)
+        self.assertEqual(full.events, 15)
+        for channel in range(4):
+            np.testing.assert_array_equal(reader.data.hg[channel], full.hg[channel])
+            np.testing.assert_array_equal(reader.data.lg[channel], full.lg[channel])
+        # Truncation/replacement resets instead of mixing old and new data.
+        path.write_text(self._csv_text(1, 2, 1))
+        reader.poll()
+        self.assertEqual((reader.data.rows, reader.data.events), (2, 2))
+
+    def test_live_tick_is_fast_and_display_memory_bounded(self):
+        from radioroc.gui.acquisition_window import _LiveEventsReader, _MAX_LINES_PER_TICK
+        self.directory.mkdir(parents=True, exist_ok=True)
+        path = self.directory / "events.csv"
+        path.write_text(self._csv_text(100, 1000, 8))   # 100k events x 8 ch = 800k rows
+        reader = _LiveEventsReader(path)
+        started = time.perf_counter()
+        reader.poll()
+        elapsed = time.perf_counter() - started
+        self.assertLess(elapsed, 0.5)
+        self.assertEqual(reader.data.rows, _MAX_LINES_PER_TICK - 1)  # header line counted
+        while reader.poll():
+            pass
+        self.assertEqual(reader.data.rows, 800_000)
+        self.assertEqual(reader.data.events, 100_000)
+        self.assertEqual(len(reader.data._batch_events), 1000)
+        self.assertEqual(sum(a.size for a in reader.data.hg.values()), 8 * 4096)
 
     def test_close_failure_remains_visible(self):
         from radioroc.application.acquisition_worker import AcquisitionWorker

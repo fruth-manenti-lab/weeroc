@@ -1,0 +1,2993 @@
+{
+  "log": [
+    {
+      "step": "startup",
+      "state": {
+        "threshold": [
+          4,
+          5
+        ],
+        "hold": [
+          4,
+          5
+        ],
+        "scurve": [
+          4
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 4,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      },
+      "modes": {
+        "threshold": "Hardware connection",
+        "hold": "Hardware connection",
+        "scurve": "Hardware connection",
+        "acq": "Hardware connection"
+      }
+    },
+    {
+      "step": "after Simulation on all scan tabs",
+      "state": {
+        "threshold": [
+          4,
+          5
+        ],
+        "hold": [
+          4,
+          5
+        ],
+        "scurve": [
+          4
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 4,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      },
+      "modes": {
+        "threshold": "Simulation",
+        "hold": "Simulation",
+        "scurve": "Simulation",
+        "acq": "Simulation"
+      }
+    },
+    {
+      "step": "Q1: threshold=38, visited every tab",
+      "state": {
+        "threshold": [
+          38
+        ],
+        "hold": [
+          4,
+          5
+        ],
+        "scurve": [
+          4
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 4,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "after switching pages/tabs and back",
+      "state": {
+        "threshold": [
+          38
+        ],
+        "hold": [
+          4,
+          5
+        ],
+        "scurve": [
+          4
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 4,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "Q2 cycle 1: on threshold",
+      "state": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          4,
+          5
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 4,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "Q2 cycle 1: on scurve",
+      "state": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          4,
+          5
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 4,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "Q2 cycle 2: on threshold",
+      "state": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          4,
+          5
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 4,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "Q2 cycle 2: on scurve",
+      "state": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          4,
+          5
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 4,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "Q2 cycle 3: on threshold",
+      "state": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          4,
+          5
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 4,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "Q2 cycle 3: on scurve",
+      "state": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          4,
+          5
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 4,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "during scurve run, viewing threshold",
+      "state": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          4,
+          5
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 4,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "Q2: after S-curve run (watched threshold during run)",
+      "state": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          4,
+          5
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 4,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      },
+      "run": {
+        "started": true,
+        "dir": "/Users/tengiz/weeroc/radioroc_runs/simulation/test_20261020_channel/scurve_ch32_155159",
+        "finished": true,
+        "seconds": 0.0,
+        "banner": "SIMULATION \u00b7 RUN \u00b7 /Users/tengiz/weeroc/radioroc_runs/simulation/test_20261020_channel/scurve_ch32_155159 \u00b7 Results shown here are from this run.",
+        "status": "SIMULATION \u00b7 completed \u00b7 21 points \u00b7 cleanup: restored",
+        "plot_title": "SIMULATION \u00b7 synthetic S-curve response",
+        "legend": [
+          "ch32"
+        ]
+      },
+      "before": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          4,
+          5
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 4,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "during threshold run, viewing scurve",
+      "state": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          4,
+          5
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 4,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "Q2: after threshold run (watched S-curve during run)",
+      "state": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          4,
+          5
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 4,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      },
+      "run": {
+        "started": true,
+        "dir": "/Users/tengiz/weeroc/radioroc_runs/simulation/test_20261020_channel/threshold_ch4_155159",
+        "finished": true,
+        "seconds": 2.3,
+        "banner": "SIMULATION \u00b7 RUN \u00b7 /Users/tengiz/weeroc/radioroc_runs/simulation/test_20261020_channel/threshold_ch4_155159 \u00b7 Results shown here are from this run.",
+        "status": "SIMULATION \u00b7 completed \u00b7 41 points / 41 windows \u00b7 cleanup: restored",
+        "plot_title": "SIMULATION \u00b7 synthetic threshold rates",
+        "legend": [
+          "ch4"
+        ]
+      },
+      "before": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          4,
+          5
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 4,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "hold run, grid 38 but trigger channel untouched",
+      "state": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 4,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      },
+      "run": {
+        "started": false,
+        "status": "Preview failed: trigger_channel must be one of channels, or its response curve will never be recorded"
+      },
+      "before": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 4,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "hold run ch38, trigger 38",
+      "state": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 38,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      },
+      "run": {
+        "started": true,
+        "dir": "/Users/tengiz/weeroc/radioroc_runs/simulation/test_20261020_channel/hold_ch38_155202",
+        "finished": true,
+        "seconds": 0.0,
+        "banner": "SIMULATION \u00b7 RUN \u00b7 /Users/tengiz/weeroc/radioroc_runs/simulation/test_20261020_channel/hold_ch38_155202 \u00b7 Results shown here are from this run.",
+        "status": "SIMULATION \u00b7 completed \u00b7 33 points \u00b7 cleanup: restored",
+        "plot_title": "SIMULATION \u00b7 synthetic hold-scan response",
+        "legend": [
+          "ch38 hg",
+          "ch38 lg"
+        ]
+      },
+      "before": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          4
+        ],
+        "hold_trigger": 38,
+        "acq_trigger_T1": 4,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "acquisition run ch38/T1 38",
+      "state": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          38
+        ],
+        "hold_trigger": 38,
+        "acq_trigger_T1": 38,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      },
+      "run": {
+        "started": true,
+        "dir": "/Users/tengiz/weeroc/radioroc_runs/simulation/test_20261020_channel/acq_ch38_155203",
+        "finished": true,
+        "seconds": 0.0,
+        "banner": "SIMULATION \u00b7 RUN \u00b7 /Users/tengiz/weeroc/radioroc_runs/simulation/test_20261020_channel/acq_ch38_155203 \u00b7 Results shown here are from this run.",
+        "status": "SIMULATION \u00b7 completed \u00b7 10 batches \u00b7 cleanup: restored",
+        "plot_title": "SIMULATION \u00b7 finished \u00b7 500 events (500 channel rows) on disk",
+        "legend": [
+          "ch38"
+        ]
+      },
+      "before": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          38
+        ],
+        "hold_trigger": 38,
+        "acq_trigger_T1": 38,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "open saved real run in threshold",
+      "state": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          38
+        ],
+        "hold_trigger": 38,
+        "acq_trigger_T1": 38,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      },
+      "reopen": {
+        "before": [
+          4
+        ],
+        "after": [
+          4
+        ],
+        "banner": "SAVED RESULT \u00b7 HARDWARE \u00b7 completed \u00b7 /Users/tengiz/weeroc/radioroc_runs/step1_pedestal_ch4_6_32_20261016T052958Z/scan \u00b7 Controls show current settings, not this run's",
+        "status": "HARDWARE \u00b7 completed \u00b7 103 points",
+        "plot_title": "HARDWARE \u00b7 completed \u00b7 103 saved points",
+        "legend": [
+          "ch4",
+          "ch6",
+          "ch32"
+        ]
+      },
+      "before": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          38
+        ],
+        "hold_trigger": 38,
+        "acq_trigger_T1": 38,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "open saved real run in hold",
+      "state": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          38
+        ],
+        "hold_trigger": 38,
+        "acq_trigger_T1": 38,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      },
+      "reopen": {
+        "before": [
+          38
+        ],
+        "after": [
+          38
+        ],
+        "banner": "SAVED RESULT \u00b7 HARDWARE \u00b7 completed \u00b7 /Users/tengiz/weeroc/radioroc_runs/step5_hold_selftrig_ctest_ch4_20261016T054013Z/scan \u00b7 Controls show current settings, not this run's",
+        "status": "HARDWARE \u00b7 completed \u00b7 31 points",
+        "plot_title": "HARDWARE \u00b7 completed \u00b7 31 saved points",
+        "legend": [
+          "ch4 hg",
+          "ch4 lg"
+        ]
+      },
+      "before": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          38
+        ],
+        "hold_trigger": 38,
+        "acq_trigger_T1": 38,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "open saved real run in acq",
+      "state": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          38
+        ],
+        "hold_trigger": 38,
+        "acq_trigger_T1": 38,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      },
+      "reopen": {
+        "before": [
+          38
+        ],
+        "after": [
+          38
+        ],
+        "banner": "SAVED RUN \u00b7 HARDWARE \u00b7 completed \u00b7 /Users/tengiz/weeroc/radioroc_runs/acq_ctest_selftrig_ch4_20261016T062341Z/acq \u00b7 Controls show current settings, not this run's",
+        "status": "HARDWARE \u00b7 completed \u00b7 100 events (100 channel rows) in this run's segment (100 events (100 channel rows) total in file) \u00b7 channels [4]",
+        "plot_title": "HARDWARE \u00b7 completed \u00b7 100 events (100 channel rows) in this\nrun's segment",
+        "legend": [
+          "ch4"
+        ]
+      },
+      "before": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          38
+        ],
+        "hold_trigger": 38,
+        "acq_trigger_T1": 38,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "open saved real run in autocal",
+      "state": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          6,
+          32
+        ],
+        "acq": [
+          38
+        ],
+        "hold_trigger": 38,
+        "acq_trigger_T1": 38,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      },
+      "reopen": {
+        "before": [
+          4,
+          5
+        ],
+        "after": [
+          4,
+          6,
+          32
+        ],
+        "banner": "SAVED RESULT \u00b7 completed \u00b7 /Users/tengiz/weeroc/radioroc_runs/hardware/20261016-155312-11f4dd6c \u00b7 Controls show this saved run's settings",
+        "status": "completed \u00b7 showing final \u00b7 86 points",
+        "plot_title": "final \u00b7 completed \u00b7 86 saved points",
+        "legend": [
+          "ch4",
+          "ch6",
+          "ch32"
+        ]
+      },
+      "before": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          5
+        ],
+        "acq": [
+          38
+        ],
+        "hold_trigger": 38,
+        "acq_trigger_T1": 38,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "open saved own run in scurve",
+      "state": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          6,
+          32
+        ],
+        "acq": [
+          38
+        ],
+        "hold_trigger": 38,
+        "acq_trigger_T1": 38,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      },
+      "reopen": {
+        "before": [
+          32
+        ],
+        "after": [
+          32
+        ],
+        "banner": "SAVED RESULT \u00b7 SIMULATION \u00b7 completed \u00b7 /Users/tengiz/weeroc/radioroc_runs/simulation/test_20261020_channel/scurve_ch32_155159 \u00b7 Controls show current settings, not this run's",
+        "status": "SIMULATION \u00b7 completed \u00b7 21 points",
+        "plot_title": "SIMULATION \u00b7 completed \u00b7 21 saved points",
+        "legend": [
+          "ch32"
+        ]
+      },
+      "before": {
+        "threshold": [
+          4
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          6,
+          32
+        ],
+        "acq": [
+          38
+        ],
+        "hold_trigger": 38,
+        "acq_trigger_T1": 38,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      }
+    },
+    {
+      "step": "open own threshold ch4 run with grid at 12",
+      "state": {
+        "threshold": [
+          12
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          6,
+          32
+        ],
+        "acq": [
+          38
+        ],
+        "hold_trigger": 38,
+        "acq_trigger_T1": 38,
+        "acq_trigger_T2": 5,
+        "main_channel": 0
+      },
+      "reopen": {
+        "after": [
+          12
+        ],
+        "banner": "SAVED RESULT \u00b7 SIMULATION \u00b7 completed \u00b7 /Users/tengiz/weeroc/radioroc_runs/simulation/test_20261020_channel/threshold_ch4_155159 \u00b7 Controls show current settings, not this run's",
+        "status": "SIMULATION \u00b7 completed \u00b7 41 points",
+        "plot_title": "SIMULATION \u00b7 completed \u00b7 41 saved points",
+        "legend": [
+          "ch4"
+        ]
+      }
+    },
+    {
+      "step": "main N\u00b0 channel = 38",
+      "state": {
+        "threshold": [
+          12
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          6,
+          32
+        ],
+        "acq": [
+          38
+        ],
+        "hold_trigger": 38,
+        "acq_trigger_T1": 38,
+        "acq_trigger_T2": 5,
+        "main_channel": 38
+      }
+    },
+    {
+      "step": "after switching away from main and back",
+      "state": {
+        "threshold": [
+          12
+        ],
+        "hold": [
+          38
+        ],
+        "scurve": [
+          32
+        ],
+        "autocal": [
+          4,
+          6,
+          32
+        ],
+        "acq": [
+          38
+        ],
+        "hold_trigger": 38,
+        "acq_trigger_T1": 38,
+        "acq_trigger_T2": 5,
+        "main_channel": 38
+      }
+    }
+  ],
+  "shots": {
+    "open_threshold": "01_first_open_threshold.png",
+    "open_hold": "02_first_open_hold.png",
+    "open_scurve": "03_first_open_scurve.png",
+    "open_autocal": "04_first_open_autocal.png",
+    "open_acq": "05_first_open_acquisition.png",
+    "open_main": "06_first_open_asic_main.png",
+    "q1_threshold_38": "07_q1_threshold_set_38.png",
+    "q1_hold": "08_q1_after38_hold.png",
+    "q1_scurve": "09_q1_after38_scurve.png",
+    "q1_autocal": "10_q1_after38_autocal.png",
+    "q1_acq": "11_q1_after38_acq.png",
+    "q1_main": "12_q1_after38_main.png",
+    "q2_threshold": "13_q2_threshold_4.png",
+    "q2_scurve": "14_q2_scurve_32.png",
+    "q2_scurve_done": "15_q2_scurve_run_done.png",
+    "q2_threshold_done": "16_q2_threshold_run_done.png",
+    "hold_fail": "17_hold_grid38_trigger4_error.png",
+    "hold_done": "18_hold_run_done.png",
+    "acq_done": "19_acq_run_done.png",
+    "reopen_threshold": "20_reopen_real_threshold.png",
+    "reopen_hold": "21_reopen_real_hold.png",
+    "reopen_acq": "22_reopen_real_acq.png",
+    "reopen_autocal": "23_reopen_real_autocal.png",
+    "reopen_scurve": "24_reopen_own_scurve.png",
+    "reopen_thr_own": "25_reopen_own_threshold_while_grid_12.png",
+    "main_38": "26_main_channel_38.png",
+    "b_threshold": "27_taskB_threshold.png",
+    "b_hold": "28_taskB_hold.png",
+    "b_scurve": "29_taskB_scurve.png",
+    "b_autocal": "30_taskB_autocal.png",
+    "b_asic_main": "31_taskB_asic_main.png",
+    "b_asic_channel_config": "32_taskB_asic_channel_config.png",
+    "b_asic_input_dac": "33_taskB_asic_input_dac.png",
+    "b_asic_threshold_calibration": "34_taskB_asic_threshold_calibration.png"
+  },
+  "reopen": {
+    "threshold": {
+      "before": [
+        4
+      ],
+      "after": [
+        4
+      ],
+      "banner": "SAVED RESULT \u00b7 HARDWARE \u00b7 completed \u00b7 /Users/tengiz/weeroc/radioroc_runs/step1_pedestal_ch4_6_32_20261016T052958Z/scan \u00b7 Controls show current settings, not this run's",
+      "status": "HARDWARE \u00b7 completed \u00b7 103 points",
+      "plot_title": "HARDWARE \u00b7 completed \u00b7 103 saved points",
+      "legend": [
+        "ch4",
+        "ch6",
+        "ch32"
+      ]
+    },
+    "hold": {
+      "before": [
+        38
+      ],
+      "after": [
+        38
+      ],
+      "banner": "SAVED RESULT \u00b7 HARDWARE \u00b7 completed \u00b7 /Users/tengiz/weeroc/radioroc_runs/step5_hold_selftrig_ctest_ch4_20261016T054013Z/scan \u00b7 Controls show current settings, not this run's",
+      "status": "HARDWARE \u00b7 completed \u00b7 31 points",
+      "plot_title": "HARDWARE \u00b7 completed \u00b7 31 saved points",
+      "legend": [
+        "ch4 hg",
+        "ch4 lg"
+      ]
+    },
+    "acq": {
+      "before": [
+        38
+      ],
+      "after": [
+        38
+      ],
+      "banner": "SAVED RUN \u00b7 HARDWARE \u00b7 completed \u00b7 /Users/tengiz/weeroc/radioroc_runs/acq_ctest_selftrig_ch4_20261016T062341Z/acq \u00b7 Controls show current settings, not this run's",
+      "status": "HARDWARE \u00b7 completed \u00b7 100 events (100 channel rows) in this run's segment (100 events (100 channel rows) total in file) \u00b7 channels [4]",
+      "plot_title": "HARDWARE \u00b7 completed \u00b7 100 events (100 channel rows) in this\nrun's segment",
+      "legend": [
+        "ch4"
+      ]
+    },
+    "autocal": {
+      "before": [
+        4,
+        5
+      ],
+      "after": [
+        4,
+        6,
+        32
+      ],
+      "banner": "SAVED RESULT \u00b7 completed \u00b7 /Users/tengiz/weeroc/radioroc_runs/hardware/20261016-155312-11f4dd6c \u00b7 Controls show this saved run's settings",
+      "status": "completed \u00b7 showing final \u00b7 86 points",
+      "plot_title": "final \u00b7 completed \u00b7 86 saved points",
+      "legend": [
+        "ch4",
+        "ch6",
+        "ch32"
+      ]
+    },
+    "scurve_own": {
+      "before": [
+        32
+      ],
+      "after": [
+        32
+      ],
+      "banner": "SAVED RESULT \u00b7 SIMULATION \u00b7 completed \u00b7 /Users/tengiz/weeroc/radioroc_runs/simulation/test_20261020_channel/scurve_ch32_155159 \u00b7 Controls show current settings, not this run's",
+      "status": "SIMULATION \u00b7 completed \u00b7 21 points",
+      "plot_title": "SIMULATION \u00b7 completed \u00b7 21 saved points",
+      "legend": [
+        "ch32"
+      ]
+    },
+    "threshold_own": {
+      "after": [
+        12
+      ],
+      "banner": "SAVED RESULT \u00b7 SIMULATION \u00b7 completed \u00b7 /Users/tengiz/weeroc/radioroc_runs/simulation/test_20261020_channel/threshold_ch4_155159 \u00b7 Controls show current settings, not this run's",
+      "status": "SIMULATION \u00b7 completed \u00b7 41 points",
+      "plot_title": "SIMULATION \u00b7 completed \u00b7 41 saved points",
+      "legend": [
+        "ch4"
+      ]
+    }
+  },
+  "taskb": {
+    "threshold": [
+      {
+        "widget": "QCheckBox",
+        "label": "Log Y",
+        "hint": "Plot the trigger-rate axis (Y) on a log scale. Threshold scans span many orders of magnitude -- a real signal plateau can be under 0.1% of the noise peak and looks like flat zero on a linear axis."
+      },
+      {
+        "widget": "QComboBox",
+        "label": "",
+        "hint": "Simulation previews a synthetic curve with no board attached; Hardware connection runs on the real ASIC/FPGA."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Channels: 12",
+        "hint": "Channels to scan and plot. Click to choose which channels."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Select all",
+        "hint": "Select every channel."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Select none",
+        "hint": "Deselect every channel."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "0",
+        "hint": "First threshold DAC code in the sweep."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "1000",
+        "hint": "Last threshold DAC code in the sweep."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "25",
+        "hint": "Step size between sweep points."
+      },
+      {
+        "widget": "QDoubleSpinBox",
+        "label": "50.000",
+        "hint": "How long to count trigger edges at each DAC point, in milliseconds."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "1",
+        "hint": "Number of counting windows to average per point."
+      },
+      {
+        "widget": "QComboBox",
+        "label": "",
+        "hint": "Which ASIC discriminator output (T1/T2) to measure the trigger rate of."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "Keep current",
+        "hint": "Override the trigger-path preamp gain code before scanning; leave at 'Keep current' to leave it alone."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Mask other channels",
+        "hint": "Mask every channel except the ones being scanned, so only their signals are read out."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Enable Ctest",
+        "hint": "Enable Ctest: routes the ASIC's internal test-charge injector into the selected channel(s), producing a repeatable calibration pulse without needing an external pulse generator."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Initialize FPGA (persists)",
+        "hint": "Re-initialize the FPGA before running. This is a persistent board change, not just a scan setting -- leave it off unless you specifically need to reset FPGA state."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Apply defaults (persists)",
+        "hint": "Apply the ASIC's packaged default register values before running. This is a persistent board change -- leave it off to keep whatever configuration is already on the ASIC."
+      },
+      {
+        "widget": "QLineEdit",
+        "label": "",
+        "hint": "Optional ASIC register CSV to load instead of the packaged defaults."
+      },
+      {
+        "widget": "QLineEdit",
+        "label": "/Users/tengiz/weeroc/radioroc_runs/simulation/20261020-155201-69ce19a6",
+        "hint": "Directory the run's data and metadata will be saved to."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Choose output parent\u2026",
+        "hint": "Choose a different parent directory for the run output above."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Preview",
+        "hint": "Preview the sweep/simulation settings without recording a run to disk."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Run simulation",
+        "hint": "Start the threshold scan and record its result to the run directory above."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Cancel",
+        "hint": "Cancel the run currently in progress."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Open saved result\u2026",
+        "hint": "Open a previously saved threshold-scan run to view its plot and data again."
+      }
+    ],
+    "hold": [
+      {
+        "widget": "QComboBox",
+        "label": "",
+        "hint": "Simulation previews a synthetic curve with no board attached; Hardware connection runs on the real ASIC/FPGA."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Channels: 38",
+        "hint": "Channels to record and plot. Click to choose which channels."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Select all",
+        "hint": "Select every channel."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Select none",
+        "hint": "Deselect every channel."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "38",
+        "hint": "Channel whose discriminator/Ctest pulse times the acquisition."
+      },
+      {
+        "widget": "QComboBox",
+        "label": "",
+        "hint": "Internal sweeps the ASIC's own delay-cell code (coarse, on-chip). External sweeps the FPGA-generated hold delay in nanoseconds (finer, matches a real injected pulse's timing)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "0 ns",
+        "hint": "First hold delay/code in the sweep."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "800 ns",
+        "hint": "Last hold delay/code in the sweep."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "25 ns",
+        "hint": "Step size between sweep points."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "10",
+        "hint": "ADC acquisitions requested per hold-delay point; the hardware may report back a different actual count."
+      },
+      {
+        "widget": "QDoubleSpinBox",
+        "label": "5.000",
+        "hint": "Maximum time to wait for each batch of acquisitions before giving up."
+      },
+      {
+        "widget": "QComboBox",
+        "label": "",
+        "hint": "Which ASIC discriminator output (T1/T2) provides the trigger timing reference."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Set threshold DAC before scan",
+        "hint": "Write the threshold DAC below to the trigger channel before running, instead of using its current value."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "0",
+        "hint": "Threshold DAC code to apply when the checkbox to its left is enabled. Keep it above the noise floor (see the threshold-scan tab) or the ASIC's own discriminator will self-trigger on noise and contaminate the hold-scan samples."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Mask other channels",
+        "hint": "Mask every channel except the ones being scanned, so only their signals are read out."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Enable Ctest",
+        "hint": "Enable Ctest: routes the ASIC's internal test-charge injector into the selected channel(s), producing a repeatable calibration pulse without needing an external pulse generator."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Pulse FPGA synchro trigger per ADC batch",
+        "hint": "Pulse FPGA synchro trigger per ADC batch: before each batch of acquisitions, the FPGA emits a sync pulse on the Sync IO line below, used to fire an external pulse generator (or the on-board Ctest path) and the ADC read-out in lockstep so the hold scan can track a real pulse's timing precisely."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Initialize FPGA (persists)",
+        "hint": "Re-initialize the FPGA before running. This is a persistent board change, not just a scan setting -- leave it off unless you specifically need to reset FPGA state."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Apply defaults (persists)",
+        "hint": "Apply the ASIC's packaged default register values before running. This is a persistent board change -- leave it off to keep whatever configuration is already on the ASIC."
+      },
+      {
+        "widget": "QComboBox",
+        "label": "",
+        "hint": "FPGA IO line that carries the synchro trigger pulse to an external pulse generator."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Set sync IO mux index before scan",
+        "hint": "Set the Sync IO mux index below before running, instead of using whatever it is currently set to."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "5",
+        "hint": "Mux index selecting which internal signal the Sync IO line carries when the checkbox to its left is enabled."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "400",
+        "hint": "Delay after the trigger before the ADC starts converting, in external hold mode."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "0",
+        "hint": "Vendor ADC trigger-type code for external hold mode acquisitions."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "3",
+        "hint": "Vendor ADC trigger-source code: which signal arms the ADC acquisition (e.g. a specific channel's discriminator, or the FPGA synchro pulse) in external hold mode."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "50",
+        "hint": "Length of the ADC's acquisition window, in nanoseconds, in external hold mode."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "1",
+        "hint": "Number of ADC triggers to accept per acquisition window, in external hold mode."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Reset-n manual",
+        "hint": "Drive the ADC reset line manually instead of letting the FPGA sequence it automatically."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Use external ASIC acquisition trigger",
+        "hint": "Use an external signal (instead of the ASIC's own discriminator) to arm the ASIC's acquisition trigger."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Use vendor peak-sensing path",
+        "hint": "Use the vendor's peak-sensing read-out path instead of the default sampling path."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "Keep current",
+        "hint": "Override the trigger-path preamp gain code before running; leave at 'Keep current' to leave it alone."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "Keep current",
+        "hint": "Override the high-gain shaper code before running; leave at 'Keep current' to leave it alone."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "Keep current",
+        "hint": "Override the low-gain shaper code before running; leave at 'Keep current' to leave it alone."
+      },
+      {
+        "widget": "QLineEdit",
+        "label": "",
+        "hint": "Optional ASIC register CSV to load instead of the packaged defaults."
+      },
+      {
+        "widget": "QLineEdit",
+        "label": "/Users/tengiz/weeroc/radioroc_runs/simulation/20261020-155202-e0b690ea",
+        "hint": "Directory the run's data and metadata will be saved to."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Choose output parent\u2026",
+        "hint": "Choose a different parent directory for the run output above."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Preview",
+        "hint": "Preview the sweep/simulation settings without recording a run to disk."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Run simulation",
+        "hint": "Start the hold scan and record its result to the run directory above."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Cancel",
+        "hint": "Cancel the run currently in progress."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Open saved result\u2026",
+        "hint": "Open a previously saved hold-scan run to view its plot and data again."
+      }
+    ],
+    "scurve": [
+      {
+        "widget": "QComboBox",
+        "label": "",
+        "hint": "Simulation previews a synthetic curve with no board attached; Hardware connection runs on the real ASIC/FPGA."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Channels: 32",
+        "hint": "Channels to scan and plot. Click to choose which channels."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Select all",
+        "hint": "Select every channel."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Select none",
+        "hint": "Deselect every channel."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "0",
+        "hint": "First threshold DAC code in the sweep."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "1023",
+        "hint": "Last threshold DAC code in the sweep."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "50",
+        "hint": "Step size between sweep points."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "3",
+        "hint": "Vendor S-curve clock index (0..3) selecting which internal clock phase times the pulse counting."
+      },
+      {
+        "widget": "QComboBox",
+        "label": "",
+        "hint": "Which ASIC discriminator output (T1/T2) to measure the turn-on efficiency of."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Count trigger level instead of rising edge",
+        "hint": "Count time spent above threshold (level) instead of counting rising-edge crossings."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Mask other channels",
+        "hint": "Mask every channel except the ones being scanned, so only their signals are read out."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Enable Ctest",
+        "hint": "Enable Ctest: routes the ASIC's internal test-charge injector into the selected channel(s), producing the repeated calibration pulse the S-curve needs without an external generator."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Initialize FPGA (persists)",
+        "hint": "Re-initialize the FPGA before running. This is a persistent board change, not just a scan setting -- leave it off unless you specifically need to reset FPGA state."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Apply defaults (persists)",
+        "hint": "Apply the ASIC's packaged default register values before running. This is a persistent board change -- leave it off to keep whatever configuration is already on the ASIC."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "Keep current",
+        "hint": "Override the trigger-path preamp gain code before running; leave at 'Keep current' to leave it alone."
+      },
+      {
+        "widget": "QLineEdit",
+        "label": "",
+        "hint": "Optional ASIC register CSV to load instead of the packaged defaults."
+      },
+      {
+        "widget": "QLineEdit",
+        "label": "/Users/tengiz/weeroc/radioroc_runs/simulation/20261020-155159-4e6b4cf1",
+        "hint": "Directory the run's data and metadata will be saved to."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Choose output parent\u2026",
+        "hint": "Choose a different parent directory for the run output above."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Preview",
+        "hint": "Preview the sweep/simulation settings without recording a run to disk."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Run simulation",
+        "hint": "Start the S-curve scan and record its result to the run directory above."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Cancel",
+        "hint": "Cancel the run currently in progress."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Open saved result\u2026",
+        "hint": "Open a previously saved S-curve run to view its plot and data again."
+      }
+    ],
+    "autocal": [
+      {
+        "widget": "QPushButton",
+        "label": "Channels: 4,6,32",
+        "hint": "Channels to calibrate together. Click to choose which channels; the first channel is the reference used for the LSB-ratio probe."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Select all",
+        "hint": "Select every channel."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Select none",
+        "hint": "Deselect every channel."
+      },
+      {
+        "widget": "QComboBox",
+        "label": "",
+        "hint": "Which ASIC discriminator output (T1/T2) -- and which channel's calibration trim DAC -- this run calibrates."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Mask other channels",
+        "hint": "Mask every channel except the one(s) being scanned in each sub-scan, so only their signals are read out."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Enable Ctest",
+        "hint": "Enable Ctest: routes the ASIC's internal test-charge injector into the selected channel(s), producing the repeated calibration pulse each sub-scan needs without an external generator."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "3",
+        "hint": "Vendor S-curve clock index (0..3) selecting which internal clock phase times the pulse counting in every sub-scan."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Count trigger level instead of rising edge",
+        "hint": "Count time spent above threshold (level) instead of counting rising-edge crossings, in every sub-scan."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "Keep current",
+        "hint": "Override the trigger-path preamp gain code before running; leave at 'Keep current' to leave it alone."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "0",
+        "hint": "First DAC code of the two coarse step-1 probes (calibration trim 0, then 63) on the reference channel."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "1000",
+        "hint": "Last DAC code of the two coarse step-1 probes on the reference channel."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "50",
+        "hint": "DAC step for the two step-1 probes."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "10",
+        "hint": "DAC step for the step-2 scan across every selected channel."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "150",
+        "hint": "Added past the higher of the two step-1 crossing estimates to pick the step-2 scan's upper bound."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "300",
+        "hint": "Lower bound clamping the computed step-2 scan's upper bound."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "1023",
+        "hint": "Upper bound clamping the computed step-2 scan's upper bound."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "50",
+        "hint": "How far below the step-2 mean crossing the final verification scan starts."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "120",
+        "hint": "How far above the step-2 mean crossing the final verification scan ends."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "2",
+        "hint": "DAC step for the final verification scan."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Initialize FPGA (persists)",
+        "hint": "Re-initialize the FPGA before running. This is a persistent board change, not just a scan setting -- leave it off unless you specifically need to reset FPGA state."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Apply defaults (persists)",
+        "hint": "Apply the ASIC's packaged default register values before running. This is a persistent board change -- leave it off to keep whatever configuration is already on the ASIC."
+      },
+      {
+        "widget": "QLineEdit",
+        "label": "",
+        "hint": "Optional ASIC register CSV to load instead of the packaged defaults."
+      },
+      {
+        "widget": "QLineEdit",
+        "label": "/Users/tengiz/weeroc/radioroc_runs/hardware/20261020-155154-ee77bcea",
+        "hint": "Directory the run's manifest and each sub-scan's data will be saved to."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Choose output parent\u2026",
+        "hint": "Choose a different parent directory for the run output above."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Preview",
+        "hint": "Preview the calibration settings without recording a run to disk."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Run autocalibration",
+        "hint": "Start the four-step calibration sequence and record its result to the run directory above."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Cancel",
+        "hint": "Cancel the run currently in progress."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Open saved result\u2026",
+        "hint": "Open a previously saved autocalibration run to view its sub-scans and result again."
+      }
+    ],
+    "acq": [
+      {
+        "widget": "QComboBox",
+        "label": "",
+        "hint": "Which gain's values the histogram below plots -- high gain (HG) or low gain (LG)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "50",
+        "hint": "Number of histogram bins."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Log Y",
+        "hint": "Plot the histogram's counts axis (Y) on a log scale instead of linear."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Clear plot",
+        "hint": "Clear the histogram display. This does not delete any saved data -- it only resets what's shown here."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Import vendor file\u2026",
+        "hint": "Load a real vendor-collected readable_adc_acq.txt file and plot its HG/LG values here, for comparison with this app's own runs."
+      },
+      {
+        "widget": "QComboBox",
+        "label": "",
+        "hint": "Simulation previews a synthetic fixed-point ADC response with no board attached; Hardware connection runs on the real ASIC/FPGA."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Channels: 38",
+        "hint": "Channels to save. Click to choose which channels."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Select all",
+        "hint": "Select every channel."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Select none",
+        "hint": "Deselect every channel."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "38",
+        "hint": "Channel used for the ADC trigger setup."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "Keep current",
+        "hint": "Optional T1/T2 threshold DAC to set before running; leave at 'Keep current' to leave it alone."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "530",
+        "hint": "External hold delay in nanoseconds, divisible by 5."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "400",
+        "hint": "ADC conversion delay in nanoseconds, divisible by 40."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "50",
+        "hint": "Requested ADC acquisitions per batch."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "10",
+        "hint": "Number of acquisition batches to run."
+      },
+      {
+        "widget": "QDoubleSpinBox",
+        "label": "5.000",
+        "hint": "Per-batch ADC timeout, in seconds."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "Keep current",
+        "hint": "Optional trigger-path preamp gain code to set before running; leave at 'Keep current' to leave it alone."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "Keep current",
+        "hint": "Optional high-gain shaper code to set before running; leave at 'Keep current' to leave it alone."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "Keep current",
+        "hint": "Optional low-gain shaper code to set before running; leave at 'Keep current' to leave it alone."
+      },
+      {
+        "widget": "QComboBox",
+        "label": "",
+        "hint": "Which ASIC discriminator (T1/T2) the threshold DAC and trigger apply to."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Mask other channels",
+        "hint": "Mask every channel except the trigger channel, so only its signal is read out."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Reset-n manual",
+        "hint": "Drive the ADC reset line manually instead of letting the FPGA sequence it automatically. The July dark-count finger plot (and the October one) needs this on; without it the single-photoelectron peaks did not appear."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Use external ASIC acquisition trigger (IO_FPGA6)",
+        "hint": "Record on an external pulse (2.5 V TTL into the board's External Synchro SMA, IO_FPGA6) instead of the ASIC discriminator, so small pulses are not cut off. Without a pulse the run times out."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Pulse FPGA synchro trigger per ADC batch",
+        "hint": "Pulse FPGA synchro trigger per ADC batch: before each batch the FPGA emits a sync pulse on the Sync IO line, used to fire an external pulse generator (set to triggered burst) in lockstep with the read-out, so every event is a real pulse."
+      },
+      {
+        "widget": "QComboBox",
+        "label": "",
+        "hint": "FPGA IO line that carries the synchro trigger pulse to an external pulse generator."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "Set sync IO mux index before run",
+        "hint": "Set the Sync IO mux index below before running, instead of using whatever it is currently set to."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "5",
+        "hint": "Mux index selecting which internal signal the Sync IO line carries when the checkbox to its left is enabled (5 = the sync pulse)."
+      },
+      {
+        "widget": "QLineEdit",
+        "label": "/Users/tengiz/weeroc/radioroc_runs/simulation/20261020-155203-474b2664",
+        "hint": "Directory the run's data and metadata will be saved to."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Choose output parent\u2026",
+        "hint": "Choose a different parent directory for the run output above."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Preview",
+        "hint": "Preview the acquisition/simulation settings without recording a run to disk."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Run simulation",
+        "hint": "Start the acquisition and record its result to the run directory above."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Cancel",
+        "hint": "Cancel the run currently in progress."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Open saved run\u2026",
+        "hint": "Open a previously saved acquisition run to view its status and data again."
+      }
+    ],
+    "main": [
+      {
+        "widget": "QSpinBox",
+        "label": "38",
+        "hint": "Channel whose analog front end the fields below show/edit."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "0",
+        "hint": "Trigger preamplifier (paT) compensation code (0-3); leave at 0 unless you know you need otherwise."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "8",
+        "hint": "Trigger preamplifier (paT) gain code (1=max gain, 63=min gain, 0=open loop)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "8",
+        "hint": "Energy measurement high-gain (paHG) code."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "4",
+        "hint": "High-gain shaping time code; actual time is this code times 20 ns or 120 ns, depending on the shaping-LSB checkbox."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "shaping LSB = 120 ns",
+        "hint": "Use 120 ns per code for high-gain shaping instead of 20 ns."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "8",
+        "hint": "Energy measurement low-gain (paLG) code."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "4",
+        "hint": "Low-gain shaping time code; actual time is this code times 20 ns or 120 ns, depending on the shaping-LSB checkbox."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "shaping LSB = 120 ns",
+        "hint": "Use 120 ns per code for low-gain shaping instead of 20 ns."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "0",
+        "hint": "Threshold for trigger T1 (ASIC-wide, not per channel)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "2",
+        "hint": "Threshold for trigger T2 (ASIC-wide, not per channel)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "520",
+        "hint": "Threshold for trigger TQ (ASIC-wide, not per channel)."
+      },
+      {
+        "widget": "QComboBox",
+        "label": "",
+        "hint": "Which trigger source feeds the readout (ASIC-wide)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "255",
+        "hint": "Trigger delay code (ASIC-wide)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "4",
+        "hint": "Trigger delay slope code (ASIC-wide)."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Apply",
+        "hint": "Apply the front-end and common-threshold settings above to the connected hardware."
+      }
+    ],
+    "threshold_calibration_panel": [
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T1 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Value to give every T1 channel when the T1 'Apply' button next to it is clicked."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Apply",
+        "hint": "Set every T1 channel to the value on the left."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Calibration DAC T2 trim code for this channel (0-63)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "32",
+        "hint": "Value to give every T2 channel when the T2 'Apply' button next to it is clicked."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Apply",
+        "hint": "Set every T2 channel to the value on the left."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Apply calibration",
+        "hint": "Apply the T1/T2 calibration DAC grids to the connected hardware."
+      }
+    ],
+    "input_dac": [
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QSpinBox",
+        "label": "128",
+        "hint": "Input DAC DC-level code for this channel (0-255)."
+      },
+      {
+        "widget": "QCheckBox",
+        "label": "HiZ input (need external resistor)",
+        "hint": "Switch to high-impedance input (needs an external resistor) instead of the ~150 Ohm default; applies to all channels."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "All ON",
+        "hint": "Enable the input DAC for every channel."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "All OFF",
+        "hint": "Disable the input DAC for every channel."
+      },
+      {
+        "widget": "QPushButton",
+        "label": "Write all",
+        "hint": "Write the 64-channel input DAC grid and impedance setting to the connected hardware."
+      }
+    ],
+    "main_apply_label": "Apply",
+    "main_thresholds": [
+      0,
+      2,
+      520
+    ]
+  }
+}

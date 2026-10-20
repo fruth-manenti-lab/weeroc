@@ -231,6 +231,15 @@ class AcquisitionReaderTests(unittest.TestCase):
         self.assertEqual(saved.status, "completed")
         self.assertEqual(saved.warnings, ())
 
+    def test_old_single_segment_manifest_yields_one_synthesized_segment(self):
+        self.write_csv(self.two_batch_rows())
+        self.write_manifest()
+        saved = read_acquisition_run(self.directory)
+        self.assertEqual(saved.warnings, ())
+        self.assertEqual(len(saved.segments), 1)
+        self.assertEqual(saved.segments[0]["channels"], [4])
+        self.assertEqual(saved.segments[0]["row_count"], len(saved.rows))
+
     def test_append_mode_segment_missing_a_batch_downgrades_completed_status(self):
         self.write_csv([{"batch": 0, "event": 0, "channel": 4, "hg": 1.0, "lg": 1.0}])
         # Manifest claims batches 0-2 (three batches) were written this run,

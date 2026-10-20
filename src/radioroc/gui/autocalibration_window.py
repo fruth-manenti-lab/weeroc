@@ -29,6 +29,7 @@ from matplotlib.figure import Figure
 
 from radioroc.application.autocalibration import AutocalibrationJob, AutocalibrationJobConfig
 from radioroc.data.autocalibration_reader import read_autocalibration_run
+from radioroc.gui.layout_util import fit_controls_pane, fit_special_text, wrap_plot_title
 from radioroc.gui.channel_select import ChannelSelectGrid
 from radioroc.gui.hint_bar import HintBar
 
@@ -116,6 +117,7 @@ class AutocalibrationWindow(QMainWindow):
         gain_form = QFormLayout(self.gain_group)
         self.trigger_preamp_gain = _integer(0, 63, 0)
         self.trigger_preamp_gain.setSpecialValueText("Keep current")
+        fit_special_text(self.trigger_preamp_gain)
         gain_form.addRow("Trigger preamp gain code", self.trigger_preamp_gain)
         form.addRow(self.gain_group)
 
@@ -181,7 +183,7 @@ class AutocalibrationWindow(QMainWindow):
         self.details.setPlaceholderText("Preview and run/result details appear here.")
         right_layout.addWidget(self.details, 2)
         split.addWidget(right)
-        split.setSizes([410, 750])
+        fit_controls_pane(split, scroll, self.controls)
 
         buttons = QHBoxLayout()
         self.preview_button = QPushButton("Preview")
@@ -477,7 +479,7 @@ class AutocalibrationWindow(QMainWindow):
 
     def _plot(self, rows, title):
         self.axes.clear()
-        self.axes.set_title(title, fontsize=11)
+        self.axes.set_title(wrap_plot_title(title), fontsize=10)
         self.axes.set_xlabel("Threshold DAC code")
         self.axes.set_ylabel("Turn-on (%)")
         self.axes.set_ylim(-5, 105)
@@ -509,12 +511,37 @@ class AutocalibrationWindow(QMainWindow):
         if path:
             self.open_saved(Path(path))
 
+    def _apply_saved_operation(self, operation):
+        """Populate the controls from a saved manifest's operation (new output dir and
+        persistent FPGA init/defaults are deliberately left untouched)."""
+        if not isinstance(operation, dict):
+            return
+        def put(name, setter, convert=lambda v: v):
+            if operation.get(name) is not None:
+                try:
+                    setter(convert(operation[name]))
+                except (TypeError, ValueError):
+                    pass
+        put("channels", self.channel_select.set_channels, lambda v: [int(c) for c in v])
+        put("t1", lambda v: self.discriminator.setCurrentIndex(0 if v else 1), bool)
+        put("use_mask", self.use_mask.setChecked, bool)
+        put("use_ctest", self.use_ctest.setChecked, bool)
+        put("trigger_level", self.trigger_level.setChecked, bool)
+        self.trigger_preamp_gain.setValue(int(operation.get("trigger_preamp_gain") or 0))
+        for name in ("clock_index", "probe_dac_min", "probe_dac_max", "probe_dac_step",
+                     "transition_dac_step", "transition_margin", "transition_dac_floor",
+                     "transition_dac_cap", "final_window_before", "final_window_after",
+                     "final_dac_step"):
+            put(name, getattr(self, name).setValue, int)
+
     def open_saved(self, path):
         if self._hardware_running:
             return
         try:
             saved = read_autocalibration_run(Path(path))
-            self.banner.setText(f"SAVED RESULT · {saved.status} · {saved.directory}")
+            self._apply_saved_operation(saved.manifest.get("operation"))
+            self.banner.setText(f"SAVED RESULT · {saved.status} · {saved.directory} · "
+                                "Controls show this saved run's settings")
             step = next((name for name in reversed(_STEP_ORDER) if name in saved.sub_runs), None)
             if step is None:
                 self._plot((), "No sub-scans recorded for this saved run")

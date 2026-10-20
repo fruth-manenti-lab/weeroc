@@ -470,7 +470,13 @@ class AcquisitionConfig:
     - `adc_window_ns` (`int`): ADC coincidence/window width, divisible by 5 ns.
     - `adc_nb_trig` (`int`): ADC time-window trigger count.
     - `rstn_manual` (`bool`): Vendor ADC reset-n manual bit.
+    - `external_trigger` (`bool`): Use the external ASIC acquisition trigger (the board's
+      External Synchro SMA, `IO_FPGA6`, 2.5 V TTL) instead of the discriminator, so every
+      external pulse is recorded whatever its size.
     - `synchro_trigger` (`bool`): Pulse FPGA synchro trigger per ADC batch.
+    - `sync_io` (`str`): FPGA IO name carrying the sync pulse.
+    - `sync_io_mux_index` (`int | None`): Optional FPGA IO mux index to set for `sync_io`
+      before acquiring (for example 5 on `io1` drives an external pulse generator).
     - `out_dir` (`Path`): Run output directory.
     """
 
@@ -497,6 +503,9 @@ class AcquisitionConfig:
     adc_nb_trig: int = 1
     rstn_manual: bool = False
     synchro_trigger: bool = False
+    external_trigger: bool = False
+    sync_io: str = "io1"
+    sync_io_mux_index: int | None = None
     out_dir: Path = DEFAULT_RUNS_DIR
 
     def validate(self) -> None:
@@ -556,6 +565,10 @@ class AcquisitionConfig:
         if not 0 <= self.trigger_source_2 <= 7:
             raise ValueError("trigger_source_2 must be in range 0..7")
         validate_channel(self.trigger_channel_2)
+        if self.sync_io not in FPGA_IO_NAMES:
+            raise ValueError(f"sync_io must be one of {FPGA_IO_NAMES}")
+        if self.sync_io_mux_index is not None and not 0 <= self.sync_io_mux_index <= 7:
+            raise ValueError("sync_io_mux_index must be in range 0..7")
         if (self.trigger_type == 1 and self.trigger_source == 3 and self.trigger_source_2 == 3
                 and self.trigger_channel_2 not in self.channels):
             # Mirrors application/acquisition.py's own gating condition for a
@@ -1134,6 +1147,9 @@ class RadiorocDevice:
         self.transport: RadiorocSerial = transport
         self.dry_run: bool = dry_run
         self.i2c_rows: list[I2CRow] = []
+        # Accounting for the most recent acquire_adc_batch: requested/received events,
+        # raw count word, payload bytes and protocol warnings.
+        self.last_adc_batch: dict | None = None
         self.chip_id: int = RADIOROC_CHIP_ID
         self.address_bits: int = ASIC_ADDRESS_BITS
         self.subaddress_bits: int = ASIC_SUBADDRESS_BITS
@@ -1553,8 +1569,11 @@ class RadiorocDevice:
         **Mapping note**
         - The user guide defines 4-bit high-gain and low-gain shaper codes.
           The default table stores `10001000` at per-channel subaddress 2,
-          consistent with two default code-8 nibbles. We use the upper nibble
-          for high gain and the lower nibble for low gain.
+          consistent with two default code-8 nibbles. The vendor GUI's
+          compiled widget properties put HG gain in bits `[3:0]` (lower
+          nibble) and LG gain in bits `[7:4]` (upper nibble). An earlier
+          version had these swapped; bench evidence (2026-10-16:
+          `high_gain_code=15` moved LG, not HG) agreed with the vendor map.
         """
 
         validate_channels(channels)
@@ -1571,11 +1590,11 @@ class RadiorocDevice:
             if row is None:
                 continue
             current: int = parse_bits(row.data)
-            current_hg: int = (current >> 4) & 0xF
-            current_lg: int = current & 0xF
+            current_hg: int = current & 0xF
+            current_lg: int = (current >> 4) & 0xF
             new_hg: int = high_gain_code if high_gain_code is not None else current_hg
             new_lg: int = low_gain_code if low_gain_code is not None else current_lg
-            new_data = bits((new_hg << 4) | new_lg, 8)
+            new_data = bits((new_lg << 4) | new_hg, 8)
             row.data = new_data
             rows.append(I2CRow(channel, ASIC_SHAPER_GAIN_SUBADDRESS, new_data))
         if not rows:
@@ -1915,6 +1934,140 @@ class RadiorocDevice:
         data[4:8] = bits(value, 4)
         self.write_register(channel, 2, "".join(data))
 
+    ANALOG_PROBE_CODES = {
+        "none": "0000",
+        "shaper_hg": "1000",
+        "shaper_lg": "0100",
+        "preamp_hg": "0010",
+        "preamp_lg": "0001",
+    }
+
+    def read_analog_probe_routes(self) -> dict[int, str]:
+        """Read every channel's analog-probe row and report the routed ones.
+
+        **Returns**
+        - `dict[int, str]`: Channel -> low-nibble bits (e.g. `"1000"`) for each
+          channel whose probe nibble is not `0000`; empty when no probe is routed.
+
+        **Hardware side effects**
+        - One 64-row ASIC FIFO read of subaddress 66; no writes.
+        """
+
+        values = self.read_fifo([I2CRow(ch, 66, "00000000") for ch in range(N_CHANNELS)])
+        return {ch: format(v & 0xF, "04b") for ch, v in enumerate(values) if v & 0xF}
+
+    def routed_analog_probe_channels(self, *, keep: int | None = None) -> list[int]:
+        """Channels with the analog probe routed (read-only), excluding `keep`."""
+
+        return [ch for ch in sorted(self.read_analog_probe_routes()) if ch != keep]
+
+    def clear_analog_probe_channel(self, channel: int) -> None:
+        """Switch one channel's analog probe off, keeping its live high nibble.
+
+        **Hardware side effects**
+        - Reads then writes one subaddress-66 row.
+        """
+
+        validate_channel(channel)
+        live = self.read_fifo([I2CRow(channel, 66, "00000000")])[0]
+        self.write_register(channel, 66, format(live & 0xF0, "08b"))
+
+    def clear_analog_probes(self, *, keep: int | None = None) -> list[int]:
+        """Switch off the analog probe on every channel that has it routed.
+
+        **Inputs**
+        - `keep` (`int | None`): Channel to leave untouched (the one about to be
+          routed), if any.
+
+        **Returns**
+        - `list[int]`: Channels that were cleared, in ascending order.
+
+        **Hardware side effects**
+        - Reads all 64 probe rows, then clears only the routed ones (normally
+          zero or one write).
+        """
+
+        cleared = self.routed_analog_probe_channels(keep=keep)
+        for ch in cleared:
+            self.clear_analog_probe_channel(ch)
+        return cleared
+
+    ANALOG_PROBE_CODES = {
+        "none": "0000",
+        "shaper_hg": "1000",
+        "shaper_lg": "0100",
+        "preamp_hg": "0010",
+        "preamp_lg": "0001",
+    }
+
+    def read_analog_probe_routes(self) -> dict[int, str]:
+        """Read every channel's analog-probe row and report the routed ones.
+
+        **Returns**
+        - `dict[int, str]`: Channel -> low-nibble bits (e.g. `"1000"`) for each
+          channel whose probe nibble is not `0000`; empty when no probe is routed.
+
+        **Hardware side effects**
+        - One 64-row ASIC FIFO read of subaddress 66; no writes.
+        """
+
+        values = self.read_fifo([I2CRow(ch, 66, "00000000") for ch in range(N_CHANNELS)])
+        return {ch: format(v & 0xF, "04b") for ch, v in enumerate(values) if v & 0xF}
+
+    def _probe_row_bytes(self) -> bytes:
+        return self.read_fifo([I2CRow(ch, 66, "00000000") for ch in range(N_CHANNELS)])
+
+    def clear_analog_probes(self, *, keep: int | None = None) -> list[int]:
+        """Switch off the analog probe on every channel that has it routed.
+
+        **Inputs**
+        - `keep` (`int | None`): Channel to leave untouched (the one about to be
+          routed), if any.
+
+        **Returns**
+        - `list[int]`: Channels that were cleared, in ascending order.
+
+        **Hardware side effects**
+        - Reads all 64 probe rows, then writes only the routed ones (normally
+          zero or one write), keeping each row's high nibble.
+        """
+
+        values = self._probe_row_bytes()
+        cleared = [ch for ch, v in enumerate(values) if v & 0xF and ch != keep]
+        for ch in cleared:
+            # Keep the live high nibble; only the probe (low) nibble is cleared.
+            self.write_register(ch, 66, format(values[ch] & 0xF0, "08b"))
+        return cleared
+
+    def set_analog_probe_for_channel(self, channel: int, source: str) -> None:
+        """Route one channel's analog node to the ASIC Analog_Probe output.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `source` (`str`): Key of `ANALOG_PROBE_CODES`: `none`, `shaper_hg`,
+          `shaper_lg`, `preamp_hg` or `preamp_lg`.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes the channel's subaddress-66 row, replacing its low nibble
+          (bit3..0 = shaper HG, shaper LG, preamp HG, preamp LG) and keeping
+          the high nibble of the loaded table row. The probe output is shared: route one channel at a
+          time. The user guide warns the probe degrades analog performance.
+
+        Register from the vendor GUI's `send_aprb` bytecode; node order not
+        independently confirmed on a scope (see `IMPLEMENTATION_STATUS.md`).
+        """
+
+        validate_channel(channel)
+        if source not in self.ANALOG_PROBE_CODES:
+            raise ValueError(f"source must be one of {sorted(self.ANALOG_PROBE_CODES)}")
+        row: I2CRow | None = self.find_i2c_row(channel, 66)
+        if row is None:
+            return
+        self.write_register(channel, 66, row.data[:4] + self.ANALOG_PROBE_CODES[source])
+
     def set_low_gain_for_channel(self, channel: int, value: int) -> None:
         """Set one channel's low-gain (LG) energy-preamplifier gain code.
 
@@ -2097,14 +2250,18 @@ class RadiorocDevice:
 
         **Hardware side effects**
         - Writes address 65 subaddresses 1 and 2 if present in the loaded
-          defaults, preserving subaddress 2's T2-DAC low bits.
+          defaults, preserving subaddress 2's T2-DAC bits [7:2].
 
         Register recovered from the vendor GUI's compiled widget properties:
         `Ui_MainWindow.retranslateUi`'s "Threshold1" control pairs with the
         raw-register-view labels at address 65 (`dac1[7:0]` at subadd 1,
-        `dac1[9:8]` sharing subadd 2 with `dac2[5:0]`). Not yet independently
-        verified against real hardware; see `IMPLEMENTATION_STATUS.md`
-        RADIOROC 30.
+        `dac1[9:8]` sharing subadd 2 with `dac2[5:0]`). Bit layout (MSB first):
+        subadd 1 = `dac1[7:0]`; subadd 2 = `{dac2[5:0], dac1[9:8]}`; subadd 3 =
+        `{dacQ[3:0], dac2[9:6]}`; subadd 4 = `{NC*2, dacQ[9:4]}`. This is the
+        layout the hardware-validated `set_threshold_dac` writes, and the
+        packaged defaults decode to 512 for all three DACs with it. (An
+        earlier version of these three setters had the sub-fields swapped;
+        fixed 2026-10-19.)
         """
 
         from radioroc.protocol.frames import validate_integer
@@ -2116,7 +2273,7 @@ class RadiorocDevice:
             self.write_register(65, 1, bits(value & 0xFF, 8))
         if high_row is not None:
             data: list[str] = list(high_row.data)
-            data[0:2] = bits((value >> 8) & 0x3, 2)
+            data[6:8] = bits((value >> 8) & 0x3, 2)
             self.write_register(65, 2, "".join(data))
 
     def set_t2_threshold_dac(self, value: int) -> None:
@@ -2132,8 +2289,8 @@ class RadiorocDevice:
 
         **Hardware side effects**
         - Writes address 65 subaddresses 2 and 3 if present in the loaded
-          defaults, preserving subaddress 2's T1-DAC high bits and
-          subaddress 3's TQ-DAC low bits.
+          defaults, preserving subaddress 2's T1-DAC bits [1:0] and
+          subaddress 3's TQ-DAC bits [7:4].
 
         Register recovered from the vendor GUI's compiled widget properties:
         `Ui_MainWindow.retranslateUi`'s "Threshold2" control pairs with the
@@ -2150,11 +2307,11 @@ class RadiorocDevice:
         high_row: I2CRow | None = self.find_i2c_row(65, 3)
         if low_row is not None:
             data: list[str] = list(low_row.data)
-            data[2:8] = bits(value & 0x3F, 6)
+            data[0:6] = bits(value & 0x3F, 6)
             self.write_register(65, 2, "".join(data))
         if high_row is not None:
             data = list(high_row.data)
-            data[0:4] = bits((value >> 6) & 0xF, 4)
+            data[4:8] = bits((value >> 6) & 0xF, 4)
             self.write_register(65, 3, "".join(data))
 
     def set_tq_threshold_dac(self, value: int) -> None:
@@ -2169,7 +2326,7 @@ class RadiorocDevice:
 
         **Hardware side effects**
         - Writes address 65 subaddresses 3 and 4 if present in the loaded
-          defaults, preserving subaddress 3's T2-DAC high bits and
+          defaults, preserving subaddress 3's T2-DAC bits [3:0] and
           subaddress 4's unused bits.
 
         Register recovered from the vendor GUI's compiled widget properties:
@@ -2187,7 +2344,7 @@ class RadiorocDevice:
         high_row: I2CRow | None = self.find_i2c_row(65, 4)
         if low_row is not None:
             data: list[str] = list(low_row.data)
-            data[4:8] = bits(value & 0xF, 4)
+            data[0:4] = bits(value & 0xF, 4)
             self.write_register(65, 3, "".join(data))
         if high_row is not None:
             data = list(high_row.data)
@@ -2571,6 +2728,8 @@ class RadiorocDevice:
         if not 1 <= nb_acq <= 255:
             raise ValueError("nb_acq must be in range 1..255")
         if self.dry_run:
+            self.last_adc_batch = {"requested": nb_acq, "received": nb_acq, "count_word": None,
+                                   "payload_bytes": 0, "warnings": []}
             return [[math.nan] * nb_acq for _ in range(N_CHANNELS)], [[math.nan] * nb_acq for _ in range(N_CHANNELS)]
 
         saved_w2: str = self.read_word(2)
@@ -2591,11 +2750,25 @@ class RadiorocDevice:
             raise TimeoutError("ADC acquisition timed out waiting for FPGA word 4 bit 5")
 
         count_words: str = self.read_word(29) + self.read_word(28)
-        total_nb_acq: int = int(int(count_words, 2) / 256)
+        count_word_value: int = int(count_words, 2)
+        total_nb_acq: int = count_word_value // 256
+        # The low byte is not a count remainder (bench: constant 254 with exact
+        # requested == received); the vendor also divides by 256. Keep the raw
+        # word for diagnosis without warning on it.
+        batch_warnings: list[str] = []
+        self.last_adc_batch = {"requested": nb_acq, "received": max(total_nb_acq, 0),
+                               "count_word": count_word_value, "payload_bytes": 0,
+                               "warnings": batch_warnings}
         if total_nb_acq <= 0:
             return [[] for _ in range(N_CHANNELS)], [[] for _ in range(N_CHANNELS)]
 
-        payload: bytes = self.transport.read_words(20, total_nb_acq * N_CHANNELS * 4)
+        expected_bytes: int = total_nb_acq * N_CHANNELS * 4
+        payload: bytes = self.transport.read_words(20, expected_bytes)
+        self.last_adc_batch["payload_bytes"] = len(payload)
+        if len(payload) != expected_bytes:
+            raise TransportProtocolError(
+                f"ADC payload length {len(payload)} does not match expected {expected_bytes} bytes "
+                f"for {total_nb_acq} events (requested {nb_acq})")
         low_gain: list[list[float]] = [[] for _ in range(N_CHANNELS)]
         high_gain: list[list[float]] = [[] for _ in range(N_CHANNELS)]
         channel: int = 0

@@ -155,6 +155,24 @@ class RadiorocCoreTests(unittest.TestCase):
         self.assertEqual(after[2:], bits(63, 6))
         self.assertEqual(after[:2], before[:2])
 
+    def test_energy_shaper_gain_nibbles_match_vendor_map(self) -> None:
+        # Vendor GUI (RADIOROC 30 recovery): subadd 2 holds HG gain in bits
+        # [3:0] and LG gain in bits [7:4]. The code originally had them
+        # swapped; bench evidence on 2026-10-16 agreed (high_gain_code=15
+        # moved LG, not HG).
+        device = RadiorocDevice(RadiorocMemoryTransport(), dry_run=True)  # type: ignore[arg-type]
+        device.load_default_config()
+
+        device.set_energy_shaper_gain(channels=[4], high_gain_code=15)
+        data = device.find_i2c_row(4, 2).data
+        self.assertEqual(parse_bits(data) & 0xF, 15)
+        self.assertEqual((parse_bits(data) >> 4) & 0xF, 8)
+
+        device.set_energy_shaper_gain(channels=[4], low_gain_code=3)
+        data = device.find_i2c_row(4, 2).data
+        self.assertEqual(parse_bits(data) & 0xF, 15)
+        self.assertEqual((parse_bits(data) >> 4) & 0xF, 3)
+
     def test_main_tab_per_channel_front_end_bit_positions(self) -> None:
         # Bit positions recovered from radioroc2UI.pyc's retranslateUi
         # tooltips (add: [0:63] - subadd: N - bit: [a:b]); see
@@ -217,23 +235,42 @@ class RadiorocCoreTests(unittest.TestCase):
 
         self.assertEqual(device.find_i2c_row(65, 12).data[4:8], bits(0b0100, 4))
 
+        # Layout (MSB first): 65/1 = dac1[7:0]; 65/2 = {dac2[5:0], dac1[9:8]};
+        # 65/3 = {dacQ[3:0], dac2[9:6]}; 65/4 = {NC*2, dacQ[9:4]}. It is the
+        # layout the hardware-validated set_threshold_dac writes, and the
+        # packaged defaults decode to 512 for all three DACs with it.
+        def dacs(dev):
+            r = {s: parse_bits(dev.find_i2c_row(65, s).data) for s in (1, 2, 3, 4)}
+            return (((r[2] & 0x3) << 8) | r[1],
+                    (((r[3] & 0xF) << 6) | (r[2] >> 2)),
+                    ((r[4] & 0x3F) << 4) | (r[3] >> 4))
+        self.assertEqual(dacs(device), (512, 512, 512))
+
         device.set_t1_threshold_dac(0x2AB)
+        self.assertEqual(dacs(device)[0], 0x2AB)
         self.assertEqual(device.find_i2c_row(65, 1).data, bits(0x2AB & 0xFF, 8))
-        self.assertEqual(device.find_i2c_row(65, 2).data[0:2], bits((0x2AB >> 8) & 0x3, 2))
+        self.assertEqual(device.find_i2c_row(65, 2).data[6:8], bits((0x2AB >> 8) & 0x3, 2))
         with self.assertRaises(ValueError):
             device.set_t1_threshold_dac(1024)
 
         device.set_t2_threshold_dac(0x155)
-        self.assertEqual(device.find_i2c_row(65, 2).data[2:8], bits(0x155 & 0x3F, 6))
-        self.assertEqual(device.find_i2c_row(65, 3).data[0:4], bits((0x155 >> 6) & 0xF, 4))
+        self.assertEqual(dacs(device), (0x2AB, 0x155, 512))
         # Setting T2 preserved T1's bits already written into subadd 2.
-        self.assertEqual(device.find_i2c_row(65, 2).data[0:2], bits((0x2AB >> 8) & 0x3, 2))
+        self.assertEqual(device.find_i2c_row(65, 2).data[6:8], bits((0x2AB >> 8) & 0x3, 2))
 
         device.set_tq_threshold_dac(0x3D0)
-        self.assertEqual(device.find_i2c_row(65, 3).data[4:8], bits(0x3D0 & 0xF, 4))
-        self.assertEqual(device.find_i2c_row(65, 4).data[2:8], bits((0x3D0 >> 4) & 0x3F, 6))
+        self.assertEqual(dacs(device), (0x2AB, 0x155, 0x3D0))
         # Setting TQ preserved T2's bits already written into subadd 3.
-        self.assertEqual(device.find_i2c_row(65, 3).data[0:4], bits((0x155 >> 6) & 0xF, 4))
+        self.assertEqual(device.find_i2c_row(65, 3).data[4:8], bits((0x155 >> 6) & 0xF, 4))
+
+        # Agrees with the hardware-validated scan setter for T1 and T2.
+        # (Each on its own device: set_threshold_dac(t1=False) rewrites all of 65/2
+        # and so clears dac1[9:8]; scans only ever set one DAC from the defaults.)
+        for t1, index, code in ((True, 0, 0x2AB), (False, 1, 0x155)):
+            other = RadiorocDevice(RadiorocMemoryTransport(), dry_run=True)  # type: ignore[arg-type]
+            other.load_default_config()
+            other.set_threshold_dac(code, t1=t1)
+            self.assertEqual(dacs(other)[index], code)
 
         device.set_trigger_selection("local_tq")
         after = device.find_i2c_row(65, 12).data

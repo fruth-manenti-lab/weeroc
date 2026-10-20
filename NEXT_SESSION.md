@@ -1,3 +1,72 @@
+# RADIOROC 43 — Check HG/LG gain mapping, then LED photoelectron spectrum
+
+Read `PLINT_STUDENT_MVP_DIRECTIVE.md`, `AGENTS.md`, then the RADIOROC 42 entry at
+the top of `IMPLEMENTATION_STATUS.md` (full evidence and run paths). Branch:
+`lab/newest-app-test` (from `origin/main` `c1b1993`), all work committed
+locally, nothing pushed. Earlier the same day, a separate branch
+`feat/desktop-hardware-threshold` (RADIOROC 24, stale base) recorded the SiPM
+noise/grounding investigation in its own `IMPLEMENTATION_STATUS.md`; port those
+findings here if still relevant (not merged).
+
+Durable procedures and lessons: `docs/bench_runbook.md`. An offline app
+test by another assistant (ChatGPT, no equipment) was started on 2026-10-16 using
+`docs/offline_app_test_guide.md`. Its report is in
+`docs/app_test_report_2026-10-16.md` (2 student-blocking: 1024x768 layout, stale hardware
+output path in Simulation); triage it before new work, once the operator asks. It was told not to change code or git state.
+
+## Environment (this Mac)
+- Use `.venv-foundation` (PySide6) with `PYTHONPATH=src`. `.conda-radioroc` has
+  no PySide6 and silently skips ~148 GUI tests.
+- Board control port `/dev/cu.usbserial-RD3_320`; TGF4162 generator
+  `/dev/cu.usbmodemDA20FE0E1` (pyvisa in `.conda-radioroc`). Generator: touch
+  **channel 1 only** (`CHN 1`; `CHN 2` switches the front panel) and send
+  `LOCAL` afterwards; tell the operator before any generator write.
+- Bench harnesses (local, uncommitted): `radioroc_runs/bench_harnesses_RADIOROC42/`
+  - `mainwindow_card.py` (connect + Threshold tab), `holdscan_card4.py` (Hold tab),
+  `acq_card.py` (Registers-tab Ctest + Acquisition tab), `defaults_traced.py`
+  (apply + verify defaults with request trace), `i2c_trace_probe.py`,
+  `gen.py ON|OFF` (generator CH1 output + LOCAL). Configured by `CARD_*` env vars;
+  run with `PYTHONPATH=src:. .venv-foundation/bin/python <script>`.
+
+## Bench rules learned in RADIOROC 42
+- After every power cycle the ASIC is at power-on values: apply defaults (verify)
+  and redo autocalibration before any scan.
+- Board hangs (USB no-response / I2C FIFO timeout) happened 4 times, on large I2C
+  operations; the sequence matches the vendor exactly; root cause open (correlates
+  with idle periods and physical handling). Recovery = operator power cycle.
+- Cabling/ground-path interference (sub-pedestal triggers) appears whenever the
+  bias supply is cabled, even unbiased.
+
+## State at handoff (2026-10-16 evening)
+Setup: SiPMs on ch 4, 6, 32 sit flat on the plint (plastic scintillator); the LED shines through a hole in it. Bias 29 V throughout.
+SiPMs biased (29 V), LED on the plint pulsed continuously by
+generator CH1 (output ON, local). Defaults applied after the last power cycle;
+operator's autocalibration trims were lost and not redone. Board idle,
+disconnected.
+
+Board USB: keep it on its own port, not a shared hub (hangs stopped after the move on 2026-10-19;
+see `docs/bench_runbook.md` section 3).
+
+## Next tasks, in order
+Follow `SOLO_PLAN.md` style: no option menus, execute and log.
+0. FIRST: the board hung during the LED sweep (see the "Solo hour" entry). Ask the
+   operator for a power cycle if not already done, then apply defaults (verify),
+   re-set ch6 HG 15 (`hgcode.py 6 15`) and the probe only if the DSO is still used.
+1. Trigger for a photoelectron spectrum: the ASIC discriminator truncates dim
+   pulses. Ask the operator to cable the generator sync-out to the board's external
+   trigger path (or decide on a threshold below the noise); then dim AMPL/PULSWID with
+   `led_sweep.py` and take the spectrum.
+2. Step 5 timing on real pulses, then biased Step 1 floors and Step 6 record.
+
+## Operator decisions still needed
+Trigger scheme (fixed pair / OR + offline cut / external coincidence), plint
+channel-to-position map, calibration tolerances, student machine/OS, hold delay
+(Ctest result 70 ns is provisional; generator state was inconsistent).
+
+---
+
+## (Previous handoff, RADIOROC 41)
+
 # RADIOROC 41 — Step 5 hold-scan rehearsal, write the real Step 6 record, then the Priority 4 rehearsal
 
 Read `PLINT_STUDENT_MVP_DIRECTIVE.md` in full before anything else, then

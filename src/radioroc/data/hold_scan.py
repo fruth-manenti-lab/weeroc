@@ -13,7 +13,7 @@ class HoldRunWriter:
         self.metadata_path = self.directory / "metadata.json"
         self.csv_path = self.directory / "holdscan.csv"
         self.point_fields = [x_name, *(field for ch in channels for field in (
-            f"ch{ch}_hg_mean", f"ch{ch}_hg_stdev", f"ch{ch}_lg_mean", f"ch{ch}_lg_stdev", f"ch{ch}_count"))]
+            f"ch{ch}_hg_mean", f"ch{ch}_hg_stdev", f"ch{ch}_lg_mean", f"ch{ch}_lg_stdev", f"ch{ch}_count")), "requested", "received"]
         self.directory.mkdir(parents=True, exist_ok=True)
         for path in (self.metadata_path, self.csv_path):
             if path.exists():

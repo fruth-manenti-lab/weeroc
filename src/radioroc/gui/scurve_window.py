@@ -28,11 +28,13 @@ from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.application.scurve import ScurveJob, ScurveJobConfig
 from radioroc.application.scurve_worker import ScurveWorker
 from radioroc.data.scurve_reader import read_scurve_run
+from radioroc.gui.layout_util import fit_controls_pane, fit_special_text, wrap_plot_title
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
 from radioroc.gui.channel_select import ChannelSelectGrid
 from radioroc.gui.connection_panel import ConnectionPanel
 from radioroc.gui.hint_bar import HintBar
 from radioroc.transport.scurve_simulator import ScurveSimulationConfig
+from radioroc.gui.output_paths import guard_output, refresh_auto_output
 
 
 def _integer(low, high, value):
@@ -168,6 +170,7 @@ class ScurveWindow(QMainWindow):
         gain_form = QFormLayout(self.gain_group)
         self.trigger_preamp_gain = _integer(0, 63, 0)
         self.trigger_preamp_gain.setSpecialValueText("Keep current")
+        fit_special_text(self.trigger_preamp_gain)
         gain_form.addRow("Trigger preamp gain code", self.trigger_preamp_gain)
         form.addRow(self.gain_group)
 
@@ -206,7 +209,7 @@ class ScurveWindow(QMainWindow):
         self.details.setPlaceholderText("Preview, run provenance and cleanup details appear here.")
         right_layout.addWidget(self.details, 2)
         split.addWidget(right)
-        split.setSizes([410, 750])
+        fit_controls_pane(split, scroll, self.controls)
 
         buttons = QHBoxLayout()
         self.preview_button = QPushButton("Preview")
@@ -337,8 +340,8 @@ class ScurveWindow(QMainWindow):
         if not simulation and previous_mode != self._accepted_mode:
             self.initialize.setChecked(False)
             self.defaults.setChecked(False)
-            if "radioroc_runs" in Path(self.output.text()).parts:
-                self.output.setText(_new_directory("hardware"))
+        if previous_mode != self._accepted_mode:
+            refresh_auto_output(self.output, "simulation" if simulation else "hardware", _new_directory)
         self.run_button.setText("Run simulation" if simulation else "Run hardware S-curve scan")
         self.sim_group.setEnabled(simulation and self.worker is None)
         self._update_connection_controls()
@@ -347,7 +350,7 @@ class ScurveWindow(QMainWindow):
         self.banner.setText(
             "SIMULATION · Synthetic turn-on percentages, not measured lab data. No board connection."
             if self.mode.currentIndex() == 0 else
-            "HARDWARE · USB candidates are unverified. FPGA initialization and apply-defaults "
+            "HARDWARE · USB candidates are unverified until you connect; the firmware status then confirms the board. FPGA initialization and apply-defaults "
             "are off by default; masking/Ctest/gain are temporary scan settings. Restoration readback "
             "verification is mandatory. Initialization and defaults are persistent changes.")
 
@@ -519,6 +522,8 @@ class ScurveWindow(QMainWindow):
         output = self.output.text().strip()
         if not output:
             raise ValueError("choose a new run directory")
+        output = guard_output(self.output, "hardware" if self.mode.currentIndex() == 1 else "simulation",
+                              _new_directory)
         scan = ScurveConfig(
             channels=channels, dac_min=self.dac_min.value(), dac_max=self.dac_max.value(),
             dac_step=self.dac_step.value(), t1=self.discriminator.currentIndex() == 0,
@@ -717,7 +722,7 @@ class ScurveWindow(QMainWindow):
 
     def _plot(self, rows, title):
         self.axes.clear()
-        self.axes.set_title(title, fontsize=11)
+        self.axes.set_title(wrap_plot_title(title), fontsize=10)
         self.axes.set_xlabel("Threshold DAC code")
         self.axes.set_ylabel("Turn-on (%)")
         self.axes.set_ylim(-5, 105)
@@ -755,7 +760,7 @@ class ScurveWindow(QMainWindow):
         try:
             saved = read_scurve_run(Path(path))
             label = saved.execution_mode.upper()
-            self.banner.setText(f"SAVED RESULT · {label} · {saved.status} · {saved.directory}")
+            self.banner.setText(f"SAVED RESULT · {label} · {saved.status} · {saved.directory} · Controls show current settings, not this run's")
             self._plot(saved.rows, f"{label} · {saved.status} · {len(saved.rows)} saved points")
             status = f"{label} · {saved.status} · {len(saved.rows)} points"
             self.status.setText(status + (" · " + "; ".join(saved.warnings) if saved.warnings else ""))

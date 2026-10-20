@@ -165,6 +165,46 @@ class ApplyChannelConfigTests(unittest.TestCase):
         self.assertIn("input_dac_value channel=5 -> 10", result.applied)
         self.assertEqual(result.verify_mismatches, ())
 
+    def test_analog_probe_routes_one_node_and_off_clears_it(self):
+        self.device.load_default_config()
+        result = apply_channel_config(self.device, ChannelConfigOperation(
+            analog_probe_sources={6: "shaper_hg"}, verify=True,
+        ))
+        self.assertEqual(self.device.read_register_bits(6, 66), "00001000")
+        self.assertIn("analog_probe channel=6 -> shaper_hg", result.applied)
+        self.assertEqual(result.verify_mismatches, ())
+        apply_channel_config(self.device, ChannelConfigOperation(analog_probe_sources={6: "none"}))
+        self.assertEqual(self.device.read_register_bits(6, 66), "00000000")
+
+    def test_routing_a_probe_switches_the_previous_channel_off(self):
+        self.device.load_default_config()
+        self.add_probe_rows()
+        apply_channel_config(self.device, ChannelConfigOperation(analog_probe_sources={6: "shaper_hg"}))
+        result = apply_channel_config(self.device, ChannelConfigOperation(
+            analog_probe_sources={38: "shaper_hg"}, analog_probe_exclusive=True, verify=True))
+        self.assertEqual(self.device.read_register_bits(6, 66), "00000000")
+        self.assertEqual(self.device.read_register_bits(38, 66), "00001000")
+        self.assertIn("analog_probe channel=6 -> none (cleared)", result.applied)
+        self.assertEqual(result.verify_mismatches, ())
+
+    def add_probe_rows(self):
+        # The fake ASIC memory stops at subaddress 63; the real one has (ch, 66).
+        self.transport.asic.update({(ch, 66): 0 for ch in range(64)})
+
+    def test_clear_all_switches_every_routed_probe_off(self):
+        self.device.load_default_config()
+        self.add_probe_rows()
+        for ch in (6, 38):
+            self.device.set_analog_probe_for_channel(ch, "shaper_lg")
+        result = apply_channel_config(self.device, ChannelConfigOperation(
+            analog_probe_clear_all=True, verify=True))
+        self.assertEqual(self.device.read_analog_probe_routes(), {})
+        self.assertEqual(len([a for a in result.applied if "(cleared)" in a]), 2)
+
+    def test_analog_probe_rejects_unknown_source(self):
+        with self.assertRaises(ValueError):
+            ChannelConfigOperation(analog_probe_sources={6: "bogus"}).validate()
+
     def test_per_channel_mask_states_write_independent_bits(self):
         self.device.load_default_config()
         result = apply_channel_config(self.device, ChannelConfigOperation(
@@ -230,7 +270,7 @@ class ApplyChannelConfigTests(unittest.TestCase):
             verify=True,
         ))
         self.assertEqual(self.device.find_i2c_row(65, 1).data, bits(0x2AB & 0xFF, 8))
-        self.assertEqual(self.device.find_i2c_row(65, 2).data[0:2], bits((0x2AB >> 8) & 0x3, 2))
+        self.assertEqual(self.device.find_i2c_row(65, 2).data[6:8], bits((0x2AB >> 8) & 0x3, 2))
         self.assertEqual(self.device.find_i2c_row(65, 12).data[4:8], bits(0b0011, 4))
         self.assertEqual(self.device.find_i2c_row(65, 8).data, bits(200, 8))
         self.assertEqual(self.device.find_i2c_row(65, 9).data[0:4], bits(9, 4))
@@ -242,18 +282,18 @@ class ApplyChannelConfigTests(unittest.TestCase):
 
     def test_t1_threshold_dac_alone_does_not_touch_t2_or_tq_independent_bits(self):
         self.device.load_default_config()
-        before_t2_high = self.device.find_i2c_row(65, 3).data[0:4]  # dac2[9:6]
-        before_tq_low = self.device.find_i2c_row(65, 3).data[4:8]  # dacQ[3:0]
+        before_t2_high = self.device.find_i2c_row(65, 3).data[4:8]  # dac2[9:6]
+        before_tq_low = self.device.find_i2c_row(65, 3).data[0:4]  # dacQ[3:0]
         before_tq_high = self.device.find_i2c_row(65, 4).data  # dacQ[9:4]
         result = apply_channel_config(self.device, ChannelConfigOperation(
             t1_threshold_dac=0x155, verify=True,
         ))
         self.assertEqual(self.device.find_i2c_row(65, 1).data, bits(0x155 & 0xFF, 8))
-        self.assertEqual(self.device.find_i2c_row(65, 2).data[0:2], bits((0x155 >> 8) & 0x3, 2))
-        # T2's low 6 bits, sharing subadd 2 with T1's high bits, are untouched.
-        self.assertEqual(self.device.find_i2c_row(65, 2).data[2:8], "000010")
-        self.assertEqual(self.device.find_i2c_row(65, 3).data[0:4], before_t2_high)
-        self.assertEqual(self.device.find_i2c_row(65, 3).data[4:8], before_tq_low)
+        self.assertEqual(self.device.find_i2c_row(65, 2).data[6:8], bits((0x155 >> 8) & 0x3, 2))
+        # T2's low 6 bits (65/2 bits [7:2]), sharing the byte with T1's high bits, are untouched.
+        self.assertEqual(self.device.find_i2c_row(65, 2).data[0:6], "000000")
+        self.assertEqual(self.device.find_i2c_row(65, 3).data[4:8], before_t2_high)
+        self.assertEqual(self.device.find_i2c_row(65, 3).data[0:4], before_tq_low)
         self.assertEqual(self.device.find_i2c_row(65, 4).data, before_tq_high)
         self.assertEqual(result.touched_rows, 2)  # only (65, 1) and (65, 2)
         self.assertEqual(result.verify_mismatches, ())
