@@ -730,7 +730,7 @@ class AcquisitionWindow(QMainWindow):
         self.banner.setText(
             "SIMULATION · Synthetic ADC response, not measured lab data. No board connection."
             if self.mode.currentIndex() == 0 else
-            "HARDWARE · Listed USB ports are unconfirmed until you connect; the firmware status then confirms the board. Masking/gain/threshold overrides are "
+            "HARDWARE · USB candidates are unverified until you connect; the firmware status then confirms the board. Masking/gain/threshold overrides are "
             "temporary scan settings, restored after the run. Restoration readback "
             "verification is mandatory.")
 

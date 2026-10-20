@@ -473,7 +473,7 @@ class HoldScanWindow(QMainWindow):
         self.banner.setText(
             "SIMULATION · Synthetic ADC counts, not measured lab data. No board connection."
             if self.mode.currentIndex() == 0 else
-            "HARDWARE · Listed USB ports are unconfirmed until you connect; the firmware status then confirms the board. FPGA initialization and apply-defaults "
+            "HARDWARE · USB candidates are unverified until you connect; the firmware status then confirms the board. FPGA initialization and apply-defaults "
             "are off by default; masking/Ctest/gain are temporary scan settings. Restoration readback "
             "verification is mandatory. Initialization and defaults are persistent changes.")
 
