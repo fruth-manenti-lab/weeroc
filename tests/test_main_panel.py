@@ -44,6 +44,18 @@ class MainPanelTests(unittest.TestCase):
         widget.deleteLater()
         self.app.processEvents()
 
+    def test_threshold_defaults_match_the_packaged_default_config(self):
+        import csv
+        from radioroc_client import DEFAULT_CONFIG
+        reg = {(int(r["add"]), int(r["subadd"])): int(r["data"].strip(), 2)
+               for r in csv.DictReader(open(DEFAULT_CONFIG, newline=""))}
+        dac1 = reg[(65, 1)] | ((reg[(65, 2)] & 0x3) << 8)
+        dac2 = (reg[(65, 2)] >> 2) | ((reg[(65, 3)] & 0xF) << 6)
+        dacq = (reg[(65, 3)] >> 4) | ((reg[(65, 4)] & 0x3F) << 4)
+        panel = self.make_panel()
+        self.assertEqual((panel.t1_threshold_spin.value(), panel.t2_threshold_spin.value(),
+                          panel.tq_threshold_spin.value()), (dac1, dac2, dacq))
+
     def test_default_widget_values_match_the_packaged_defaults(self):
         panel = self.make_panel()
         self.assertEqual(panel.channel_spin.value(), 0)
@@ -57,9 +69,9 @@ class MainPanelTests(unittest.TestCase):
         self.assertEqual(panel.low_gain_spin.value(), 8)
         self.assertEqual(panel.low_gain_shaping_spin.value(), 4)
         self.assertFalse(panel.low_gain_shaping_slow_check.isChecked())
-        self.assertEqual(panel.t1_threshold_spin.value(), 0)
-        self.assertEqual(panel.t2_threshold_spin.value(), 2)
-        self.assertEqual(panel.tq_threshold_spin.value(), 520)
+        self.assertEqual(panel.t1_threshold_spin.value(), 512)
+        self.assertEqual(panel.t2_threshold_spin.value(), 512)
+        self.assertEqual(panel.tq_threshold_spin.value(), 512)
         self.assertEqual(panel.trigger_selection_combo.currentText(), "Global T1")
         self.assertEqual(panel.delay_spin.value(), 255)
         self.assertEqual(panel.slope_spin.value(), 4)

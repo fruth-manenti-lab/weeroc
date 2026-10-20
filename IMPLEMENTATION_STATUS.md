@@ -19,6 +19,17 @@
   reads all 64 `(ch,66)` rows and clears the routed ones (keeps each row's live high nibble). The Acquisition page now
   switches any routed probe off before a run (`AcquisitionJobConfig.clear_analog_probe`, set by the GUI, default off for
   the CLI) and records a warning naming the channels. Offline only (511 tests OK); not yet exercised on the board.
+- **Main tab threshold defaults fixed.** The tab started at 0 / 2 / 520 (an old decode); the packaged defaults decode
+  to 512 / 512 / 512 with the hardware-validated layout (`set_t1_threshold_dac` docstring). Applying the tab unedited
+  wrote T1 = 0 and killed the trigger. Defaults are now 512 each; a test decodes the packaged CSV and compares.
+- **Accessibility for assistive automation (ChatGPT drove the app on hardware: connected, probes off, ch6 selected).**
+  All dropdowns take Tab focus and arrow keys (macOS Qt skips them otherwise); Port selector named; new Page menu
+  (Ctrl+1/2/3) because the sidebar rows are not exposed to macOS accessibility. The Port is still never preselected
+  (explicit-selection tests). The Page menu adds ~23 px of minimum height off macOS (guard 620 -> 650).
+- **Operator scope decisions (2026-10-20):** a good, repeatable HG gain on the 6 mm SiPMs is hard and is recorded as a
+  known limitation for now (1 mm SiPM on ch38 gives clean fingers). Hold scan is done with Ctest, or with the hold
+  scan tab's "Use external ASIC acquisition trigger" checkbox (IO_FPGA6) for LED pulses; threshold scan, S-curve,
+  autocalibration and acquisition are the working workflow. Goal: finish the app for students soon.
 - **Next:** decide whether the 6 mm SiPMs need HG 15 at all (1 mm fingers are clean); make the Main tab start from the
   real chip defaults and warn before overwriting thresholds.
 
