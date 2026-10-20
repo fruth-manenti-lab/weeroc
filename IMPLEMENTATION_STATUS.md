@@ -1,5 +1,22 @@
 # Implementation status
 
+## RADIOROC 44 — Analog probe in the GUI; probe enable register; 1 mm SiPM fingers
+
+- **Analog probe selector** on ASIC config. -> Probes/Masks: channel + node (off, shaper HG/LG, preamp HG/LG),
+  own "Apply probe". Backend `RadiorocDevice.set_analog_probe_for_channel` (row `(ch,66)` low nibble, high nibble
+  kept) and `ChannelConfigOperation.analog_probe_sources`; three offline tests added, `tools/check_development.py` passes.
+  Node order is from the vendor `send_aprb` bytecode and still unconfirmed on a scope.
+- **Probe needs the common enables:** `(66,70)` = `{NC*3, ON_outing, ON_aBuffer, EN_probe, EN_aMuxHG, EN_aMuxLG}`.
+  It was found at `00001011` (ON_outing and EN_probe off, cause unknown, not written by this code) with ch38 routed and
+  HG 15 set, and no probe signal. Writing `00011111` (read-back verified) restored it; the operator then saw clean
+  fingers from a 1 mm SiPM on ch38.
+- **Pitfalls found:** the Main tab's Apply writes the whole tab, including thresholds that start at 0/2/520
+  (chip defaults decode to 512/512/512), so applying it unedited breaks the trigger; applying the defaults clears the
+  per-channel probe route and (66,70) edits. LED run on ch4 at HG 15, hold 110 ns, 1000 events, external trigger:
+  ped ~304, median 413, p90 1045 (`radioroc_runs/led_hg15_ch4`). Pedestal rises with gain.
+- **Next:** decide whether the 6 mm SiPMs need HG 15 at all (1 mm fingers are clean); make the Main tab start from the
+  real chip defaults and warn before overwriting thresholds.
+
 ## RADIOROC 43 — HG/LG shaper-gain swap fixed and bench-confirmed; restoration faults now explain themselves; first LED acquisition
 
 Setup: SiPMs on ch 4, 6, 32 flat on the plint, LED through a hole, bias 29 V,

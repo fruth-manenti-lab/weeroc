@@ -1934,6 +1934,43 @@ class RadiorocDevice:
         data[4:8] = bits(value, 4)
         self.write_register(channel, 2, "".join(data))
 
+    ANALOG_PROBE_CODES = {
+        "none": "0000",
+        "shaper_hg": "1000",
+        "shaper_lg": "0100",
+        "preamp_hg": "0010",
+        "preamp_lg": "0001",
+    }
+
+    def set_analog_probe_for_channel(self, channel: int, source: str) -> None:
+        """Route one channel's analog node to the ASIC Analog_Probe output.
+
+        **Inputs**
+        - `channel` (`int`): Channel index.
+        - `source` (`str`): Key of `ANALOG_PROBE_CODES`: `none`, `shaper_hg`,
+          `shaper_lg`, `preamp_hg` or `preamp_lg`.
+
+        **Returns**
+        - `None`
+
+        **Hardware side effects**
+        - Writes the channel's subaddress-66 row, replacing its low nibble
+          (bit3..0 = shaper HG, shaper LG, preamp HG, preamp LG) and keeping
+          the high nibble. The probe output is shared: route one channel at a
+          time. The user guide warns the probe degrades analog performance.
+
+        Register from the vendor GUI's `send_aprb` bytecode; node order not
+        independently confirmed on a scope (see `IMPLEMENTATION_STATUS.md`).
+        """
+
+        validate_channel(channel)
+        if source not in self.ANALOG_PROBE_CODES:
+            raise ValueError(f"source must be one of {sorted(self.ANALOG_PROBE_CODES)}")
+        row: I2CRow | None = self.find_i2c_row(channel, 66)
+        if row is None:
+            return
+        self.write_register(channel, 66, row.data[:4] + self.ANALOG_PROBE_CODES[source])
+
     def set_low_gain_for_channel(self, channel: int, value: int) -> None:
         """Set one channel's low-gain (LG) energy-preamplifier gain code.
 

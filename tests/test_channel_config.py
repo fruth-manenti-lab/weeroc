@@ -165,6 +165,21 @@ class ApplyChannelConfigTests(unittest.TestCase):
         self.assertIn("input_dac_value channel=5 -> 10", result.applied)
         self.assertEqual(result.verify_mismatches, ())
 
+    def test_analog_probe_routes_one_node_and_off_clears_it(self):
+        self.device.load_default_config()
+        result = apply_channel_config(self.device, ChannelConfigOperation(
+            analog_probe_sources={6: "shaper_hg"}, verify=True,
+        ))
+        self.assertEqual(self.device.read_register_bits(6, 66), "00001000")
+        self.assertIn("analog_probe channel=6 -> shaper_hg", result.applied)
+        self.assertEqual(result.verify_mismatches, ())
+        apply_channel_config(self.device, ChannelConfigOperation(analog_probe_sources={6: "none"}))
+        self.assertEqual(self.device.read_register_bits(6, 66), "00000000")
+
+    def test_analog_probe_rejects_unknown_source(self):
+        with self.assertRaises(ValueError):
+            ChannelConfigOperation(analog_probe_sources={6: "bogus"}).validate()
+
     def test_per_channel_mask_states_write_independent_bits(self):
         self.device.load_default_config()
         result = apply_channel_config(self.device, ChannelConfigOperation(
