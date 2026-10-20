@@ -1,0 +1,35 @@
+[
+  {
+    "step": "startup",
+    "state": {
+      "threshold": [
+        4,
+        5
+      ],
+      "hold": [
+        4,
+        5
+      ],
+      "scurve": [
+        4
+      ],
+      "autocal": [
+        4,
+        5
+      ],
+      "acq": [
+        4
+      ],
+      "hold_trigger": 4,
+      "acq_trigger_T1": 4,
+      "acq_trigger_T2": 5,
+      "main_channel": 0
+    },
+    "modes": {
+      "threshold": "Hardware connection",
+      "hold": "Hardware connection",
+      "scurve": "Hardware connection",
+      "acq": "Hardware connection"
+    }
+  }
+]
