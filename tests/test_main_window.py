@@ -114,6 +114,19 @@ class MainWindowTests(unittest.TestCase):
         for index in range(window.calibration_tabs.count()):
             self.assertIsNot(window.calibration_tabs.widget(index), window.acquisition_window)
 
+    def test_every_dropdown_takes_keyboard_focus_and_arrow_keys_change_it(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QComboBox
+        window = self._make_window()
+        combos = window.findChildren(QComboBox)
+        self.assertTrue(combos)
+        self.assertTrue(all(c.focusPolicy() == Qt.StrongFocus for c in combos))
+        combo = next(c for c in combos if c.count() > 1)
+        combo.setCurrentIndex(0)
+        QTest.keyClick(combo, Qt.Key_Down)
+        self.assertEqual(combo.currentIndex(), 1)
+
     def test_main_panel_is_the_first_asic_config_tab(self):
         window = self._make_window()
         # Each ASIC-config tab wraps its panel in a QScrollArea (see

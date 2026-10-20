@@ -11,9 +11,9 @@ then collect). The remaining scan workflows are sub-tabs of one "Calibration"
 area, not independent top-level windows each owning their own connection.
 """
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QApplication, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
+    QApplication, QComboBox, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QMainWindow, QScrollArea, QStackedWidget, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -222,6 +222,12 @@ class MainWindow(QMainWindow):
             self.connection_panel.status_changed.connect(scan_window.poll_connection_worker)
 
         self.sidebar.setCurrentRow(0)
+
+        # macOS Qt dropdowns skip Tab focus by default (unless the system's Full
+        # Keyboard Access is on), so keyboard-only users and assistive automation
+        # cannot reach them. Make every dropdown focusable and arrow-key selectable.
+        for combo in self.findChildren(QComboBox):
+            combo.setFocusPolicy(Qt.StrongFocus)
 
         # -- Persistent connection status strip (mirrors the vendor app's
         # bottom power-button/status bar, visible regardless of the active
