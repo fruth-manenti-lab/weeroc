@@ -30,6 +30,15 @@
   known limitation for now (1 mm SiPM on ch38 gives clean fingers). Hold scan is done with Ctest, or with the hold
   scan tab's "Use external ASIC acquisition trigger" checkbox (IO_FPGA6) for LED pulses; threshold scan, S-curve,
   autocalibration and acquisition are the working workflow. Goal: finish the app for students soon.
+- **ChatGPT hardware run on ch6 (operator-driven app, 2026-10-20), findings:** first threshold run hit a board no-response
+  (power cycle, then defaults+FPGA init, verified clean); threshold scan clean floor DAC 520 (proposed 580); autocalibration
+  skipped (single channel); external-hold scan 0-100 ns completed 21/21 but no clean peak (10 events/point, huge spread);
+  200-event finger acquisition timed out on batch 0 (`ADC acquisition timed out waiting for FPGA word 4 bit 5`, cleanup OK,
+  not retried). Likely cause (unconfirmed): generator CH2 rate too low for 200 pulses in 60 s (operator had slowed CH2
+  to about 0.5 s); the 10-event hold scan fits that. The Acquisition preview now states the pulse rate needed
+  (events per batch / timeout) when the external trigger is on. Also: banners no longer say "USB candidates are
+  unverified" after connecting; channel buttons have accessible names ("Channel N"). Open: spinbox typing appends
+  instead of replacing (automation only), no intermediate progress inside a batch, channel selectors independent per tab.
 - **Next:** decide whether the 6 mm SiPMs need HG 15 at all (1 mm fingers are clean); make the Main tab start from the
   real chip defaults and warn before overwriting thresholds.
 

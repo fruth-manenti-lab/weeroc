@@ -730,7 +730,7 @@ class AcquisitionWindow(QMainWindow):
         self.banner.setText(
             "SIMULATION · Synthetic ADC response, not measured lab data. No board connection."
             if self.mode.currentIndex() == 0 else
-            "HARDWARE · USB candidates are unverified. Masking/gain/threshold overrides are "
+            "HARDWARE · Listed USB ports are unconfirmed until you connect; the firmware status then confirms the board. Masking/gain/threshold overrides are "
             "temporary scan settings, restored after the run. Restoration readback "
             "verification is mandatory.")
 
@@ -958,8 +958,18 @@ class AcquisitionWindow(QMainWindow):
                                                   not getattr(self.connection_worker.snapshot(), "fault", None)),
                     "restoration_verification": "mandatory",
                 }
+            note = ""
+            if not simulation and operation.acquisition.external_trigger:
+                per_batch = operation.acquisition.acquisitions_per_batch
+                timeout = operation.acquisition.timeout_s
+                min_rate = per_batch / timeout
+                data["external_trigger_note"] = (
+                    f"Each batch waits for {per_batch} pulses on IO6. The pulse source must deliver at "
+                    f"least {min_rate:.1f} pulses/s, or the batch times out after {timeout:g} s. "
+                    "The board itself handles at most about 20 events/s.")
+                note = f" · IO6 pulses needed: at least {min_rate:.1f}/s"
             self.details.setPlainText(json.dumps(data, indent=2))
-            self.status.setText(f"Preview valid · {data['total_points']} batches · no output created")
+            self.status.setText(f"Preview valid · {data['total_points']} batches · no output created{note}")
             return operation
         except Exception as exc:
             self.status.setText(f"Preview failed: {exc}")

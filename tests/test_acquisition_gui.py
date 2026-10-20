@@ -64,6 +64,21 @@ class AcquisitionGuiTests(unittest.TestCase):
         self.assertIn("at least one channel is required", self.window.status.text())
         self.assertFalse(self.directory.exists())
 
+    def test_hardware_preview_with_external_trigger_states_the_pulse_rate_needed(self):
+        self.window.mode.setCurrentIndex(1)
+        self.window.external_trigger.setChecked(True)
+        self.window.acquisitions_per_batch.setValue(200)
+        self.window.timeout_s.setValue(60.0)
+        self.assertIsNotNone(self.window.preview())
+        self.assertIn("at least 3.3/s", self.window.status.text())
+        self.assertIn("external_trigger_note", self.window.details.toPlainText())
+
+    def test_channel_buttons_have_accessible_names(self):
+        buttons = self.window.channel_select.channel_buttons
+        self.assertEqual([b.accessibleName() for b in buttons[:3]],
+                         ["Channel 0", "Channel 1", "Channel 2"])
+        self.assertEqual(buttons[63].accessibleName(), "Channel 63")
+
     def test_operation_uses_selected_channels(self):
         self.window.channel_select.set_channels([1, 3, 6])
         self.window.trigger_channel.setValue(3)
