@@ -12,6 +12,7 @@ area, not independent top-level windows each owning their own connection.
 """
 
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QMainWindow, QScrollArea, QStackedWidget, QTabWidget, QVBoxLayout, QWidget,
@@ -101,6 +102,19 @@ class MainWindow(QMainWindow):
         """)
         for label in ("ASIC config.", "Acquisition", "Calibration"):
             QListWidgetItem(label, self.sidebar)
+        self.sidebar.setFocusPolicy(Qt.StrongFocus)
+        self.sidebar.setAccessibleName("Page navigation")
+        self.sidebar.setAccessibleDescription(
+            "Pages: ASIC config., Acquisition, Calibration. Also in the Page menu (Ctrl+1, Ctrl+2, Ctrl+3).")
+        # The sidebar's rows are not exposed to macOS accessibility tools, so the same
+        # three pages are also in a real menu (accessible, and with keyboard shortcuts).
+        page_menu = self.menuBar().addMenu("Page")
+        self.page_actions = []
+        for row, label in enumerate(("ASIC config.", "Acquisition", "Calibration")):
+            action = page_menu.addAction(label)
+            action.setShortcut(QKeySequence(f"Ctrl+{row + 1}"))
+            action.triggered.connect(lambda _checked=False, r=row: self.sidebar.setCurrentRow(r))
+            self.page_actions.append(action)
         body_layout.addWidget(self.sidebar)
 
         self.pages = QStackedWidget()

@@ -127,6 +127,16 @@ class MainWindowTests(unittest.TestCase):
         QTest.keyClick(combo, Qt.Key_Down)
         self.assertEqual(combo.currentIndex(), 1)
 
+    def test_page_menu_switches_the_sidebar_page(self):
+        window = self._make_window()
+        self.assertEqual([a.text() for a in window.page_actions],
+                         ["ASIC config.", "Acquisition", "Calibration"])
+        window.page_actions[2].trigger()
+        self.assertEqual(window.sidebar.currentRow(), 2)
+        self.assertEqual(window.pages.currentIndex(), 2)
+        window.page_actions[0].trigger()
+        self.assertEqual(window.pages.currentIndex(), 0)
+
     def test_main_panel_is_the_first_asic_config_tab(self):
         window = self._make_window()
         # Each ASIC-config tab wraps its panel in a QScrollArea (see
@@ -447,7 +457,8 @@ class MainWindowTests(unittest.TestCase):
         window = self._make_window()
         hint = window.minimumSizeHint()
         self.assertLessEqual(hint.width(), 1000)
-        self.assertLessEqual(hint.height(), 620)
+        # 620 plus the in-window Page menu bar (~23 px; on macOS it is the native bar).
+        self.assertLessEqual(hint.height(), 650)
 
     def test_every_page_keeps_a_usable_plot_at_1024x700(self):
         from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
