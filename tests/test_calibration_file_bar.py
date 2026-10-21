@@ -1,0 +1,141 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+
+from PySide6.QtWidgets import QApplication
+
+from radioroc.gui.calibration_file_bar import CalibrationFileBar
+from radioroc.gui.calibration_selection import CalibrationSelection
+
+_APP = QApplication.instance() or QApplication([])
+
+
+class FakeWorker:
+    def __init__(self, state="connected"):
+        self.state = state
+        self.ops = []
+
+    def snapshot(self):
+        return SimpleNamespace(state=self.state)
+
+    def apply_channel_config(self, op):
+        self.ops.append(op)
+
+
+class CalibrationFileBarTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+
+    def _autocal_dir(self):
+        run = self.tmp / "runs" / "hardware" / "r1"
+        run.mkdir(parents=True)
+        (run / "autocalibration_metadata.json").write_text(json.dumps({
+            "status": "completed", "calibration_status": "verified", "operation": {"t1": True},
+            "calibration_after": {"4": 31, "5": 28}}))
+        return run
+
+    def _bar(self, worker=None, window=None, channels=(4, 5)):
+        bar = CalibrationFileBar(CalibrationSelection(channels), worker or FakeWorker(), window,
+                                 runs_root=self.tmp / "runs")
+        return bar
+
+    def test_round_trip_and_no_chip_write_on_load(self):
+        worker = FakeWorker()
+        bar = self._bar(worker, SimpleNamespace(_active_directory=self._autocal_dir()),
+                        channels=(7, 9, 12))
+        bar.selection.set_trigger_channels(9, 12)
+        bar.operating_threshold.setValue(600)
+        bar.bias_text.setText("54.5")
+        bar.note_edit.setText("cold run")
+        path = self.tmp / "c.json"
+        self.assertTrue(bar.save_to(path))
+        self.assertIn("2 channel trims", bar.status_label.text())
+
+        other = self._bar(worker)
+        other._confirm_reapply = lambda text: False
+        self.assertTrue(other.load_from(path))
+        self.assertEqual(other.selection.channels(), [7, 9, 12])
+        self.assertEqual((other.selection.trigger_channel, other.selection.trigger_channel_2), (9, 12))
+        self.assertFalse(other.selection.auto_triggers)
+        self.assertEqual(other.operating_threshold.value(), 600)
+        self.assertEqual((other.bias_text.text(), other.note_edit.text()), ("54.5", "cold run"))
+        self.assertEqual(worker.ops, [])
+        self.assertIn("not re-applied", other.status_label.text())
+
+    def test_reapply_after_confirmation(self):
+        worker = FakeWorker()
+        bar = self._bar(worker, SimpleNamespace(_active_directory=self._autocal_dir()))
+        path = self.tmp / "c.json"
+        bar.save_to(path)
+        bar._confirm_reapply = lambda text: True
+        bar.load_from(path)
+        self.assertEqual(len(worker.ops), 1)
+        self.assertEqual(worker.ops[0].t1_calibration_dac_values, {4: 31, 5: 28})
+
+    def test_no_reapply_when_disconnected(self):
+        worker = FakeWorker(state="disconnected")
+        bar = self._bar(worker, SimpleNamespace(_active_directory=self._autocal_dir()))
+        path = self.tmp / "c.json"
+        bar.save_to(path)
+        bar._confirm_reapply = lambda text: self.fail("asked")
+        bar.load_from(path)
+        self.assertEqual(worker.ops, [])
+        self.assertIn("Connect the board", bar.status_label.text())
+
+    def test_save_without_trims(self):
+        bar = self._bar()
+        path = self.tmp / "c.json"
+        self.assertTrue(bar.save_to(path))
+        self.assertIn("WITHOUT trims", bar.status_label.text())
+        self.assertIsNone(json.loads(path.read_text())["autocalibration"])
+        bar.load_from(path)
+        self.assertIn("no trims", bar.status_label.text())
+
+    def test_bad_file_does_not_crash_or_change(self):
+        bar = self._bar()
+        bad = self.tmp / "bad.json"
+        bad.write_text("garbage")
+        self.assertFalse(bar.load_from(bad))
+        self.assertIn("Nothing was changed", bar.status_label.text())
+        self.assertEqual(bar.selection.channels(), [4, 5])
+        bad.write_text(json.dumps({"schema_version": 9}))
+        self.assertFalse(bar.load_from(bad))
+        self.assertIn("version", bar.status_label.text())
+
+    def test_defaults(self):
+        bar = self._bar()
+        self.assertEqual(bar.operating_threshold.value(), 540)
+        self.assertEqual(bar.save_button.text(), "Save calibration…")
+
+
+    def test_hold_delay_is_saved_loaded_and_shared(self):
+        bar = self._bar()
+        bar.hold_delay.setValue(525)
+        self.assertEqual(bar.selection.hold_delay_ns, 525)
+        path = self.tmp / "hold.json"
+        self.assertTrue(bar.save_to(path))
+        self.assertEqual(json.loads(path.read_text())["hold_scan"], {"hold_delay_ns": 525})
+        bar.selection.set_hold_delay_ns(100)
+        self.assertEqual(bar.hold_delay.value(), 100)
+        self.assertTrue(bar.load_from(path))
+        self.assertEqual(bar.selection.hold_delay_ns, 525)
+        self.assertEqual(bar.hold_delay.value(), 525)
+
+    def test_bad_hold_delay_in_file_is_refused(self):
+        bar = self._bar()
+        path = self.tmp / "bad_hold.json"
+        self.assertTrue(bar.save_to(path))
+        data = json.loads(path.read_text())
+        data["hold_scan"] = {"hold_delay_ns": -5}
+        path.write_text(json.dumps(data))
+        bar.selection.set_hold_delay_ns(300)
+        self.assertFalse(bar.load_from(path))
+        self.assertEqual(bar.selection.hold_delay_ns, 300)
+
+
+if __name__ == "__main__":
+    unittest.main()

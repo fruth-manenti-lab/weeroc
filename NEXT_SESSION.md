@@ -1,4 +1,33 @@
-# RADIOROC 43 — Check HG/LG gain mapping, then LED photoelectron spectrum
+# RADIOROC 45 — Acquisition path: find why the app saw zero batches, then take the muon rate run
+
+Read `AGENTS.md`, the RADIOROC 44 entries at the top of `IMPLEMENTATION_STATUS.md`, and
+`docs/muon_rate_measurement_guide.md`. Branch `lab/newest-app-test`. Only the operator accesses the board; agents use
+offline tests, fake transports or saved data unless the operator explicitly asks for a hardware check.
+
+## Next tasks, in order
+1. Reproduce headlessly why the app's coincidence acquisition got zero batches while the CLI
+   (`scripts/radioroc_acquire.py`, same settings) filled batches in seconds. Compare the app's job path
+   (`AcquisitionWindow` -> `ConnectionWorker` -> `AcquisitionJob`) with the CLI's, offline first (fake transport,
+   saved run configs 20261021-164706-7a50dea4 and 20261021-160106-c89b2a43), then ask the operator for a hardware run.
+2. Decide with the operator whether to change the Acquisition/hold-delay default from 530 to about 30 ns, and add a
+   hold-delay sweep helper if useful. Muon runs need 20-55 ns (see the hardware findings).
+3. Operator re-runs the whole calibration process from the guide on the board; collect every label or step that was
+   unclear. Hardware tests still owed: acknowledge-fault-without-disconnect, trim re-apply from a calibration file.
+4. Muon run: dead-time check with a pulser, background run, rate per minute with uncertainty, compare with the reference.
+5. Priority 0: controlled demonstration that the coincidence needs two distinct channels.
+6. Guide open items: operating threshold choice, hold delay confirmation, label check against the real screens.
+
+## Environment reminders
+- `.venv-foundation` with `PYTHONPATH=src` for the app and `tools/check_development.py` (about a minute); board control
+  port `/dev/cu.usbserial-RD3_320`; keep the board on its own USB port; close the app before running any script.
+- After every power cycle: first scan with Initialize FPGA and Apply defaults, then autocalibration, then Load
+  calibration only after reading the re-apply caveat. Generator: touch channel 1 only by script; the operator sets it by hand.
+
+---
+
+## Earlier handoff (RADIOROC 43), kept for context
+
+# (RADIOROC 43 title) RADIOROC 43 — Check HG/LG gain mapping, then LED photoelectron spectrum
 
 Read `PLINT_STUDENT_MVP_DIRECTIVE.md`, `AGENTS.md`, then the RADIOROC 42 entry at
 the top of `IMPLEMENTATION_STATUS.md` (full evidence and run paths). Branch:

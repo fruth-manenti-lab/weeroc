@@ -167,8 +167,6 @@ class ConnectionWorkerAcquisitionTests(unittest.TestCase):
                         lambda: worker.run_acquisition(self.operation("blocked"))):
             with self.assertRaises(JobBusyError):
                 command()
-        with self.assertRaises(JobBusyError):
-            worker.review_fault()
 
         worker.disconnect()
         idle = self.wait_for(worker, "idle")

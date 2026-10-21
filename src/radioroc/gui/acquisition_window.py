@@ -309,7 +309,7 @@ class AcquisitionWindow(QMainWindow):
     # long run spends its time on the job, not re-parsing a growing CSV.
     _LIVE_REFRESH_EVERY_TICKS = 10
 
-    def __init__(self, *, worker_factory=AcquisitionWorker,
+    def __init__(self, *, selection=None, worker_factory=AcquisitionWorker,
                  connection_worker_factory=ConnectionWorker, connection_worker=None):
         super().__init__()
         self.setWindowTitle("RADIOROC · Acquisition workflow")
@@ -610,6 +610,33 @@ class AcquisitionWindow(QMainWindow):
         self.hint.attach(self.mode, "Simulation previews a synthetic fixed-point ADC "
                           "response with no board attached; Hardware connection runs on "
                           "the real ASIC/FPGA.")
+        # Shared Calibration-page selection: hide this window's own channel grid
+        # (and trigger spin boxes) and mirror the model into them.
+        self.shared_selection = selection
+        if selection is not None:
+            from radioroc.gui.calibration_selection_panel import bind_shared_selection
+            self._sync_shared_selection = bind_shared_selection(
+                selection, form, self.channel_select, trigger_1=self.trigger_channel, trigger_2=self.trigger_channel_2)
+            self.shared_selection_label = QLabel()
+            self.shared_selection_label.setWordWrap(True)
+            self.shared_selection_label.setAccessibleName("Shared channel selection")
+            form.insertRow(0, self.shared_selection_label)
+
+            def _update_selection_label(*_):
+                chans = ",".join(str(c) for c in selection.channels()) or "none"
+                self.shared_selection_label.setText(
+                    f"Channels {chans} \u00b7 trigger T1={selection.trigger_channel}, "
+                    f"T2={selection.trigger_channel_2} (set on the Calibration page)")
+            selection.channels_changed.connect(_update_selection_label)
+            selection.triggers_changed.connect(_update_selection_label)
+            _update_selection_label()
+
+            # The hold delay is shared with the Calibration page's file bar.
+            self.hold_delay_ns.setValue(selection.hold_delay_ns)
+            self.hold_delay_ns.valueChanged.connect(selection.set_hold_delay_ns)
+            selection.hold_delay_changed.connect(
+                lambda value: self.hold_delay_ns.setValue(value)
+                if self.hold_delay_ns.value() != value else None)
         self.hint.attach(self.channel_select.toggle_button,
                          "Channels to save. Click to choose which channels.")
         self.hint.attach(self.channel_select.select_all_button, "Select every channel.")
