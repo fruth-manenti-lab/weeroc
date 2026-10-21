@@ -30,6 +30,17 @@ Hardware findings (operator present, user-authorised; read-only status + short a
 - `ConnectionWorker` acknowledge-without-disconnect, trim re-apply from a saved calibration file and the new
   Calibration-page layout have NOT been run on hardware.
 
+CI parity (GitHub checks kept failing): CI installs `.[analysis,dev]` without PySide6 and non-editable, which
+`.venv-foundation` (PySide6, editable) hides. Reproduced locally with a clean Python 3.11 venv: two errors, both fixed.
+(1) new `tests/test_calibration_file_bar.py` imported PySide6 at module level (now guarded with `find_spec` +
+`skipUnless`); (2) `tests/test_desktop_icon.py` needed `radioroc.resources`, which exists only in an installed package
+(commit cee2ae0, so CI was probably already red before this session); it now falls back to `configs/`. New
+`tools/check_ci_parity.py` repeats the workflow steps in clean venvs; documented in `DEVELOPMENT.md` and made a rule
+in `AGENTS.md`. Result with Python 3.11: unit tests 545 OK (187 skipped), wheel build, installed-package checks and
+the `[analysis]` headless plot pass; the final optional `[gui]` pip install failed twice with a network read error
+while downloading PySide6 (environment, not the repo), so the offscreen GUI steps and Python 3.13 were not run here.
+`gh` is not logged in on this machine, so GitHub's own logs could not be read.
+
 Limitations: no dead-time measurement yet; Priority 0 (formal coincidence verification with controlled inputs) still
 open; the Acquisition hold delay still defaults to 530 (wrong for muon runs); guide labels not seen rendered for the
 grid Select all/none captions and some Hold-scan field labels.

@@ -54,6 +54,14 @@ propagate explicitly and requests are not automatically resent. Threshold dry-ru
 the serial port. Offline checks run help, pure functions and recorded/synthetic
 data only. Migrate those commands in their own workflow slices.
 
+## CI parity
+
+`python tools/check_ci_parity.py` repeats the steps of `.github/workflows/python.yml` in clean
+temporary environments (no PySide6 for the unit-test step, a non-editable install, wheel build,
+wheel check, then the optional offscreen GUI steps). It needs network access and takes a few
+minutes; run it with Python 3.11 and 3.13 before pushing a branch that will become a PR. The
+everyday `.venv-foundation` has PySide6 and an editable install, so it hides these failures.
+
 ## Build and verify an installed artifact
 
 ```bash

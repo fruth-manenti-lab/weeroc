@@ -1,15 +1,21 @@
+import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from PySide6.QtWidgets import QApplication
+GUI_AVAILABLE = importlib.util.find_spec("PySide6") is not None
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from radioroc.gui.calibration_file_bar import CalibrationFileBar
-from radioroc.gui.calibration_selection import CalibrationSelection
+if GUI_AVAILABLE:
+    from PySide6.QtWidgets import QApplication
 
-_APP = QApplication.instance() or QApplication([])
+    from radioroc.gui.calibration_file_bar import CalibrationFileBar
+    from radioroc.gui.calibration_selection import CalibrationSelection
+
+    _APP = QApplication.instance() or QApplication([])
 
 
 class FakeWorker:
@@ -24,6 +30,7 @@ class FakeWorker:
         self.ops.append(op)
 
 
+@unittest.skipUnless(GUI_AVAILABLE, "PySide6 is not installed")
 class CalibrationFileBarTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

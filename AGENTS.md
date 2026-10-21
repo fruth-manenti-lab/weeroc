@@ -22,6 +22,13 @@
   or `.venv-foundation` for package development; see `DEVELOPMENT.md`.
 - Run `python tools/check_development.py` for relevant source changes and verify
   an installed wheel after packaging changes. Never run hardware scans as CI tests.
+- **CI parity before any push that may become a PR.** GitHub installs `.[analysis,dev]`
+  without PySide6 and without an editable install, so `check_development.py` can pass in
+  `.venv-foundation` while CI fails. Run `python tools/check_ci_parity.py` (needs network;
+  repeat with `--python python3.11` and the 3.13 interpreter) and fix failures first. New GUI
+  tests must guard Qt imports (`importlib.util.find_spec("PySide6")` plus `skipUnless`), and
+  tests must not import `radioroc.resources` from a source tree (it exists only when installed).
+  Known cause of past red checks: unguarded PySide6 imports in tests, and the icon test.
 - Only one designated operator accesses the board. Agent workers use offline
   tests, fake transports or saved data. Do not run the environment diagnostic
   script as an offline check: it enumerates hardware through D2XX.
