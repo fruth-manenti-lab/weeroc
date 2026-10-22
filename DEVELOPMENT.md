@@ -54,6 +54,14 @@ propagate explicitly and requests are not automatically resent. Threshold dry-ru
 the serial port. Offline checks run help, pure functions and recorded/synthetic
 data only. Migrate those commands in their own workflow slices.
 
+## Merging PRs without conflicts
+
+`main` received PR #3 as a squash commit, so the branch's own 63 commits looked unrelated to `main` and the next PR
+reported "can't merge automatically" although the files were identical. Prefer **Create a merge commit** (or rebase)
+when merging a long-lived branch such as `lab/newest-app-test`. If you do squash, delete the branch afterwards and start
+the next one from `main`. If the conflict appears anyway, check `git diff <last-merged-commit> origin/main`: when empty,
+`git merge -s ours origin/main` joins the histories without touching files (done on 2026-10-22).
+
 ## CI parity
 
 `python tools/check_ci_parity.py` repeats the steps of `.github/workflows/python.yml` in clean
