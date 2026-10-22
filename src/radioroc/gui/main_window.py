@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from .acquisition_window import AcquisitionWindow
+from .muon_view import MuonView
 from .autocalibration_window import AutocalibrationWindow
 from .calibration_file_bar import CalibrationFileBar
 from .calibration_selection import CalibrationSelection
@@ -59,7 +60,7 @@ def _scrollable(widget):
     return scroll
 
 
-_PAGE_LABELS = ("ASIC config.", "Calibration", "Acquisition")
+_PAGE_LABELS = ("ASIC config.", "Calibration", "Acquisition", "Muon")
 
 
 class MainWindow(QMainWindow):
@@ -111,7 +112,7 @@ class MainWindow(QMainWindow):
         self.sidebar.setFocusPolicy(Qt.StrongFocus)
         self.sidebar.setAccessibleName("Page navigation")
         self.sidebar.setAccessibleDescription(
-            "Pages: ASIC config., Calibration, Acquisition. Also in the Page menu (Ctrl+1, Ctrl+2, Ctrl+3).")
+            "Pages: ASIC config., Calibration, Acquisition, Muon. Also in the Page menu (Ctrl+1, Ctrl+2, Ctrl+3, Ctrl+4).")
         # The sidebar's rows are not exposed to macOS accessibility tools, so the same
         # three pages are also in a real menu (accessible, and with keyboard shortcuts).
         page_menu = self.menuBar().addMenu("Page")
@@ -224,6 +225,12 @@ class MainWindow(QMainWindow):
         self.acquisition_window = AcquisitionWindow(selection=self.calibration_selection, connection_worker=worker)
         acquisition_layout.addWidget(self.acquisition_window)
         self.pages.addWidget(acquisition_page)
+
+        # -- Muon: offline demo detector view (simulated events or a saved run);
+        # never touches the board connection. ------------------------------------
+        self.muon_view = MuonView()
+        self.pages.addWidget(self.muon_view)
+        self.muon_view.attach_hints(self.hint)
 
         # An injected connection_worker means each scan window's own
         # ConnectionPanel-owning code path (which self-wires this on the

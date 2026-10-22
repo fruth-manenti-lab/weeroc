@@ -1,5 +1,36 @@
 # Implementation status
 
+## RADIOROC 45 — muon detector view tab
+
+New offline sidebar page **Muon** (after Acquisition; Page menu Ctrl+4): `gui/muon_view.py` `MuonView`, a top view of the
+SiPM layers (two panels, 1 mm scale auto-fitted) with event replay. It never opens the board connection; events come from
+`muon_simulator.simulate_events` or a saved run (`muon_analysis.load_events`), with a `append_events` hook for a future live feed.
+
+- SiPMs glow dark grey to yellow to white with amplitude / full scale, decaying exponentially (glow time, default 600 ms);
+  `advance(dt_ms)` applies one step so tests need no real time. Seed SiPM outlined, centroid cross per layer, numbers in the info label.
+- Edit layout mode: drag (1 mm snap, inside the panel), Add SiPM, Remove selected, context menu "Move to other layer";
+  replay disabled while editing. Grid rebuild, layer spacing, SiPM size, Save/Load layout (errors in the status label).
+- Replay: play/pause, step, speed, coincidences-only, slider; statistics and truth angle for simulated events.
+- Tests: `tests/test_muon_view.py` (Qt guarded, skips without PySide6; fake logic plus real-logic tests when available),
+  `tests/test_main_window.py` page order and Ctrl+4. Limitation: live board data and a layer-stacked side view are not implemented.
+
+## RADIOROC 45 — muon view logic (layout, simulator, analysis)
+
+Pure-Python (no Qt, no matplotlib) logic for the demo muon detector view; offline-tested only.
+
+- `data/muon_types.py` (layout/event types), `data/muon_simulator.py` (`simulate_events`: seeded, stdlib `random`),
+  `data/muon_analysis.py` (`events_from_rows`, `load_events` via `acquisition_reader` using all rows,
+  `estimate_pedestals`, `analyse_event`).
+- Simulator: muon tracks are rejection-sampled so every layer is crossed inside its SiPM bounding box (a
+  coincidence trigger would not record the others); `dark_hit_probability` default lowered to 0.005 so non-muon
+  events rarely fake a two-layer coincidence. hg saturates at 4095; lg amplitude = hg amplitude / 8.
+- Measured (4x8x2 grid, 2000 events, 80% muons, 3 seeds): coincidence recognised for 100% of muons, false
+  coincidences 0-1.1% of non-muons, centroid within 6 mm 100%, mean angle error ~1 deg (angle > 10 deg).
+- Limitation: median pedestals are biased upward (up to ~30 counts for central SiPMs) when 80% of events are muons;
+  accurate with a muon-poor sample. Saturated hg uses lg scaled by the event's median hg/lg ratio (lg baseline = event
+  median since no lg pedestals are passed).
+- Tests: `tests/test_muon_layout.py`, `test_muon_simulator.py`, `test_muon_analysis.py`.
+
 ## RADIOROC 44 — shared trigger gain and operating threshold
 
 Root cause of the zero-trigger acquisition: scans ran at trigger gain code 1 while Autocalibration and Acquisition ran

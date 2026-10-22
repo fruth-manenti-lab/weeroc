@@ -18,6 +18,12 @@ offline tests, fake transports or saved data unless the operator explicitly asks
 5. Priority 0: controlled demonstration that the coincidence needs two distinct channels.
 6. Guide open items: operating threshold choice, hold delay confirmation, label check against the real screens.
 
+## Muon detector view (branch feat/muon-coincidence-view, RADIOROC 45)
+New sidebar page "Muon": editable 1- or 2-layer SiPM layout (drag, add/remove, save/load JSON), replay of simulated or
+saved-run events with glow, offline cluster/coincidence/angle analysis. Next: compare against the Geant4 simulations in
+`cosmic-geant` (real light sharing), a live feed that appends events per batch (`MuonView.append_events` hook), per-channel
+pedestals and HG/LG handling for real data, bigger SiPM squares in the canvas.
+
 ## Separate goals (do not block the muon count)
 - **Gain calibration with the board** (idea from the cryo Attocube work, 2026-10-22): first look at dark pulses on a scope via
   Analog_Probe (Probes/Masks tab, Shaper output high gain, persistence on) to see whether 1/2/3 photoelectron levels resolve;
