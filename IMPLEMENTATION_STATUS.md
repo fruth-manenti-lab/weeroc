@@ -39,7 +39,11 @@ CI parity (GitHub checks kept failing): CI installs `.[analysis,dev]` without Py
 in `AGENTS.md`. Result with Python 3.11: unit tests 545 OK (187 skipped), wheel build, installed-package checks and
 the `[analysis]` headless plot pass; the final optional `[gui]` pip install failed twice with a network read error
 while downloading PySide6 (environment, not the repo), so the offscreen GUI steps and Python 3.13 were not run here.
-`gh` is not logged in on this machine, so GitHub's own logs could not be read.
+Confirmed on GitHub afterwards (`gh` now logged in as F7East): every run since 2026-10-20 failed on one error in all four
+jobs, `test_desktop_icon.test_icon_resource_is_a_png` -> `No module named 'radioroc.resources'`, in the
+`check_development.py` step (later steps skipped); last green before that was 2026-09-25. Run 39557712590 (commit
+143d4a8) passed ubuntu-24.04 and macos-14 on Python 3.11 and 3.13 including the offscreen GUI steps. Only a Node.js 20
+deprecation warning for actions/checkout@v4 and setup-python@v5 remains (bump later). `main` stays red until the fix is merged.
 
 Limitations: no dead-time measurement yet; Priority 0 (formal coincidence verification with controlled inputs) still
 open; the Acquisition hold delay still defaults to 530 (wrong for muon runs); guide labels not seen rendered for the
