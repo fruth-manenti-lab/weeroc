@@ -1,5 +1,119 @@
 # Implementation status
 
+## RADIOROC 44 — shared trigger gain and operating threshold
+
+Root cause of the zero-trigger acquisition: scans ran at trigger gain code 1 while Autocalibration and Acquisition ran
+on "Keep current" (chip default 8), so a threshold chosen at gain 1 was far too high at gain 8. Offline-tested only.
+
+- `CalibrationSelection` now also owns `trigger_gain` (1..63, default 1) and `operating_threshold` (0..1023, default
+  540) with change signals and validation, like the hold delay.
+- Calibration bar: Operating threshold and new Trigger gain (paT) spins are bound two-way to the model; row order is
+  threshold, gain, hold delay, Save, Load. Bias (V) and Note moved into a dialog shown by Save calibration… after the
+  file name is chosen (hidden `bias_text`/`note_edit` keep the last values; `save_to` never opens a dialog).
+- Calibration file: optional `trigger_gain_code` (1..63), schema_version still 1; old files load and leave the gain alone.
+- With a shared selection, the trigger gain spin of the Threshold, Autocalibration, Hold scan, S-curve and Acquisition
+  windows (no more "Keep current") and the Acquisition Threshold DAC follow the model both ways. Standalone windows
+  keep "Keep current". Hold scan's own "Set threshold DAC before scan" stays independent.
+- Test change: the "Keep current spinbox is wide enough" test now checks standalone windows and the remaining
+  Keep-current spins, since the embedded gain spins no longer have that text; no size floor was lowered.
+- Limitation: the app still cannot read the chip's gain back, so the gain shown is what scans will write, not a readback.
+
+## RADIOROC 44 — lead summary, hardware findings and guide (2026-10-21)
+
+Session work, all offline-tested (`tools/check_development.py`: 546 tests OK, 18 CLI help checks) except where marked
+hardware. Delegated pieces have their own RADIOROC 44 entries below (shared channel selection and page order,
+acknowledge fault without disconnect, calibration file bar). Lead changes:
+
+- Save/Load calibration bar wired into the Calibration page (above the selection panel), channel grid widened to 16
+  columns so the expanded grid fits at 1024x700, bar status line shown only when there is a message (second row).
+  New **Hold delay (ns)** box on the bar, shared both ways with the Acquisition page's Hold delay (model
+  `CalibrationSelection.hold_delay_ns`, saved as `hold_scan.hold_delay_ns`; loader validates 0..100000).
+  `test_every_page_keeps_a_usable_plot_at_1024x700` floor lowered 150 -> 105 px (two bars above the tabs).
+- New guide `docs/muon_rate_measurement_guide.md` (also mirrored to a Claude doc): connections (IN_TEST1 via 20 dB,
+  IO1 -> generator external trigger input, IO6, HV, edge connector), app walkthrough with per-tab settings tables,
+  analog-probe gain/shaping check (Step 0b), coincidence trigger table, timeout/run-length guidance.
+
+Hardware findings (operator present, user-authorised; read-only status + short acquisitions through
+`scripts/radioroc_acquire.py --execute --skip-fpga-init`, all restored/verified; runs in `radioroc_runs/acquire_*`):
+
+- Board answered (word 100 = 5). Single channels 6 and 32 at threshold 540 each fire about 1 event/s.
+- **Hold delay**: the external-synchro Hold scan (Ctest, IO1 -> generator) peaks near 525 ns, measured from the
+  synchro pulse. Self-triggered muon runs read the pedestal at 525 ns. Coincidence ch6+ch32 (trigger type 1, both
+  sources Individual trigger, window 50 ns, threshold 540), mean HG over 10 events per point: ch6 257/243/237/193/202/163/164/121
+  and ch32 558/636/707/652/637/417/338/265 at hold 10/20/30/40/55/85/100/130 ns; pulses tallest at 20-55 ns. Use ~30 ns.
+- 12 coincident events in 41 s (about 18/min) at hold 70 ns, both channels above pedestal in every event (ch6 HG 129-340,
+  ch32 HG 266-628; pedestals about 90-100). One earlier 3-event run had one event with ch6 at pedestal.
+- Not explained: the app's own coincidence runs (164706, 160106; hold 525, threshold Keep current) produced zero batches
+  in 43 s and 105 s before being cancelled, while the CLI with the same configuration filled a 3-event batch in 20 s.
+- `ConnectionWorker` acknowledge-without-disconnect, trim re-apply from a saved calibration file and the new
+  Calibration-page layout have NOT been run on hardware.
+
+CI parity (GitHub checks kept failing): CI installs `.[analysis,dev]` without PySide6 and non-editable, which
+`.venv-foundation` (PySide6, editable) hides. Reproduced locally with a clean Python 3.11 venv: two errors, both fixed.
+(1) new `tests/test_calibration_file_bar.py` imported PySide6 at module level (now guarded with `find_spec` +
+`skipUnless`); (2) `tests/test_desktop_icon.py` needed `radioroc.resources`, which exists only in an installed package
+(commit cee2ae0, so CI was probably already red before this session); it now falls back to `configs/`. New
+`tools/check_ci_parity.py` repeats the workflow steps in clean venvs; documented in `DEVELOPMENT.md` and made a rule
+in `AGENTS.md`. Result with Python 3.11: unit tests 545 OK (187 skipped), wheel build, installed-package checks and
+the `[analysis]` headless plot pass; the final optional `[gui]` pip install failed twice with a network read error
+while downloading PySide6 (environment, not the repo), so the offscreen GUI steps and Python 3.13 were not run here.
+Confirmed on GitHub afterwards (`gh` now logged in as F7East): every run since 2026-10-20 failed on one error in all four
+jobs, `test_desktop_icon.test_icon_resource_is_a_png` -> `No module named 'radioroc.resources'`, in the
+`check_development.py` step (later steps skipped); last green before that was 2026-09-25. Run 39557712590 (commit
+143d4a8) passed ubuntu-24.04 and macos-14 on Python 3.11 and 3.13 including the offscreen GUI steps. Only a Node.js 20
+deprecation warning for actions/checkout@v4 and setup-python@v5 remains (bump later). `main` stays red until the fix is merged.
+
+Zero-batch app runs explained offline (2026-10-22, no hardware): saved run configs show the user's Threshold scans ran with
+`trigger_preamp_gain` 1 (the guide said so), while Autocalibration and the Acquisition used "Keep current" (chip value 8
+after defaults). A threshold chosen at gain 1 (470-540) is far too high at gain 8, so nothing triggers. The "reproducing"
+CLI runs worked only because `scripts/radioroc_acquire.py` silently defaults to `--threshold-dac 530` and `--pat-gain 1`.
+Guide now fixes trigger gain at 1 in the Threshold scan, Autocalibration and Acquisition ("Trigger gain must match").
+Follow-ups: a shared trigger-gain field on the Calibration bar (like Hold delay) so the three windows cannot disagree;
+the CLI's hidden defaults should be printed or removed; autocalibration must be redone at gain 1.
+
+Limitations: no dead-time measurement yet; Priority 0 (formal coincidence verification with controlled inputs) still
+open; the Acquisition hold delay still defaults to 530 (wrong for muon runs); guide labels not seen rendered for the
+grid Select all/none captions and some Hold-scan field labels.
+
+## RADIOROC 44 — shared channel selection and page order
+
+- New `gui/calibration_selection.py` (model: channels, T1/T2, auto-trigger rule) and
+  `gui/calibration_selection_panel.py` (`CalibrationSelectionPanel` above the Calibration sub-tabs: channel grid,
+  T1/T2 spin boxes, "Choose trigger channels automatically"; editing a trigger box turns auto off).
+- Threshold, Hold scan, S-curve, Autocalibration and Acquisition windows take `selection=None`. With a selection they
+  hide their own channel grid / trigger spin boxes (mirrored from the model, so job configs read the shared values);
+  without one they behave as before. Acquisition shows a read-only "Channels ... (set on the Calibration page)" line.
+  Autocalibration saved-result restore sets the shared selection.
+- Calibration sub-tabs are now Threshold scan, Autocalibration, Hold scan, S-curve. Sidebar/Page menu order is
+  ASIC config. (Ctrl+1), Calibration (Ctrl+2), Acquisition (Ctrl+3). `MainWindow._build_calibration_page` marks where
+  the file bar goes.
+- Tests: `tests/test_calibration_selection.py` (new), `tests/test_main_window.py` updated. Results: tools/check_development.py passes (543 tests, OK).
+- Limitations: saved-result reopen in threshold/hold/S-curve/Acquisition does not carry channels into the selection
+  (those windows never applied them to their controls); layout checked offscreen at 1024x700 only.
+
+## RADIOROC 44 — acknowledge fault without disconnect
+
+- `ConnectionWorker.review_fault` now also works in state `faulted` with the session still open (no job running,
+  nothing pending): it queues one read-only status read (word 100, as Read status). Success clears the fault and
+  returns to `connected`; failure re-latches a fault saying the board is not answering and a power cycle is needed,
+  stays `faulted` with the session open, and does not retry. Idle/error (released session) acknowledge unchanged;
+  `close_failed` still refuses. Scans/refresh/connect stay blocked while a fault is latched, including during the check.
+- Panel: "Acknowledge fault review" enabled for idle/error/faulted when a fault exists and not busy; new hint text.
+- Tests: `tests/test_connection_worker_fault_ack.py`, updated `test_connection_panel.py`; two old assertions that
+  review was refused in `faulted` removed from the worker tests.
+
+## RADIOROC 44 — calibration file bar
+
+- New `gui/calibration_file_bar.py` (`CalibrationFileBar`) and pure `application/calibration_file.py`: Save/Load
+  calibration (JSON, schema_version 1, default folder `radioroc_runs/calibration/`). Saves channels, T1/T2 + auto flag,
+  operating threshold DAC, bias text, note and the trims from the newest completed+verified autocalibration run
+  (the window's last run folder, else newest under `radioroc_runs/hardware`), with that run directory. No trims -> saved
+  without them and the status label says so.
+- Load validates and never writes to the chip. If the file has trims, the board is connected and the operator confirms,
+  trims are re-applied via the existing `ConnectionWorker.apply_channel_config(ChannelConfigOperation(t1|t2_calibration_dac_values))`
+  (read-back verified). Offline tests only (`tests/test_calibration_file*.py`); not yet exercised on the board.
+- Not wired into the Calibration page yet; hold-scan results are not saved (no stored hold-scan result source).
+
 ## RADIOROC 44 — Analog probe in the GUI; probe enable register; 1 mm SiPM fingers
 
 - **Analog probe selector** on ASIC config. -> Probes/Masks: channel + node (off, shaper HG/LG, preamp HG/LG),

@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 
 from radioroc_client import N_CHANNELS, format_channels
 
-_GRID_COLUMNS = 8
+_GRID_COLUMNS = 16
 
 CHECKED_FILL = "#007990"
 CHECKED_BORDER = "#024167"

@@ -54,6 +54,22 @@ propagate explicitly and requests are not automatically resent. Threshold dry-ru
 the serial port. Offline checks run help, pure functions and recorded/synthetic
 data only. Migrate those commands in their own workflow slices.
 
+## Merging PRs without conflicts
+
+`main` received PR #3 as a squash commit, so the branch's own 63 commits looked unrelated to `main` and the next PR
+reported "can't merge automatically" although the files were identical. Prefer **Create a merge commit** (or rebase)
+when merging a long-lived branch such as `lab/newest-app-test`. If you do squash, delete the branch afterwards and start
+the next one from `main`. If the conflict appears anyway, check `git diff <last-merged-commit> origin/main`: when empty,
+`git merge -s ours origin/main` joins the histories without touching files (done on 2026-10-22).
+
+## CI parity
+
+`python tools/check_ci_parity.py` repeats the steps of `.github/workflows/python.yml` in clean
+temporary environments (no PySide6 for the unit-test step, a non-editable install, wheel build,
+wheel check, then the optional offscreen GUI steps). It needs network access and takes a few
+minutes; run it with Python 3.11 and 3.13 before pushing a branch that will become a PR. The
+everyday `.venv-foundation` has PySide6 and an editable install, so it hides these failures.
+
 ## Build and verify an installed artifact
 
 ```bash

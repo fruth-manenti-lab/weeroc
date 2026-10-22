@@ -269,7 +269,8 @@ class ConnectionPanel(QWidget):
             commands_available and state in {"connected", "close_failed", "faulted"})
         self.disconnect_button.setText("Retry close" if state == "close_failed" else "Disconnect")
         self.review_fault_button.setEnabled(
-            commands_available and not busy and bool(fault) and state in {"idle", "error"})
+            commands_available and not busy and bool(fault)
+            and state in {"idle", "error", "faulted"})
 
     def mode_locked(self):
         """Whether the connection alone makes it unsafe to switch device mode.
@@ -297,4 +298,4 @@ class ConnectionPanel(QWidget):
         hint_bar.attach(self.read_status_button, "Read the board's current firmware/"
                         "connection status.")
         hint_bar.attach(self.disconnect_button, "Close the current hardware connection.")
-        hint_bar.attach(self.review_fault_button, "Show details of the last connection fault.")
+        hint_bar.attach(self.review_fault_button, "Clear the fault and re-check the board without disconnecting.")

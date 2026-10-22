@@ -2,11 +2,18 @@
 
 import unittest
 from importlib.resources import files
+from pathlib import Path
 
 
 class DesktopIconTests(unittest.TestCase):
     def test_icon_resource_is_a_png(self):
-        data = (files("radioroc.resources") / "radioroc_icon.png").read_bytes()
+        try:
+            icon = files("radioroc.resources") / "radioroc_icon.png"
+        except ModuleNotFoundError:
+            # Running from a source checkout: the package-data mapping
+            # radioroc.resources -> configs/ exists only in an installed package.
+            icon = Path(__file__).resolve().parents[1] / "configs" / "radioroc_icon.png"
+        data = icon.read_bytes()
         self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
 
     def test_gui_sets_the_window_icon_without_error(self):

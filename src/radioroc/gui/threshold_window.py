@@ -53,7 +53,7 @@ class ThresholdWindow(QMainWindow):
                         "configuring"}
     _CONNECTION_LOCKS_MODE = _CONNECTION_BUSY | {"connected", "close_failed", "faulted"}
 
-    def __init__(self, *, worker_factory=ThresholdWorker,
+    def __init__(self, *, selection=None, worker_factory=ThresholdWorker,
                  connection_worker_factory=ConnectionWorker, connection_worker=None):
         super().__init__()
         self.setWindowTitle("RADIOROC · Threshold workflow")
@@ -241,6 +241,15 @@ class ThresholdWindow(QMainWindow):
             "working threshold. Hover a control to see what it does.")
         self.hint.attach(self.mode, "Simulation previews a synthetic curve with no "
                           "board attached; Hardware connection runs on the real ASIC/FPGA.")
+        # Shared Calibration-page selection: hide this window's own channel grid
+        # (and trigger spin boxes) and mirror the model into them.
+        self.shared_selection = selection
+        if selection is not None:
+            from radioroc.gui.calibration_selection import bind_trigger_gain
+            bind_trigger_gain(self.gain, selection)
+            from radioroc.gui.calibration_selection_panel import bind_shared_selection
+            self._sync_shared_selection = bind_shared_selection(
+                selection, form, self.channel_select)
         self.hint.attach(self.channel_select.toggle_button,
                          "Channels to scan and plot. Click to choose which channels.")
         self.hint.attach(self.channel_select.select_all_button, "Select every channel.")

@@ -20,6 +20,9 @@ from PySide6.QtWidgets import (
 
 from .acquisition_window import AcquisitionWindow
 from .autocalibration_window import AutocalibrationWindow
+from .calibration_file_bar import CalibrationFileBar
+from .calibration_selection import CalibrationSelection
+from .calibration_selection_panel import CalibrationSelectionPanel
 from .channel_config_panel import ChannelConfigPanel
 from .connection_panel import ConnectionPanel
 from .hint_bar import HintBar
@@ -54,6 +57,9 @@ def _scrollable(widget):
     scroll.setWidget(widget)
     scroll.setWidgetResizable(True)
     return scroll
+
+
+_PAGE_LABELS = ("ASIC config.", "Calibration", "Acquisition")
 
 
 class MainWindow(QMainWindow):
@@ -100,17 +106,17 @@ class MainWindow(QMainWindow):
             QListWidget::item {{ padding: 14px 10px; }}
             QListWidget::item:selected {{ background: {_SIDEBAR_SELECTED}; }}
         """)
-        for label in ("ASIC config.", "Acquisition", "Calibration"):
+        for label in _PAGE_LABELS:
             QListWidgetItem(label, self.sidebar)
         self.sidebar.setFocusPolicy(Qt.StrongFocus)
         self.sidebar.setAccessibleName("Page navigation")
         self.sidebar.setAccessibleDescription(
-            "Pages: ASIC config., Acquisition, Calibration. Also in the Page menu (Ctrl+1, Ctrl+2, Ctrl+3).")
+            "Pages: ASIC config., Calibration, Acquisition. Also in the Page menu (Ctrl+1, Ctrl+2, Ctrl+3).")
         # The sidebar's rows are not exposed to macOS accessibility tools, so the same
         # three pages are also in a real menu (accessible, and with keyboard shortcuts).
         page_menu = self.menuBar().addMenu("Page")
         self.page_actions = []
-        for row, label in enumerate(("ASIC config.", "Acquisition", "Calibration")):
+        for row, label in enumerate(_PAGE_LABELS):
             action = page_menu.addAction(label)
             action.setShortcut(QKeySequence(f"Ctrl+{row + 1}"))
             action.triggered.connect(lambda _checked=False, r=row: self.sidebar.setCurrentRow(r))
@@ -201,31 +207,23 @@ class MainWindow(QMainWindow):
         self.probes_masks_panel.attach_hints(self.hint)
         self.raw_register_panel.attach_hints(self.hint)
 
-        # -- Acquisition: its own top-level sidebar page, ahead of
+        # -- Calibration: one shared channel selection above the scan workflows
+        # (sub-tabs). Sidebar order is ASIC config., Calibration, Acquisition. ----
+        self.calibration_selection = CalibrationSelection((4, 5), parent=self)
+        self.calibration_selection_panel = CalibrationSelectionPanel(self.calibration_selection)
+        self.calibration_selection_panel.attach_hints(self.hint)
+        calibration_page = self._build_calibration_page()
+        self.pages.addWidget(calibration_page)
+
+        # -- Acquisition: its own top-level sidebar page, after
         # Calibration in the sidebar -- collecting data is a distinct phase
         # from calibrating, not one more Calibration sub-tab. -----------------
         acquisition_page = QWidget()
         acquisition_layout = QVBoxLayout(acquisition_page)
         acquisition_layout.setContentsMargins(0, 0, 0, 0)
-        self.acquisition_window = AcquisitionWindow(connection_worker=worker)
+        self.acquisition_window = AcquisitionWindow(selection=self.calibration_selection, connection_worker=worker)
         acquisition_layout.addWidget(self.acquisition_window)
         self.pages.addWidget(acquisition_page)
-
-        # -- Calibration: the remaining scan workflows as sub-tabs -----------
-        calibration_page = QWidget()
-        calibration_layout = QVBoxLayout(calibration_page)
-        calibration_layout.setContentsMargins(0, 0, 0, 0)
-        self.calibration_tabs = QTabWidget()
-        calibration_layout.addWidget(self.calibration_tabs)
-        self.threshold_window = ThresholdWindow(connection_worker=worker)
-        self.hold_scan_window = HoldScanWindow(connection_worker=worker)
-        self.scurve_window = ScurveWindow(connection_worker=worker)
-        self.autocalibration_window = AutocalibrationWindow(connection_worker=worker)
-        self.calibration_tabs.addTab(self.threshold_window, "Threshold scan")
-        self.calibration_tabs.addTab(self.hold_scan_window, "Hold scan")
-        self.calibration_tabs.addTab(self.scurve_window, "S-curve")
-        self.calibration_tabs.addTab(self.autocalibration_window, "Autocalibration")
-        self.pages.addWidget(calibration_page)
 
         # An injected connection_worker means each scan window's own
         # ConnectionPanel-owning code path (which self-wires this on the
@@ -265,6 +263,29 @@ class MainWindow(QMainWindow):
         self._finish_timer = QTimer(self)
         self._finish_timer.setInterval(150)
         self._finish_timer.timeout.connect(self._finish_close_if_idle)
+
+    def _build_calibration_page(self):
+        page = QWidget()
+        self.calibration_layout = QVBoxLayout(page)
+        self.calibration_layout.setContentsMargins(0, 0, 0, 0)
+        self.calibration_layout.setSpacing(2)
+        self.calibration_layout.addWidget(self.calibration_selection_panel)
+        self.calibration_tabs = QTabWidget()
+        self.calibration_layout.addWidget(self.calibration_tabs, 1)
+        worker = self.connection_panel.ensure_worker()
+        sel = self.calibration_selection
+        self.threshold_window = ThresholdWindow(selection=sel, connection_worker=worker)
+        self.autocalibration_window = AutocalibrationWindow(selection=sel, connection_worker=worker)
+        self.hold_scan_window = HoldScanWindow(selection=sel, connection_worker=worker)
+        self.scurve_window = ScurveWindow(selection=sel, connection_worker=worker)
+        self.calibration_tabs.addTab(self.threshold_window, "Threshold scan")
+        self.calibration_tabs.addTab(self.autocalibration_window, "Autocalibration")
+        self.calibration_tabs.addTab(self.hold_scan_window, "Hold scan")
+        self.calibration_tabs.addTab(self.scurve_window, "S-curve")
+        self.calibration_file_bar = CalibrationFileBar(
+            sel, worker, autocalibration_window=self.autocalibration_window)
+        self.calibration_layout.insertWidget(0, self.calibration_file_bar)
+        return page
 
     @staticmethod
     def _default_worker_factory():

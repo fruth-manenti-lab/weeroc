@@ -138,8 +138,22 @@ class ConnectionPanelTests(unittest.TestCase):
             snapshot=lambda: SimpleNamespace(state="faulted", fault="restore mismatch"))
         panel.update_controls(commands_available=True)
         self.assertFalse(panel.refresh_button.isEnabled())
-        # "faulted" is a session state, not {idle, error}: review isn't offered yet.
+        # Faulted with the session open: acknowledge is offered (no disconnect needed).
+        self.assertTrue(panel.review_fault_button.isEnabled())
+        panel.update_controls(commands_available=False)
         self.assertFalse(panel.review_fault_button.isEnabled())
+        for busy in ("reading", "disconnecting"):
+            panel.connection_worker = SimpleNamespace(
+                snapshot=lambda busy=busy: SimpleNamespace(state=busy, fault="restore mismatch"))
+            panel.update_controls(commands_available=True)
+            self.assertFalse(panel.review_fault_button.isEnabled())
+        panel.connection_worker = SimpleNamespace(
+            snapshot=lambda: SimpleNamespace(state="connected", fault=None))
+        panel.update_controls(commands_available=True)
+        self.assertFalse(panel.review_fault_button.isEnabled())
+        panel.connection_worker = SimpleNamespace(
+            snapshot=lambda: SimpleNamespace(state="faulted", fault="restore mismatch"))
+        panel.update_controls(commands_available=True)
 
         panel.connection_worker = SimpleNamespace(
             snapshot=lambda: SimpleNamespace(state="idle", fault="restore mismatch"))

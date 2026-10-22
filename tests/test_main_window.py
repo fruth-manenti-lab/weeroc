@@ -95,10 +95,14 @@ class MainWindowTests(unittest.TestCase):
         self.assertIs(worker, window.channel_config_panel.connection_worker)
         self.assertIs(worker, window.main_panel.connection_worker)
 
-    def test_autocalibration_window_is_the_fourth_calibration_tab(self):
+    def test_calibration_tab_order(self):
         window = self._make_window()
-        self.assertIs(window.calibration_tabs.widget(3), window.autocalibration_window)
-        self.assertEqual(window.calibration_tabs.tabText(3), "Autocalibration")
+        tabs = window.calibration_tabs
+        self.assertEqual([tabs.tabText(i) for i in range(4)],
+                         ["Threshold scan", "Autocalibration", "Hold scan", "S-curve"])
+        for i, attr in enumerate(("threshold_window", "autocalibration_window",
+                                  "hold_scan_window", "scurve_window")):
+            self.assertIs(tabs.widget(i), getattr(window, attr))
 
     def test_acquisition_is_its_own_sidebar_page_left_of_calibration(self):
         # Acquisition used to be the Calibration tab widget's fifth sub-tab;
@@ -108,9 +112,9 @@ class MainWindowTests(unittest.TestCase):
         window = self._make_window()
         self.assertEqual(window.sidebar.count(), 3)
         self.assertEqual(window.sidebar.item(0).text(), "ASIC config.")
-        self.assertEqual(window.sidebar.item(1).text(), "Acquisition")
-        self.assertEqual(window.sidebar.item(2).text(), "Calibration")
-        self.assertIs(window.pages.widget(1).layout().itemAt(0).widget(), window.acquisition_window)
+        self.assertEqual(window.sidebar.item(1).text(), "Calibration")
+        self.assertEqual(window.sidebar.item(2).text(), "Acquisition")
+        self.assertIs(window.pages.widget(2).layout().itemAt(0).widget(), window.acquisition_window)
         for index in range(window.calibration_tabs.count()):
             self.assertIsNot(window.calibration_tabs.widget(index), window.acquisition_window)
 
@@ -130,10 +134,15 @@ class MainWindowTests(unittest.TestCase):
     def test_page_menu_switches_the_sidebar_page(self):
         window = self._make_window()
         self.assertEqual([a.text() for a in window.page_actions],
-                         ["ASIC config.", "Acquisition", "Calibration"])
+                         ["ASIC config.", "Calibration", "Acquisition"])
+        self.assertEqual([a.shortcut().toString() for a in window.page_actions],
+                         ["Ctrl+1", "Ctrl+2", "Ctrl+3"])
         window.page_actions[2].trigger()
         self.assertEqual(window.sidebar.currentRow(), 2)
-        self.assertEqual(window.pages.currentIndex(), 2)
+        self.assertIs(window.pages.currentWidget().layout().itemAt(0).widget(),
+                      window.acquisition_window)
+        window.page_actions[1].trigger()
+        self.assertIs(window.pages.currentWidget(), window.calibration_tabs.parentWidget())
         window.page_actions[0].trigger()
         self.assertEqual(window.pages.currentIndex(), 0)
 
@@ -464,7 +473,7 @@ class MainWindowTests(unittest.TestCase):
         from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
         window = self._make_window()
         window.show()
-        pages = [(1, None), (2, 0), (2, 1), (2, 2), (2, 3)]
+        pages = [(2, None), (1, 0), (1, 1), (1, 2), (1, 3)]
         for row, tab in pages:
             window.sidebar.setCurrentRow(row)
             if tab is not None:
@@ -476,14 +485,38 @@ class MainWindowTests(unittest.TestCase):
             self.assertTrue(canvases, (row, tab))
             for canvas in canvases:
                 self.assertGreater(canvas.width(), 200, (row, tab))
-                self.assertGreater(canvas.height(), 150, (row, tab))
+                # 150 before the shared channel-selection bar and calibration file bar took ~60 px above the Calibration tabs.
+                self.assertGreater(canvas.height(), 105, (row, tab))
+
+    def test_one_shared_selection_feeds_every_window(self):
+        window = self._make_window()
+        sel = window.calibration_selection
+        self.assertIsNotNone(window.calibration_selection_panel)
+        self.assertEqual(sel.channels(), [4, 5])
+        sel.set_channels([6, 32])
+        for w in (window.threshold_window, window.hold_scan_window, window.scurve_window,
+                  window.autocalibration_window, window.acquisition_window):
+            self.assertIs(w.shared_selection, sel)
+            self.assertEqual(w.channel_select.selected_channels(), [6, 32])
+        self.assertEqual(window.hold_scan_window.trigger_channel.value(), 6)
+        self.assertEqual(window.acquisition_window.trigger_channel_2.value(), 32)
+        calibration_layout = window.pages.widget(1).layout()
+        self.assertIs(calibration_layout.itemAt(calibration_layout.count() - 2).widget(),
+                      window.calibration_selection_panel)
 
     def test_keep_current_spinbox_is_wide_enough_for_its_text(self):
         window = self._make_window()
-        spins = [window.scurve_window.trigger_preamp_gain,
-                 window.autocalibration_window.trigger_preamp_gain,
-                 window.threshold_window.gain,
-                 window.hold_scan_window.trigger_preamp_gain]
+        # The trigger gain spins of the embedded windows are bound to the shared
+        # model (no "Keep current"); check the remaining Keep-current spins here and
+        # the standalone windows' gain spins, which still have it.
+        from radioroc.gui.scurve_window import ScurveWindow
+        from radioroc.gui.threshold_window import ThresholdWindow
+        standalone_scurve, standalone_threshold = ScurveWindow(), ThresholdWindow()
+        spins = [standalone_scurve.trigger_preamp_gain,
+                 standalone_threshold.gain,
+                 window.hold_scan_window.high_gain_code,
+                 window.hold_scan_window.low_gain_code,
+                 window.acquisition_window.high_gain_code]
         for spin in spins:
             text = spin.specialValueText()
             self.assertEqual(text, "Keep current")

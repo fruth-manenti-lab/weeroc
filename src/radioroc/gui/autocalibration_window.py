@@ -49,7 +49,7 @@ def _new_directory():
 
 
 class AutocalibrationWindow(QMainWindow):
-    def __init__(self, *, connection_worker=None):
+    def __init__(self, *, selection=None, connection_worker=None):
         super().__init__()
         self.setWindowTitle("RADIOROC · Autocalibration workflow")
         self.resize(1180, 820)
@@ -217,6 +217,15 @@ class AutocalibrationWindow(QMainWindow):
             "corrects each channel's calibration trim DAC to align them on the mean crossing, "
             "then runs one final scan to verify the alignment. Hover a control to see what it "
             "does.")
+        # Shared Calibration-page selection: hide this window's own channel grid
+        # (and trigger spin boxes) and mirror the model into them.
+        self.shared_selection = selection
+        if selection is not None:
+            from radioroc.gui.calibration_selection import bind_trigger_gain
+            bind_trigger_gain(self.trigger_preamp_gain, selection)
+            from radioroc.gui.calibration_selection_panel import bind_shared_selection
+            self._sync_shared_selection = bind_shared_selection(
+                selection, form, self.channel_select)
         self.hint.attach(self.channel_select.toggle_button,
                          "Channels to calibrate together. Click to choose which channels; "
                           "the first channel is the reference used for the LSB-ratio probe.")
@@ -511,6 +520,12 @@ class AutocalibrationWindow(QMainWindow):
         if path:
             self.open_saved(Path(path))
 
+    def _set_saved_channels(self, channels):
+        if self.shared_selection is not None:
+            self.shared_selection.set_channels(channels)
+        else:
+            self.channel_select.set_channels(channels)
+
     def _apply_saved_operation(self, operation):
         """Populate the controls from a saved manifest's operation (new output dir and
         persistent FPGA init/defaults are deliberately left untouched)."""
@@ -522,12 +537,14 @@ class AutocalibrationWindow(QMainWindow):
                     setter(convert(operation[name]))
                 except (TypeError, ValueError):
                     pass
-        put("channels", self.channel_select.set_channels, lambda v: [int(c) for c in v])
+        put("channels", self._set_saved_channels, lambda v: [int(c) for c in v])
         put("t1", lambda v: self.discriminator.setCurrentIndex(0 if v else 1), bool)
         put("use_mask", self.use_mask.setChecked, bool)
         put("use_ctest", self.use_ctest.setChecked, bool)
         put("trigger_level", self.trigger_level.setChecked, bool)
-        self.trigger_preamp_gain.setValue(int(operation.get("trigger_preamp_gain") or 0))
+        saved_gain = int(operation.get("trigger_preamp_gain") or 0)
+        if saved_gain or self.shared_selection is None:
+            self.trigger_preamp_gain.setValue(saved_gain)
         for name in ("clock_index", "probe_dac_min", "probe_dac_max", "probe_dac_step",
                      "transition_dac_step", "transition_margin", "transition_dac_floor",
                      "transition_dac_cap", "final_window_before", "final_window_after",

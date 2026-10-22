@@ -399,14 +399,46 @@ class ConnectionWorker:
             self._acquisition_token.cancel()
 
     def review_fault(self):
-        """Clear a visible fault after the session has been released."""
+        """Acknowledge a visible fault.
+
+        Released session (idle/error): just clear it.  Faulted with the session
+        still open: queue one read-only status read; the fault is cleared only
+        if the board answers, otherwise it stays latched (no automatic retry).
+        """
         with self._lock:
-            if (not self._started or self._pending or self._shutdown_queued
-                    or self._session is not None or self._state not in {"idle", "error"}):
+            if not self._started or self._pending or self._shutdown_queued:
+                raise JobBusyError(f"cannot review_fault while connection is {self._state}")
+            if self._state == "faulted":
+                if self._session is None or self._device is None:
+                    raise JobBusyError("cannot review_fault: the session is not open")
+                if self._fault is None:
+                    raise JobBusyError("there is no connection fault to review")
+                self._pending = True
+                self._state = "reading"
+                self._commands.put(("review_fault", None))
+                return
+            if self._session is not None or self._state not in {"idle", "error"}:
                 raise JobBusyError(f"cannot review_fault while connection is {self._state}")
             if self._fault is None:
                 raise JobBusyError("there is no connection fault to review")
             self._fault = None
+
+    def _review_fault(self):
+        try:
+            status_word = int(self._device.read_word(100), 2)
+        except Exception as exc:
+            message = ("board is not answering after fault acknowledgement "
+                       f"({self._describe(exc)}); power cycle the board, then disconnect "
+                       "and reconnect")
+            with self._lock:
+                self._status_word = None
+                self._fault = message
+            self._publish("faulted", error=message)
+            return
+        with self._lock:
+            self._status_word = status_word
+            self._fault = None
+        self._publish("connected")
 
     def shutdown(self):
         """Request session release then stop; a failed close remains retryable."""
@@ -575,6 +607,8 @@ class ConnectionWorker:
                 self._connect(argument)
             elif command == "read_status":
                 self._read_status()
+            elif command == "review_fault":
+                self._review_fault()
             elif command == "apply_channel_config":
                 self._apply_channel_config(argument)
             elif command == "read_all_registers":
