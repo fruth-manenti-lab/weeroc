@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
+import math
+import re
 from pathlib import Path
 
 SCHEMA_VERSION = 1
@@ -17,6 +19,52 @@ N_CHANNELS = 64
 
 class LayoutError(ValueError):
     """The detector layout is invalid or a layout file cannot be read."""
+
+
+def parse_channel_list(text: str) -> list[int]:
+    """Parse '6', '6, 7, 9-12' or '0-31' into a list of channels in the order written.
+
+    Raises LayoutError naming the problem (unreadable item, descending range, channel outside
+    0..63, channel listed twice). An empty or blank string gives an empty list."""
+    channels: list[int] = []
+    seen: set[int] = set()
+    for token in str(text).split(","):
+        token = token.strip()
+        if not token:
+            continue
+        match = re.fullmatch(r"(\d+)\s*(?:-\s*(\d+))?", token)
+        if match is None:
+            raise LayoutError(f'cannot read "{token}"')
+        first = int(match.group(1))
+        last = first if match.group(2) is None else int(match.group(2))
+        if last < first:
+            raise LayoutError(f'range "{token}" must go upwards')
+        for channel in (first, last):
+            if not 0 <= channel < N_CHANNELS:
+                raise LayoutError(f"channel {channel} is outside 0..{N_CHANNELS - 1}")
+        for channel in range(first, last + 1):
+            if channel in seen:
+                raise LayoutError(f"channel {channel} is listed twice")
+            seen.add(channel)
+            channels.append(channel)
+    return channels
+
+
+def format_channel_list(channels) -> str:
+    """Compact text for a set of channels, e.g. [0, 1, 2, 3, 6] -> '0-3, 6' (the inverse of parse_channel_list)."""
+    values = sorted(set(channels))
+    parts = []
+    i = 0
+    while i < len(values):
+        j = i
+        while j + 1 < len(values) and values[j + 1] == values[j] + 1:
+            j += 1
+        if j - i >= 1:
+            parts.append(f"{values[i]}-{values[j]}")
+        else:
+            parts.append(str(values[i]))
+        i = j + 1
+    return ", ".join(parts)
 
 
 @dataclass(frozen=True)
@@ -137,6 +185,40 @@ class DetectorLayout:
                     p.width_mm if plint_width_mm is None else float(plint_width_mm),
                     p.length_mm if plint_length_mm is None else float(plint_length_mm),
                     p.thickness_mm if plint_thickness_mm is None else float(plint_thickness_mm)))
+        layout.validate()
+        return layout
+
+    @classmethod
+    def from_channel_lists(cls, layer_channels: dict, columns: int, pitch_mm: float = 10.0,
+                           layer_spacing_mm: float = 100.0, sipm_size_mm: float = 6.0,
+                           name: str = "channels") -> "DetectorLayout":
+        """Layers defined by board channel lists. Each layer's channels (in the order given) fill
+        rows of ``columns`` SiPMs (clipped to the channel count), row-major from the bottom-left,
+        the block centred on (0, 0) like grid()."""
+        if not isinstance(columns, int) or columns < 1:
+            raise LayoutError("columns must be a whole number of at least 1")
+        sipms = []
+        used: dict[int, int] = {}
+        for layer in sorted(layer_channels):
+            if layer not in (0, 1):
+                raise LayoutError(f"layer {layer!r} must be 0 or 1")
+            channels = list(layer_channels[layer])
+            for channel in channels:
+                if channel in used:
+                    where = "twice in layer %d" % layer if used[channel] == layer else f"in layers {used[channel]} and {layer}"
+                    raise LayoutError(f"channel {channel} is listed {where}")
+                used[channel] = layer
+            if not channels:
+                continue
+            cols = min(columns, len(channels))
+            rows = math.ceil(len(channels) / cols)
+            for i, channel in enumerate(channels):
+                r, c = divmod(i, cols)
+                sipms.append(SiPMPlacement(channel, layer, (c - (cols - 1) / 2) * pitch_mm,
+                                           (r - (rows - 1) / 2) * pitch_mm))
+        if not sipms:
+            raise LayoutError("no channels given")
+        layout = cls(sipms, layer_spacing_mm, sipm_size_mm, name)
         layout.validate()
         return layout
 

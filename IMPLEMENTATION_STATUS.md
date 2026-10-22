@@ -23,6 +23,16 @@ SiPM layers (two panels, 1 mm scale auto-fitted) with event replay. It never ope
   manually. Channel numbers in the layout must match the board channels. Events carry no timestamps, so replay follows
   event order (batch, event). `tests/fixtures/muon_run_ch6_ch32` approximates the 2026-10-21 run (11/12 recognised with
   true pedestals 92/100 at threshold 40, all 12 at 35; the median estimate recognises fewer).
+- Channel lists and SiPM table (user feedback: "which channels are layer 0 / layer 1"): Layout group has `Layer 0 channels` /
+  `Layer 1 channels` fields (e.g. `0-31` / `32-63`, or `6` / `32`; pre-filled from the layout, layer 1 off when Layers = 1)
+  and `Build from channel lists`, which fills each layer row-major with Columns SiPMs per row at the Pitch
+  (`parse_channel_list`, `format_channel_list`, `DetectorLayout.from_channel_lists` in `muon_types.py`; errors such as
+  "channel 70 is outside 0..63" or "channel 6 is listed twice" go to the status label and change nothing; view API
+  `set_channel_lists`, `channel_list_text`). A `SiPMs` table (channel, layer, x, y; editable with validation and revert,
+  selection synchronised with the canvas) replaces guessing; `Add SiPM` opens a dialog (layer, lowest free channel, position
+  = next slot right of the layer's rightmost SiPM by Pitch, or (0, 0)); `add_sipm(layer, channel=None, x_mm=None, y_mm=None)`
+  uses the same defaults (it no longer stacks at the centre). Generate events / Open saved run moved to the start of the
+  replay row; plint table headers read "Centre X/Y (mm)".
 - Tests: `tests/test_muon_view.py` (Qt guarded, skips without PySide6; fake logic plus real-logic tests when available),
   `tests/test_main_window.py` page order and Ctrl+4. Limitation: live board data and a layer-stacked side view are not implemented.
 

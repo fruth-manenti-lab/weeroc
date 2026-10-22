@@ -14,15 +14,16 @@ from pathlib import Path
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
-    QAbstractItemView, QButtonGroup, QCheckBox, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout,
+    QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout,
     QGraphicsItem, QGraphicsLineItem, QGraphicsRectItem, QGraphicsScene, QGraphicsSimpleTextItem,
-    QGraphicsView, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QMenu, QPushButton, QRadioButton,
+    QGraphicsView, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QPushButton, QRadioButton,
     QScrollArea, QSlider, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from radioroc.data import muon_analysis, muon_simulator
 from radioroc.data.muon_types import (
-    N_CHANNELS, DetectorLayout, LayoutError, MuonEvent, PlintSpec, SiPMPlacement,
+    N_CHANNELS, DetectorLayout, LayoutError, MuonEvent, PlintSpec, SiPMPlacement, format_channel_list,
+    parse_channel_list,
 )
 
 _IDLE = (52, 54, 60)
@@ -209,6 +210,70 @@ class ManualPedestalDialog(QDialog):
         super().accept()
 
 
+class AddSipmDialog(QDialog):
+    """Small form for one new SiPM: layer, free channel and position (mm)."""
+
+    def __init__(self, layers, used_channels, position_for_layer, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add SiPM")
+        self._used = set(used_channels)
+        self._position_for_layer = position_for_layer
+        form = QFormLayout(self)
+        self.layer_combo = QComboBox()
+        for layer in layers:
+            self.layer_combo.addItem(f"Layer {layer}", layer)
+        self.layer_combo.setAccessibleName("New SiPM layer")
+        free = [c for c in range(N_CHANNELS) if c not in self._used]
+        self.channel_spin = QSpinBox()
+        self.channel_spin.setRange(0, N_CHANNELS - 1)
+        self.channel_spin.setValue(free[0] if free else 0)
+        self.channel_spin.setAccessibleName("New SiPM channel")
+        self.x_spin = QDoubleSpinBox()
+        self.y_spin = QDoubleSpinBox()
+        for box, name in ((self.x_spin, "New SiPM x"), (self.y_spin, "New SiPM y")):
+            box.setRange(-100000, 100000)
+            box.setDecimals(1)
+            box.setAccessibleName(name)
+        self.message_label = QLabel("")
+        self.message_label.setStyleSheet("color: #e6a23c;")
+        form.addRow("Layer", self.layer_combo)
+        form.addRow("Channel", self.channel_spin)
+        form.addRow("X (mm)", self.x_spin)
+        form.addRow("Y (mm)", self.y_spin)
+        form.addRow(self.message_label)
+        row = QHBoxLayout()
+        ok, cancel = QPushButton("Add"), QPushButton("Cancel")
+        ok.clicked.connect(self.accept)
+        cancel.clicked.connect(self.reject)
+        row.addStretch(1)
+        row.addWidget(ok)
+        row.addWidget(cancel)
+        form.addRow(row)
+        self.layer_combo.currentIndexChanged.connect(lambda _i: self._reset_position())
+        self._reset_position()
+
+    def set_layer(self, layer):
+        index = self.layer_combo.findData(layer)
+        if index >= 0:
+            self.layer_combo.setCurrentIndex(index)
+
+    def _reset_position(self):
+        x, y = self._position_for_layer(self.layer_combo.currentData())
+        self.x_spin.setValue(x)
+        self.y_spin.setValue(y)
+
+    def values(self):
+        """(layer, channel, x_mm, y_mm)."""
+        return (self.layer_combo.currentData(), self.channel_spin.value(), self.x_spin.value(), self.y_spin.value())
+
+    def accept(self):
+        channel = self.channel_spin.value()
+        if channel in self._used:
+            self.message_label.setText(f"Channel {channel} is already used; choose another.")
+            return
+        super().accept()
+
+
 class MuonView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -223,6 +288,8 @@ class MuonView(QWidget):
         self._pedestal_warning = ""
         self._plint_items: list[PlintItem] = []
         self._plint_table_busy = False
+        self._sipm_table_busy = False
+        self._select_busy = False
         self._data_channels: set[int] = set()
         self.current_index = -1
         self._brightness: dict[int, float] = {}
@@ -255,6 +322,7 @@ class MuonView(QWidget):
         self._sync_layout_controls()
         self._rebuild_scene()
         self._fill_plint_table()
+        self._fill_sipm_table()
         self._update_controls()
 
     # ---------------------------------------------------------------- UI --
@@ -302,10 +370,20 @@ class MuonView(QWidget):
         left.addWidget(self.status_label)
 
         # Replay controls under the canvas.
-        self.replay_box = QWidget()
-        rv = QVBoxLayout(self.replay_box)
+        replay_panel = QWidget()
+        rv = QVBoxLayout(replay_panel)
         rv.setContentsMargins(0, 0, 0, 0)
         r1 = QHBoxLayout()
+        r1.setSpacing(4)
+        self.generate_button = self._button("Generate events", "Generate events", "Simulate events for this layout",
+                                            self._generate_clicked)
+        self.open_button = self._button("Open saved run…", "Open saved run", "Load events from an acquisition run folder",
+                                        self._open_clicked)
+        self.open_run_button = self.open_button
+        self.replay_box = QWidget()      # the replay controls proper; disabled without events or while editing
+        rr = QHBoxLayout(self.replay_box)
+        rr.setContentsMargins(0, 0, 0, 0)
+        rr.setSpacing(4)
         self.step_back_button = self._button("Step back", "Step back", "Previous event", lambda: self.step(-1))
         self.play_button = self._button("Play", "Play or pause", "Replay the events automatically", self._toggle_play)
         self.step_button = self._button("Step forward", "Step forward", "Next event", lambda: self.step(1))
@@ -315,20 +393,27 @@ class MuonView(QWidget):
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setAccessibleName("Event index")
         self.slider.valueChanged.connect(self._slider_changed)
-        for w in (self.step_back_button, self.play_button, self.step_button, self.coinc_check):
-            r1.addWidget(w)
-        r1.addWidget(self.slider, 1)
-        r2 = QHBoxLayout()
+        for w in (self.step_back_button, self.play_button, self.step_button):
+            rr.addWidget(w)
+        rr.addStretch(1)
+        r1.addWidget(self.generate_button)
+        r1.addWidget(self.open_button)
+        r1.addWidget(self.replay_box, 1)
+        self.replay_options = QWidget()
+        r2 = QHBoxLayout(self.replay_options)
+        r2.setContentsMargins(0, 0, 0, 0)
         self.speed_spin = self._spin(0.1, 1000, 2.0, "Replay speed", "Events per second", 1, 0.5)
         self.glow_spin = self._spin(10, 20000, 600, "Glow time", "Time constant of the glow decay (ms)", 0, 50)
+        r2.addWidget(self.coinc_check)
         r2.addWidget(QLabel("Speed (events/s)"))
         r2.addWidget(self.speed_spin)
         r2.addWidget(QLabel("Glow time (ms)"))
         r2.addWidget(self.glow_spin)
         r2.addStretch(1)
         rv.addLayout(r1)
-        rv.addLayout(r2)
-        left.addWidget(self.replay_box)
+        rv.addWidget(self.replay_options)
+        rv.addWidget(self.slider)
+        left.addWidget(replay_panel)
         root.addLayout(left, 1)
 
         # Right column: layout / events / detection, scrollable.
@@ -337,48 +422,94 @@ class MuonView(QWidget):
         sv.setContentsMargins(0, 0, 4, 0)
 
         lbox = QGroupBox("Layout")
-        lf = QFormLayout(lbox)
+        lv = QVBoxLayout(lbox)
+        lg = QGridLayout()
         self.layers_spin = self._spin(1, 2, 2, "Layers", "Number of SiPM layers (1 or 2)")
         self.rows_spin = self._spin(1, 64, 4, "Rows", "SiPM rows per layer")
-        self.cols_spin = self._spin(1, 64, 8, "Columns", "SiPM columns per layer")
-        self.pitch_spin = self._spin(1, 200, 10, "Pitch", "Centre-to-centre spacing (mm)", 1, 1)
-        self.spacing_spin = self._spin(1, 5000, 100, "Layer spacing", "Distance between the layers (mm)", 1, 5)
-        self.size_spin = self._spin(1, 100, 6, "SiPM size", "Side of one SiPM (mm)", 1, 0.5)
-        for text, w in (("Layers", self.layers_spin), ("Rows", self.rows_spin), ("Columns", self.cols_spin),
-                        ("Pitch (mm)", self.pitch_spin), ("Layer spacing (mm)", self.spacing_spin),
-                        ("SiPM size (mm)", self.size_spin)):
-            lf.addRow(text, w)
+        self.cols_spin = self._spin(1, 64, 8, "Columns", "SiPM columns per layer (SiPMs per row)")
+        self.pitch_spin = self._spin(1, 200, 10, "Pitch", "Centre-to-centre spacing of SiPMs in a layer (mm)", 1, 1)
+        self.spacing_spin = self._spin(1, 5000, 100, "Layer spacing", "Distance between the two layers (mm)", 1, 5)
+        self.size_spin = self._spin(1, 100, 6, "SiPM size", "Side of one SiPM square (mm)", 1, 0.5)
+        for i, (text, w) in enumerate((("Layers", self.layers_spin), ("Rows", self.rows_spin),
+                                       ("Columns", self.cols_spin), ("Pitch", self.pitch_spin),
+                                       ("Spacing", self.spacing_spin), ("Size", self.size_spin))):
+            lg.addWidget(QLabel(text), i // 2, (i % 2) * 2)
+            lg.addWidget(w, i // 2, (i % 2) * 2 + 1)
+        lv.addLayout(lg)
         self.rebuild_button = self._button("Rebuild grid", "Rebuild grid", "Replace the layout by a regular grid",
                                            self._rebuild_clicked)
-        lf.addRow(self.rebuild_button)
+        lv.addWidget(self.rebuild_button)
+        cf = QFormLayout()
+        self.layer0_edit = QLineEdit()
+        self.layer0_edit.setPlaceholderText("0-31")
+        self.layer0_edit.setAccessibleName("Layer 0 channels")
+        self.layer0_edit.setToolTip("Board channels of layer 0, e.g. 0-31 or 6, 7, 9-12")
+        self.layer1_edit = QLineEdit()
+        self.layer1_edit.setPlaceholderText("32-63")
+        self.layer1_edit.setAccessibleName("Layer 1 channels")
+        self.layer1_edit.setToolTip("Board channels of layer 1 (needs Layers = 2), e.g. 32-63")
+        cf.addRow("Layer 0 channels", self.layer0_edit)
+        cf.addRow("Layer 1 channels", self.layer1_edit)
+        lv.addLayout(cf)
+        self.build_channels_button = self._button(
+            "Build from channel lists", "Build from channel lists",
+            "Lay out each layer's channels in rows of Columns SiPMs at the given Pitch", self._build_channels_clicked)
+        lv.addWidget(self.build_channels_button)
+        self.layers_spin.valueChanged.connect(lambda _v: self._update_channel_fields())
         self.spacing_spin.valueChanged.connect(self._spacing_changed)
         self.size_spin.valueChanged.connect(self._size_changed)
+
+        self.sipm_table = QTableWidget(0, 4)
+        self.sipm_table.setHorizontalHeaderLabels(["Channel", "Layer", "X (mm)", "Y (mm)"])
+        self.sipm_table.verticalHeader().setVisible(False)
+        self.sipm_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.sipm_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.sipm_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.sipm_table.setFixedHeight(150)
+        self.sipm_table.setAccessibleName("SiPMs")
+        self.sipm_table.setToolTip("One row per SiPM. Edit a cell to change its channel, layer or position.")
+        self.sipm_table.itemChanged.connect(self._sipm_cell_changed)
+        self.sipm_table.itemSelectionChanged.connect(self._sipm_table_selection_changed)
+        lv.addWidget(QLabel("SiPMs"))
+        lv.addWidget(self.sipm_table)
+
         self.edit_check = QCheckBox("Edit layout")
         self.edit_check.setAccessibleName("Edit layout")
         self.edit_check.setToolTip("Drag SiPMs with the mouse; replay is disabled while editing")
         self.edit_check.toggled.connect(self._set_edit_mode)
-        lf.addRow(self.edit_check)
-        self.add_button = self._button("Add SiPM", "Add SiPM", "Add a SiPM with the next free channel", self._add_clicked)
+        lv.addWidget(self.edit_check)
+        self.add_button = self._button("Add SiPM", "Add SiPM", "Add a SiPM: choose layer, channel and position",
+                                       self._add_clicked)
         self.remove_button = self._button("Remove selected", "Remove selected", "Remove the selected SiPMs",
                                           self._remove_clicked)
         self.save_button = self._button("Save layout…", "Save layout", "Save the layout as JSON", self._save_clicked)
         self.load_button = self._button("Load layout…", "Load layout", "Load a layout JSON file", self._load_clicked)
-        for b in (self.add_button, self.remove_button, self.save_button, self.load_button):
-            lf.addRow(b)
+        brow1, brow2 = QHBoxLayout(), QHBoxLayout()
+        for b in (self.add_button, self.remove_button):
+            brow1.addWidget(b)
+        for b in (self.save_button, self.load_button):
+            brow2.addWidget(b)
+        lv.addLayout(brow1)
+        lv.addLayout(brow2)
         sv.addWidget(lbox)
 
         pbox = QGroupBox("Plints")
         pv = QVBoxLayout(pbox)
         self.plint_table = QTableWidget(0, 6)
-        self.plint_table.setHorizontalHeaderLabels(["Layer", "X\n(mm)", "Y\n(mm)", "Width\n(mm)", "Length\n(mm)",
-                                                    "Thickness\n(mm)"])
+        self.plint_table.setHorizontalHeaderLabels(["Layer", "Centre\nX (mm)", "Centre\nY (mm)", "Width\n(mm)",
+                                                    "Length\n(mm)", "Thick.\n(mm)"])
+        for col, tip in ((1, "Centre of the plint in the layer panel, mm, x to the right"),
+                         (2, "Centre of the plint in the layer panel, mm, y upwards"),
+                         (5, "Thickness of the plint (mm)")):
+            self.plint_table.horizontalHeaderItem(col).setToolTip(tip)
         self.plint_table.verticalHeader().setVisible(False)
         self.plint_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.plint_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.plint_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.plint_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.plint_table.horizontalHeader().setMinimumSectionSize(40)
         self.plint_table.setFixedHeight(130)
-        self.plint_table.setMinimumWidth(330)
+        self.plint_table.setMinimumWidth(260)
         self.plint_table.setAccessibleName("Plints")
         self.plint_table.setToolTip("Scintillator bars; x extent = width, y extent = length. Edit a cell to change it.")
         self.plint_table.itemChanged.connect(self._plint_cell_changed)
@@ -387,7 +518,7 @@ class MuonView(QWidget):
         self.add_plint_button = self._button("Add plint", "Add plint", "Add a plint to the table", self._add_plint_clicked)
         self.remove_plint_button = self._button("Remove plint", "Remove plint", "Remove the selected plint",
                                                 self._remove_plint_clicked)
-        self.autofit_button = self._button("Auto-fit to SiPMs", "Auto-fit plints",
+        self.autofit_button = self._button("Auto-fit", "Auto-fit plints",
                                            "Drop the explicit plints; use one plint per layer around the SiPMs",
                                            self.auto_fit_plints)
         for b in (self.add_plint_button, self.remove_plint_button, self.autofit_button):
@@ -403,12 +534,6 @@ class MuonView(QWidget):
         ef.addRow("Number of events", self.n_spin)
         ef.addRow("Seed", self.seed_spin)
         ef.addRow("Muon fraction", self.fraction_spin)
-        self.generate_button = self._button("Generate events", "Generate events", "Simulate events for this layout",
-                                            self._generate_clicked)
-        self.open_button = self._button("Open saved run…", "Open saved run", "Load events from an acquisition run folder",
-                                        self._open_clicked)
-        ef.addRow(self.generate_button)
-        ef.addRow(self.open_button)
         sv.addWidget(ebox)
 
         dbox = QGroupBox("Detection")
@@ -422,8 +547,8 @@ class MuonView(QWidget):
 
         qbox = QGroupBox("Pedestals")
         qv = QVBoxLayout(qbox)
-        self.ped_auto_radio = QRadioButton("Estimate from the loaded events (median)")
-        self.ped_file_radio = QRadioButton("From a pedestal run or file…")
+        self.ped_auto_radio = QRadioButton("Estimate from events (median)")
+        self.ped_file_radio = QRadioButton("From a pedestal run/file…")
         self.ped_manual_radio = QRadioButton("Manual…")
         self._ped_group = QButtonGroup(self)
         for mode, radio in (("auto", self.ped_auto_radio), ("file", self.ped_file_radio),
@@ -502,11 +627,152 @@ class MuonView(QWidget):
         lay = self._layout
         for w in (self.layers_spin, self.spacing_spin, self.size_spin):
             w.blockSignals(True)
-        self.layers_spin.setValue(max(1, len(lay.layers())))
+        self.layers_spin.setValue(max(1, len(lay.layers()), 2 if 1 in lay.layers() else 1))
         self.spacing_spin.setValue(lay.layer_spacing_mm)
         self.size_spin.setValue(lay.sipm_size_mm)
         for w in (self.layers_spin, self.spacing_spin, self.size_spin):
             w.blockSignals(False)
+        self._update_channel_fields()
+
+    # ------------------------------------------------- channel lists ------
+    def _update_channel_fields(self):
+        """Pre-fill the channel list fields from the layout; layer 1 only editable with two layers."""
+        for layer, edit in ((0, self.layer0_edit), (1, self.layer1_edit)):
+            edit.setText(format_channel_list(s.channel for s in self._layout.in_layer(layer)))
+        self.layer1_edit.setEnabled(self.layers_spin.value() == 2)
+
+    def channel_list_text(self, layer) -> str:
+        return (self.layer0_edit if layer == 0 else self.layer1_edit).text()
+
+    def set_channel_lists(self, layer0_text, layer1_text):
+        """Parse both lists and rebuild the layout from them (Columns = SiPMs per row, Pitch from the spin boxes).
+        Returns False, with the reason in the status label and the layout unchanged, on any error."""
+        try:
+            lists = {0: parse_channel_list(layer0_text)}
+            if self.layers_spin.value() == 2:
+                lists[1] = parse_channel_list(layer1_text)
+            elif str(layer1_text).strip():
+                raise LayoutError("layer 1 is off: set Layers to 2 to use it")
+            layout = DetectorLayout.from_channel_lists(
+                lists, int(self.cols_spin.value()), float(self.pitch_spin.value()),
+                self._layout.layer_spacing_mm, self._layout.sipm_size_mm, self._layout.name)
+        except LayoutError as exc:
+            self._set_status(f"Cannot build from channel lists: {exc}")
+            return False
+        layout.plints = [p for p in self._layout.plints if p.layer in layout.layers()]
+        self._layout = layout
+        self._sync_layout_controls()
+        self._after_layout_change(structural=True)
+        self._set_status(f"Built {len(layout.sipms)} SiPMs from the channel lists.")
+        return True
+
+    def _build_channels_clicked(self):
+        self.set_channel_lists(self.layer0_edit.text(), self.layer1_edit.text())
+
+    # ------------------------------------------------------ SiPM table -----
+    def _fill_sipm_table(self):
+        selected = set(self._table_channels())
+        self._sipm_table_busy = True
+        try:
+            rows = sorted(self._layout.sipms, key=lambda s: s.channel)
+            self.sipm_table.setRowCount(len(rows))
+            for row, s in enumerate(rows):
+                for col, text in enumerate((str(s.channel), str(s.layer), f"{s.x_mm:g}", f"{s.y_mm:g}")):
+                    item = QTableWidgetItem(text)
+                    item.setTextAlignment(Qt.AlignCenter)
+                    item.setData(Qt.UserRole, s.channel)
+                    self.sipm_table.setItem(row, col, item)
+        finally:
+            self._sipm_table_busy = False
+        self._set_table_selection(selected)
+
+    def _set_table_selection(self, wanted):
+        wanted = set(wanted)
+        previous = self._sipm_table_busy
+        self._sipm_table_busy = True
+        try:
+            self.sipm_table.clearSelection()
+            for row in range(self.sipm_table.rowCount()):
+                if self.sipm_table.item(row, 0).data(Qt.UserRole) in wanted:
+                    for col in range(4):
+                        self.sipm_table.item(row, col).setSelected(True)
+        finally:
+            self._sipm_table_busy = previous
+
+    def _table_channels(self):
+        rows = {i.row() for i in self.sipm_table.selectedItems()}
+        out = []
+        for row in sorted(rows):
+            item = self.sipm_table.item(row, 0)
+            if item is not None:
+                out.append(item.data(Qt.UserRole))
+        return out
+
+    def _scene_channels(self):
+        try:
+            return [i.channel for i in self.scene.selectedItems() if isinstance(i, SipmItem)]
+        except RuntimeError:
+            return []
+
+    def select_channels(self, channels):
+        """Select these SiPMs in the table and (in edit mode, where they are selectable) on the canvas."""
+        wanted = set(channels)
+        self._select_busy = True
+        try:
+            self._set_table_selection(wanted)
+            for ch, item in self._items.items():
+                if item.isSelected() != (ch in wanted) and (ch not in wanted or self._edit_mode):
+                    item.setSelected(ch in wanted)
+        finally:
+            self._select_busy = False
+        self._update_controls()
+
+    def _sipm_table_selection_changed(self):
+        if self._sipm_table_busy or self._select_busy:
+            return
+        self.select_channels(self._table_channels())
+
+    _SIPM_ERROR = "SiPM table: "
+
+    def _sipm_cell_changed(self, item):
+        if self._sipm_table_busy:
+            return
+        channel, col, text = item.data(Qt.UserRole), item.column(), item.text().strip()
+        placement = next((s for s in self._layout.sipms if s.channel == channel), None)
+        if placement is None:
+            return
+        try:
+            if col == 0:
+                value = int(text)
+                if not 0 <= value < N_CHANNELS:
+                    raise ValueError(f"channel {value} is outside 0..{N_CHANNELS - 1}")
+                if value != channel and value in self._layout.channels():
+                    raise ValueError(f"channel {value} is already used")
+                changes = {"channel": value}
+            elif col == 1:
+                value = int(text)
+                if value not in (0, 1):
+                    raise ValueError("layer must be 0 or 1")
+                if not self._layer_allowed(value):
+                    raise ValueError("layer 1 needs Layers = 2")
+                changes = {"layer": value}
+            else:
+                value = float(text)
+                if not math.isfinite(value) or abs(value) > 1e5:
+                    raise ValueError(f"{text!r} is not a usable number of millimetres")
+                changes = {"x_mm" if col == 2 else "y_mm": value}
+        except ValueError as exc:
+            reason = str(exc)
+            if reason.startswith("invalid literal") or reason.startswith("could not convert"):
+                reason = f"{text!r} is not a number"
+            self._set_status(f"{self._SIPM_ERROR}{reason}; value restored.")
+            self._fill_sipm_table()
+            return
+        keep = {changes.get("channel", channel) if ch == channel else ch for ch in self._selected_channels()}
+        self._replace_placement(channel, **changes)
+        self._after_layout_change(structural=True)
+        self.select_channels(keep)
+        self._set_status("")
 
     def rebuild_grid(self, rows, cols, pitch_mm, layers):
         try:
@@ -518,11 +784,12 @@ class MuonView(QWidget):
             self._set_status(f"Cannot build grid: {exc}")
             return False
         self._layout = layout
+        self._sync_layout_controls()
         self._after_layout_change(structural=True)
         self._set_status(f"Grid {rows} x {cols} x {layers} layer(s): {len(layout.sipms)} SiPMs.")
         return True
 
-    def _replace_placement(self, channel, **changes):
+    def _replace_placement(self, channel, /, **changes):
         sipms = self._layout.sipms
         for i, s in enumerate(sipms):
             if s.channel == channel:
@@ -545,24 +812,53 @@ class MuonView(QWidget):
             self._editing_items = self._edit_mode
         self._after_layout_change(structural=False)
 
-    def add_sipm(self, layer=0):
+    def _layer_allowed(self, layer):
+        """Layer 1 is available when Layers = 2 or the layout already has a layer 1."""
+        return layer == 0 or (layer == 1 and (self.layers_spin.value() == 2 or 1 in self._layout.layers()))
+
+    def _free_channels(self):
         used = set(self._layout.channels())
-        free = [c for c in range(N_CHANNELS) if c not in used]
+        return [c for c in range(N_CHANNELS) if c not in used]
+
+    def _default_position(self, layer):
+        """Next free slot: just right of the layer's rightmost SiPM by the current Pitch, or (0, 0) if empty."""
+        same = self._layout.in_layer(layer)
+        if not same:
+            return 0.0, 0.0
+        last = max(same, key=lambda s: (s.x_mm, s.y_mm))
+        return last.x_mm + float(self.pitch_spin.value()), last.y_mm
+
+    def add_sipm(self, layer=0, channel=None, x_mm=None, y_mm=None):
+        free = self._free_channels()
         if not free:
             self._set_status("All 64 channels are in use.")
             return None
-        if layer not in (0, 1) or (layer == 1 and len(self._layout.layers()) < 2 and self._layout.sipms):
+        if layer not in (0, 1) or not self._layer_allowed(layer):
             layer = 0 if not self._layout.layers() else self._layout.layers()[0]
-        occupied = {(s.x_mm, s.y_mm) for s in self._layout.in_layer(layer)}
-        x = 0.0
-        step = max(1.0, round(self._layout.sipm_size_mm))
-        while (x, 0.0) in occupied and abs(x) < self._panel_half:
-            x += step
-        channel = free[0]
-        self._layout.sipms.append(SiPMPlacement(channel, layer, x, 0.0))
+        if channel is None:
+            channel = free[0]
+        elif channel not in free:
+            self._set_status(f"Channel {channel} is not free (use 0..{N_CHANNELS - 1} once).")
+            return None
+        dx, dy = self._default_position(layer)
+        x = dx if x_mm is None else float(x_mm)
+        y = dy if y_mm is None else float(y_mm)
+        self._layout.sipms.append(SiPMPlacement(int(channel), layer, x, y))
+        try:
+            self._layout.validate()
+        except LayoutError as exc:
+            self._layout.sipms.pop()
+            self._set_status(f"Cannot add SiPM: {exc}")
+            return None
         self._after_layout_change(structural=True)
         self._set_status(f"Added SiPM channel {channel} to layer {layer}.")
         return channel
+
+    def add_sipm_dialog(self, layer=0):
+        layers = [0, 1] if self._layer_allowed(1) else [0]
+        dialog = AddSipmDialog(layers, self._layout.channels(), self._default_position, self)
+        dialog.set_layer(layer if layer in layers else 0)
+        return dialog
 
     def remove_sipm(self, channel):
         before = len(self._layout.sipms)
@@ -717,10 +1013,15 @@ class MuonView(QWidget):
         self._fill_plint_table()
 
     def _after_layout_change(self, structural):
+        keep = set(self._selected_channels()) & set(self._layout.channels())
         self._reanalyse(refresh=False)
         if structural:
             self._rebuild_scene()
             self._fill_plint_table()
+            self._update_channel_fields()
+        self._fill_sipm_table()
+        if keep:
+            self.select_channels(keep)
         self._update_controls()
         self._refresh_items()
 
@@ -823,16 +1124,20 @@ class MuonView(QWidget):
         self._replace_placement(item.channel, x_mm=float(round(item.pos().x() - cx)),
                                 y_mm=float(-round(item.pos().y())))
         self._reanalyse(refresh=False)
+        self._fill_sipm_table()
         self._refresh_items()
 
     def _selection_changed(self):
+        if not self._select_busy and not self._building:
+            self._select_busy = True
+            try:
+                self._set_table_selection(self._scene_channels())
+            finally:
+                self._select_busy = False
         self._update_controls()
 
     def _selected_channels(self):
-        try:
-            return [i.channel for i in self.scene.selectedItems() if isinstance(i, SipmItem)]
-        except RuntimeError:
-            return []
+        return sorted(set(self._scene_channels()) | set(self._table_channels()))
 
     # -------------------------------------------------------- edit mode --
     def _set_edit_mode(self, on):
@@ -850,6 +1155,8 @@ class MuonView(QWidget):
         editing = self._edit_mode
         has_events = bool(self.events)
         self.replay_box.setEnabled(has_events and not editing)
+        self.replay_options.setEnabled(has_events and not editing)
+        self.slider.setEnabled(has_events and not editing)
         self.generate_button.setEnabled(not editing)
         self.open_button.setEnabled(not editing)
         self.add_button.setEnabled(editing and len(self._layout.sipms) < N_CHANNELS)
@@ -876,7 +1183,9 @@ class MuonView(QWidget):
     def _add_clicked(self):
         selected = self._selected_channels()
         layer = self._layout.placement(selected[0]).layer if selected else 0
-        self.add_sipm(layer)
+        dialog = self.add_sipm_dialog(layer)
+        if dialog.exec() == QDialog.Accepted:
+            self.add_sipm(*dialog.values())
 
     def _remove_clicked(self):
         for ch in self._selected_channels():

@@ -3,7 +3,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from radioroc.data.muon_types import DetectorLayout, LayoutError, PlintSpec, SiPMPlacement
+from radioroc.data.muon_types import (
+    DetectorLayout, LayoutError, PlintSpec, SiPMPlacement, format_channel_list, parse_channel_list,
+)
 
 
 class MuonLayoutTests(unittest.TestCase):
@@ -101,6 +103,69 @@ class MuonLayoutTests(unittest.TestCase):
                     PlintSpec(0, 0, 0, 10, 10, -1), PlintSpec(0, float("nan"), 0, 10, 10, 10)):
             with self.assertRaises(LayoutError):
                 DetectorLayout(base, plints=[bad]).validate()
+
+
+class ChannelListTests(unittest.TestCase):
+    def test_parse_good(self):
+        self.assertEqual(parse_channel_list("6"), [6])
+        self.assertEqual(parse_channel_list(" 6, 7 ,9-12 "), [6, 7, 9, 10, 11, 12])
+        self.assertEqual(parse_channel_list("0-31"), list(range(32)))
+        self.assertEqual(parse_channel_list("5 - 7"), [5, 6, 7])
+        self.assertEqual(parse_channel_list(""), [])
+        self.assertEqual(parse_channel_list("  "), [])
+        self.assertEqual(parse_channel_list("63"), [63])
+
+    def test_parse_bad(self):
+        cases = {"70": "channel 70 is outside 0..63", "60-64": "channel 64 is outside 0..63",
+                 "6, 6": "channel 6 is listed twice", "0-3, 2": "channel 2 is listed twice",
+                 "x-y": 'cannot read "x-y"', "1,a": 'cannot read "a"', "-3": 'cannot read "-3"',
+                 "9-5": 'range "9-5" must go upwards', "1.5": 'cannot read "1.5"'}
+        for text, message in cases.items():
+            with self.subTest(text=text), self.assertRaises(LayoutError) as ctx:
+                parse_channel_list(text)
+            self.assertIn(message, str(ctx.exception))
+
+    def test_format_round_trip(self):
+        self.assertEqual(format_channel_list([0, 1, 2, 3, 6, 8, 9]), "0-3, 6, 8-9")
+        self.assertEqual(format_channel_list(range(32)), "0-31")
+        self.assertEqual(format_channel_list([]), "")
+        for text in ("0-31", "6", "6, 8-9"):
+            self.assertEqual(format_channel_list(parse_channel_list(text)), text)
+
+    def test_from_channel_lists_grid_and_centering(self):
+        layout = DetectorLayout.from_channel_lists({0: list(range(32)), 1: list(range(32, 64))}, 8, 10.0)
+        self.assertEqual(len(layout.sipms), 64)
+        self.assertEqual(layout.layers(), [0, 1])
+        self.assertEqual(layout.channels(), list(range(64)))
+        first, last = layout.placement(0), layout.placement(31)
+        self.assertEqual((first.x_mm, first.y_mm), (-35.0, -15.0))
+        self.assertEqual((last.x_mm, last.y_mm), (35.0, 15.0))
+        self.assertEqual(layout.placement(32).layer, 1)
+        ref = DetectorLayout.grid(4, 8, 10.0, layers=2)
+        self.assertEqual(sorted((s.channel, s.layer, s.x_mm, s.y_mm) for s in layout.sipms),
+                         sorted((s.channel, s.layer, s.x_mm, s.y_mm) for s in ref.sipms))
+
+    def test_from_channel_lists_clips_columns_and_partial_rows(self):
+        single = DetectorLayout.from_channel_lists({0: [6], 1: [32]}, 8, 10.0)
+        self.assertEqual([(s.channel, s.layer, s.x_mm, s.y_mm) for s in single.sipms],
+                         [(6, 0, 0.0, 0.0), (32, 1, 0.0, 0.0)])
+        column = DetectorLayout.from_channel_lists({0: [1, 2, 3]}, 1, 10.0)
+        self.assertEqual([(s.x_mm, s.y_mm) for s in column.sipms], [(0.0, -10.0), (0.0, 0.0), (0.0, 10.0)])
+        partial = DetectorLayout.from_channel_lists({0: [1, 2, 3]}, 2, 10.0)
+        self.assertEqual([(s.x_mm, s.y_mm) for s in partial.sipms], [(-5.0, -5.0), (5.0, -5.0), (-5.0, 5.0)])
+
+    def test_from_channel_lists_errors(self):
+        with self.assertRaises(LayoutError) as ctx:
+            DetectorLayout.from_channel_lists({0: [1, 2], 1: [2, 3]}, 2, 10.0)
+        self.assertIn("channel 2", str(ctx.exception))
+        with self.assertRaises(LayoutError):
+            DetectorLayout.from_channel_lists({0: [1, 1]}, 2, 10.0)
+        with self.assertRaises(LayoutError):
+            DetectorLayout.from_channel_lists({0: [], 1: []}, 2, 10.0)
+        with self.assertRaises(LayoutError):
+            DetectorLayout.from_channel_lists({0: [1]}, 0, 10.0)
+        with self.assertRaises(LayoutError):
+            DetectorLayout.from_channel_lists({2: [1]}, 1, 10.0)
 
 
 if __name__ == "__main__":
