@@ -130,6 +130,59 @@ class MuonViewTests(unittest.TestCase):
         p = v.layout.placement(40)
         self.assertEqual((p.x_mm, p.y_mm), (4.0, 10.0))
 
+    def test_plints_auto_explicit_and_table(self):
+        v = self.view
+        self.assertFalse(v.plints_are_explicit)
+        self.assertEqual(len(v.plints), 2)
+        self.assertEqual(v.plint_table.rowCount(), 2)
+        self.assertEqual(len(v._plint_items), 2)
+        self.assertEqual((v.plints[0].width_mm, v.plints[0].length_mm), (80.0, 40.0))
+        v.plint_table.item(0, 3).setText("120")          # editing an auto plint makes it explicit
+        self.assertTrue(v.plints_are_explicit)
+        self.assertEqual(len(v.layout.plints), 2)
+        self.assertEqual(v.layout.plints[0].width_mm, 120.0)
+        v.plint_table.item(0, 3).setText("abc")          # bad text is reverted
+        self.assertEqual(v.layout.plints[0].width_mm, 120.0)
+        self.assertEqual(v.plint_table.item(0, 3).text(), "120")
+        v.plint_table.item(0, 4).setText("-5")           # invalid size is rejected
+        self.assertEqual(v.layout.plints[0].length_mm, 40.0)
+        idx = v.add_plint(1, 5, 5, 60, 30, 10)
+        self.assertEqual((idx, len(v.plints), v.plint_table.rowCount()), (2, 3, 3))
+        self.assertTrue(v.set_plint(idx, width_mm=70.0, thickness_mm=20.0))
+        self.assertEqual((v.plints[idx].width_mm, v.plints[idx].thickness_mm), (70.0, 20.0))
+        self.assertTrue(v.remove_plint(idx))
+        v.auto_fit_plints()
+        self.assertFalse(v.plints_are_explicit)
+        self.assertEqual(v.plints[0].width_mm, 80.0)
+
+    def test_big_plints_grow_the_panel_and_save_load(self):
+        v = self.view
+        before = v._panel_half
+        v.set_plint(0, width_mm=400, length_mm=120, thickness_mm=10)   # auto plints become explicit
+        v.set_plint(1, width_mm=300, length_mm=150, thickness_mm=20)
+        self.assertGreaterEqual(v._panel_half, 200.0)
+        self.assertGreater(v._panel_half, before)
+        self.assertGreaterEqual(v._panel_half_y, 75.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "lay.json"
+            self.assertTrue(v.save_layout_to(path))
+            v.auto_fit_plints()
+            self.assertTrue(v.load_layout_from(path))
+        self.assertEqual([(p.layer, p.width_mm) for p in v.layout.plints], [(0, 400.0), (1, 300.0)])
+
+    def test_plint_drag_updates_layout_and_table(self):
+        from PySide6.QtCore import QPointF
+        v = self.view
+        v.edit_mode = True
+        item = v._plint_items[1]
+        cx = v._panel_centre_x(1)
+        item.setPos(QPointF(cx + 3.4, -6.6))
+        self.assertTrue(v.plints_are_explicit)
+        p = v.plints[1]
+        self.assertEqual((p.x_mm, p.y_mm), (3.0, 7.0))
+        self.assertEqual(v.plint_table.item(1, 1).text(), "3")
+        self.assertEqual(v.plint_table.item(1, 2).text(), "7")
+
     def test_edit_mode_disables_replay(self):
         v = self.view
         v.generate_events(10, 1, 0.8)
@@ -296,6 +349,53 @@ class MuonViewRealLogicTests(unittest.TestCase):
         v.step(1)
         self.assertEqual(v.current_index, 1)
 
+    def test_pedestal_sources_on_recorded_run(self):
+        from radioroc.data.muon_types import SiPMPlacement
+        fixture = Path(__file__).parent / "fixtures" / "muon_run_ch6_ch32"
+        v = self.view
+        v.set_layout(DetectorLayout([SiPMPlacement(6, 0, 0, 0), SiPMPlacement(32, 1, 0, 0)]))
+        self.assertTrue(v.load_run(fixture), v.status_label.text())
+        self.assertEqual(v.pedestal_mode, "auto")
+        auto_hits = v.stats()["coincidences"]
+        self.assertLess(auto_hits, 12)
+        self.assertIn("muon signal", v.pedestal_warning)
+        self.assertTrue(v.pedestal_warning_label.isVisibleTo(v))
+        self.assertTrue(v.set_pedestals({6: 92, 32: 100}))
+        self.assertEqual(v.pedestal_mode, "manual")
+        self.assertEqual(v.pedestals, {6: 92.0, 32: 100.0})
+        self.assertEqual(v.pedestal_warning, "")
+        self.assertEqual(v.stats()["coincidences"], 11)      # ch6 of event 9 is 37 counts, under the threshold
+        self.assertIn("ch6 92", v.pedestal_label.text())
+        v.threshold_spin.setValue(35)
+        self.assertEqual(v.stats()["coincidences"], 12)
+        v.set_pedestal_mode("auto")
+        self.assertLess(v.stats()["coincidences"], 12)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ped.json"
+            v.set_pedestals({6: 92, 32: 100})
+            self.assertTrue(v.save_pedestals_to(path))
+            v.set_pedestal_mode("auto")
+            self.assertTrue(v.load_pedestal_source(path))
+            self.assertEqual((v.pedestal_mode, v.pedestals), ("file", {6: 92.0, 32: 100.0}))
+            self.assertFalse(v.load_pedestal_source(Path(tmp) / "missing.json"))
+            self.assertIn("Could not load pedestals", v.status_label.text())
+            self.assertEqual(v.pedestal_mode, "file")
+            self.assertTrue(v.load_pedestal_source(fixture))     # a run folder: median of its events
+            self.assertEqual(v.pedestals[6], 174.0)
+        v.set_pedestals({6: 92})
+        self.assertIn("No pedestal for channel", v.pedestal_warning)
+
+    def test_manual_pedestal_dialog(self):
+        from radioroc.gui.muon_view import ManualPedestalDialog
+        dialog = ManualPedestalDialog([6, 32], {6: 90.0}, self.view)
+        self.assertEqual(dialog.values(), {6: 90.0, 32: dialog.all_spin.value()})
+        dialog.set_all(77)
+        self.assertEqual(dialog.values(), {6: 77.0, 32: 77.0})
+        dialog.table.item(0, 1).setText("x")
+        with self.assertRaises(ValueError):
+            dialog.values()
+        dialog.deleteLater()
+
     def test_load_tiny_run_folder(self):
         v = self.view
         events, _ = muon_simulator.simulate_events(v.layout, 5, seed=2)
@@ -325,6 +425,11 @@ class MuonViewRealLogicTests(unittest.TestCase):
             window.sidebar.setCurrentRow(3)
             window.resize(1024, 700)
             window.show()
+            window.muon_view.rebuild_grid(4, 8, 10.0, 2)
+            window.muon_view.set_plint(0, width_mm=400, length_mm=120, thickness_mm=10)
+            window.muon_view.set_plint(1, width_mm=300, length_mm=150, thickness_mm=20)
+            window.muon_view.add_plint(0, 120, 0, 60, 40, 10)
+            window.muon_view.add_sipm(0)
             window.muon_view.generate_events(100, 1, 0.8)
             window.muon_view.coinc_check.setChecked(True)
             window.muon_view.step(1)

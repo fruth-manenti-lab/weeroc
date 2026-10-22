@@ -14,14 +14,15 @@ from pathlib import Path
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
-    QCheckBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGraphicsItem, QGraphicsLineItem,
-    QGraphicsRectItem, QGraphicsScene, QGraphicsSimpleTextItem, QGraphicsView, QGroupBox,
-    QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea, QSlider, QSpinBox, QVBoxLayout, QWidget,
+    QAbstractItemView, QButtonGroup, QCheckBox, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout,
+    QGraphicsItem, QGraphicsLineItem, QGraphicsRectItem, QGraphicsScene, QGraphicsSimpleTextItem,
+    QGraphicsView, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QMenu, QPushButton, QRadioButton,
+    QScrollArea, QSlider, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from radioroc.data import muon_analysis, muon_simulator
 from radioroc.data.muon_types import (
-    N_CHANNELS, DetectorLayout, LayoutError, MuonEvent, SiPMPlacement,
+    N_CHANNELS, DetectorLayout, LayoutError, MuonEvent, PlintSpec, SiPMPlacement,
 )
 
 _IDLE = (52, 54, 60)
@@ -111,6 +112,103 @@ class SipmItem(QGraphicsRectItem):
             view.move_to_other_layer(self.channel)
 
 
+class PlintItem(QGraphicsRectItem):
+    """One plint (scintillator bar): translucent blue-grey rounded rectangle behind the SiPMs of its panel."""
+
+    def __init__(self, view, index, width_mm, length_mm):
+        super().__init__(-width_mm / 2, -length_mm / 2, width_mm, length_mm)
+        self._view = view
+        self.index = index
+        self.setBrush(QBrush(QColor(110, 140, 175, 70)))
+        pen = QPen(QColor(140, 170, 205, 200), 0.0)
+        pen.setCosmetic(True)
+        self.setPen(pen)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+
+    def paint(self, painter, option, widget=None):
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(self.pen())
+        painter.setBrush(self.brush())
+        radius = min(self.rect().width(), self.rect().height()) * 0.08
+        painter.drawRoundedRect(self.rect(), radius, radius)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionChange and self._view._editing_items:
+            layer = self._view._plint_layer(self.index)
+            cx = self._view._panel_centre_x(layer)
+            x = min(cx + self._view._panel_half, max(cx - self._view._panel_half, round(value.x() - cx) + cx))
+            y = min(self._view._panel_half_y, max(-self._view._panel_half_y, round(value.y())))
+            return QPointF(x, y)
+        if change == QGraphicsItem.ItemPositionHasChanged and self._view._editing_items:
+            self._view._plint_dragged(self)
+        return super().itemChange(change, value)
+
+
+class ManualPedestalDialog(QDialog):
+    """Small table channel -> pedestal value, with a 'Set all to' box."""
+
+    def __init__(self, channels, values, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Manual pedestals (high gain)")
+        self.channels = list(channels)
+        lay = QVBoxLayout(self)
+        top = QHBoxLayout()
+        self.all_spin = QDoubleSpinBox()
+        self.all_spin.setRange(0, 4095)
+        self.all_spin.setDecimals(1)
+        self.all_spin.setValue(float(sorted(values.values())[len(values) // 2]) if values else 100.0)
+        self.all_spin.setAccessibleName("Set all pedestals to")
+        set_all = QPushButton("Set all")
+        set_all.clicked.connect(lambda _c=False: self.set_all(self.all_spin.value()))
+        top.addWidget(QLabel("Set all to"))
+        top.addWidget(self.all_spin)
+        top.addWidget(set_all)
+        lay.addLayout(top)
+        self.table = QTableWidget(len(self.channels), 2)
+        self.table.setHorizontalHeaderLabels(["Channel", "Pedestal (counts)"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        for row, ch in enumerate(self.channels):
+            item = QTableWidgetItem(str(ch))
+            item.setFlags(Qt.ItemIsEnabled)
+            self.table.setItem(row, 0, item)
+            self.table.setItem(row, 1, QTableWidgetItem(f"{values.get(ch, self.all_spin.value()):g}"))
+        lay.addWidget(self.table)
+        row = QHBoxLayout()
+        ok, cancel = QPushButton("OK"), QPushButton("Cancel")
+        ok.clicked.connect(self.accept)
+        cancel.clicked.connect(self.reject)
+        row.addStretch(1)
+        row.addWidget(ok)
+        row.addWidget(cancel)
+        lay.addLayout(row)
+        self.resize(300, 380)
+
+    def set_all(self, value):
+        for row in range(self.table.rowCount()):
+            self.table.item(row, 1).setText(f"{float(value):g}")
+
+    def values(self) -> dict:
+        """Channel -> value; raises ValueError naming the bad channel."""
+        out = {}
+        for row, ch in enumerate(self.channels):
+            try:
+                v = float(self.table.item(row, 1).text())
+            except ValueError:
+                raise ValueError(f"channel {ch}: not a number") from None
+            if not 0 <= v <= 4095:
+                raise ValueError(f"channel {ch}: pedestal must be 0..4095")
+            out[ch] = v
+        return out
+
+    def accept(self):
+        try:
+            self.values()
+        except ValueError:
+            return
+        super().accept()
+
+
 class MuonView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -118,6 +216,13 @@ class MuonView(QWidget):
         self.events: list[MuonEvent] = []
         self.analyses: list = []
         self._pedestals: dict[int, float] = {}
+        self._pedestal_mode = "auto"
+        self._file_pedestals: dict[int, float] = {}
+        self._manual_pedestals: dict[int, float] = {}
+        self._pedestals_from_simulator = False
+        self._pedestal_warning = ""
+        self._plint_items: list[PlintItem] = []
+        self._plint_table_busy = False
         self._data_channels: set[int] = set()
         self.current_index = -1
         self._brightness: dict[int, float] = {}
@@ -149,6 +254,7 @@ class MuonView(QWidget):
         self.timer.start()
         self._sync_layout_controls()
         self._rebuild_scene()
+        self._fill_plint_table()
         self._update_controls()
 
     # ---------------------------------------------------------------- UI --
@@ -261,6 +367,34 @@ class MuonView(QWidget):
             lf.addRow(b)
         sv.addWidget(lbox)
 
+        pbox = QGroupBox("Plints")
+        pv = QVBoxLayout(pbox)
+        self.plint_table = QTableWidget(0, 6)
+        self.plint_table.setHorizontalHeaderLabels(["Layer", "X\n(mm)", "Y\n(mm)", "Width\n(mm)", "Length\n(mm)",
+                                                    "Thickness\n(mm)"])
+        self.plint_table.verticalHeader().setVisible(False)
+        self.plint_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.plint_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.plint_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.plint_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.plint_table.setFixedHeight(130)
+        self.plint_table.setMinimumWidth(330)
+        self.plint_table.setAccessibleName("Plints")
+        self.plint_table.setToolTip("Scintillator bars; x extent = width, y extent = length. Edit a cell to change it.")
+        self.plint_table.itemChanged.connect(self._plint_cell_changed)
+        pv.addWidget(self.plint_table)
+        prow = QHBoxLayout()
+        self.add_plint_button = self._button("Add plint", "Add plint", "Add a plint to the table", self._add_plint_clicked)
+        self.remove_plint_button = self._button("Remove plint", "Remove plint", "Remove the selected plint",
+                                                self._remove_plint_clicked)
+        self.autofit_button = self._button("Auto-fit to SiPMs", "Auto-fit plints",
+                                           "Drop the explicit plints; use one plint per layer around the SiPMs",
+                                           self.auto_fit_plints)
+        for b in (self.add_plint_button, self.remove_plint_button, self.autofit_button):
+            prow.addWidget(b)
+        pv.addLayout(prow)
+        sv.addWidget(pbox)
+
         ebox = QGroupBox("Events")
         ef = QFormLayout(ebox)
         self.n_spin = self._spin(1, 100000, 200, "Number of events", "How many events to simulate")
@@ -281,14 +415,47 @@ class MuonView(QWidget):
         df = QFormLayout(dbox)
         self.threshold_spin = self._spin(0, 100000, 40, "Detection threshold", "Counts above pedestal to count as a hit", 0, 5)
         self.full_scale_spin = self._spin(1, 100000, 400, "Full-scale brightness", "Counts that light a SiPM fully", 0, 50)
-        self.threshold_spin.valueChanged.connect(lambda _v: self._reanalyse())
+        self.threshold_spin.valueChanged.connect(lambda _v: (self._update_pedestal_labels(), self._reanalyse()))
         df.addRow("Threshold (counts)", self.threshold_spin)
         df.addRow("Full scale (counts)", self.full_scale_spin)
+        sv.addWidget(dbox)
+
+        qbox = QGroupBox("Pedestals")
+        qv = QVBoxLayout(qbox)
+        self.ped_auto_radio = QRadioButton("Estimate from the loaded events (median)")
+        self.ped_file_radio = QRadioButton("From a pedestal run or file…")
+        self.ped_manual_radio = QRadioButton("Manual…")
+        self._ped_group = QButtonGroup(self)
+        for mode, radio in (("auto", self.ped_auto_radio), ("file", self.ped_file_radio),
+                            ("manual", self.ped_manual_radio)):
+            self._ped_group.addButton(radio)
+            radio.setAccessibleName(radio.text())
+            radio.clicked.connect(lambda _c=False, m=mode: self._pedestal_radio_clicked(m))
+            qv.addWidget(radio)
+        self.ped_auto_radio.setChecked(True)
+        self.ped_file_button = self._button("Pedestal file…", "Pedestal file", "Choose a pedestal JSON file",
+                                            self._pedestal_file_clicked)
+        self.ped_run_button = self._button("Pedestal run folder…", "Pedestal run folder",
+                                           "Choose a saved acquisition run recorded without muons",
+                                           self._pedestal_run_clicked)
+        self.ped_save_button = self._button("Save pedestals…", "Save pedestals", "Save the effective pedestals as JSON",
+                                            self._save_pedestals_clicked)
+        qrow = QHBoxLayout()
+        qrow.addWidget(self.ped_file_button)
+        qrow.addWidget(self.ped_run_button)
+        qv.addLayout(qrow)
+        qv.addWidget(self.ped_save_button)
         self.pedestal_label = QLabel("Pedestals: no events")
         self.pedestal_label.setWordWrap(True)
         self.pedestal_label.setAccessibleName("Pedestals")
-        df.addRow(self.pedestal_label)
-        sv.addWidget(dbox)
+        self.pedestal_warning_label = QLabel("")
+        self.pedestal_warning_label.setWordWrap(True)
+        self.pedestal_warning_label.setStyleSheet("color: #e6a23c; font-weight: bold;")
+        self.pedestal_warning_label.setAccessibleName("Pedestal warning")
+        self.pedestal_warning_label.setVisible(False)
+        qv.addWidget(self.pedestal_label)
+        qv.addWidget(self.pedestal_warning_label)
+        sv.addWidget(qbox)
         sv.addStretch(1)
 
         scroll = QScrollArea()
@@ -300,7 +467,9 @@ class MuonView(QWidget):
 
     def attach_hints(self, hint):
         for w in (self.rebuild_button, self.edit_check, self.add_button, self.remove_button, self.save_button,
-                  self.load_button, self.generate_button, self.open_button, self.play_button, self.coinc_check,
+                  self.load_button, self.generate_button, self.open_button, self.add_plint_button, self.remove_plint_button,
+                  self.autofit_button, self.ped_file_button, self.ped_run_button, self.ped_save_button,
+                  self.play_button, self.coinc_check,
                   self.threshold_spin, self.full_scale_spin, self.glow_spin, self.speed_spin):
             tip = w.toolTip()
             if tip:
@@ -327,6 +496,7 @@ class MuonView(QWidget):
         self._layout = layout
         self._sync_layout_controls()
         self._after_layout_change(structural=True)
+        self._recompute_pedestals()
 
     def _sync_layout_controls(self):
         lay = self._layout
@@ -343,6 +513,7 @@ class MuonView(QWidget):
             layout = DetectorLayout.grid(rows, cols, pitch_mm, layers=layers,
                                          layer_spacing_mm=self._layout.layer_spacing_mm,
                                          sipm_size_mm=self._layout.sipm_size_mm, name=self._layout.name)
+            layout.plints = [p for p in self._layout.plints if p.layer < layers]
         except (LayoutError, ValueError) as exc:
             self._set_status(f"Cannot build grid: {exc}")
             return False
@@ -407,10 +578,149 @@ class MuonView(QWidget):
         self._replace_placement(channel, layer=1 - current)
         self._after_layout_change(structural=True)
 
+    # ----------------------------------------------------------- plints ---
+    @property
+    def plints(self) -> list[PlintSpec]:
+        """The effective plints: the explicit ones, or the auto plints around the SiPMs."""
+        return self._layout.effective_plints()
+
+    @property
+    def plints_are_explicit(self) -> bool:
+        return bool(self._layout.plints)
+
+    def _make_explicit(self):
+        if not self._layout.plints:
+            self._layout.plints = self._layout.effective_plints()
+
+    def _plint_layer(self, index):
+        plints = self.plints
+        return plints[index].layer if 0 <= index < len(plints) else 0
+
+    def add_plint(self, layer=0, x_mm=0.0, y_mm=0.0, width_mm=100.0, length_mm=50.0, thickness_mm=10.0):
+        spec = PlintSpec(int(layer), float(x_mm), float(y_mm), float(width_mm), float(length_mm), float(thickness_mm))
+        old = list(self._layout.plints)
+        self._make_explicit()
+        self._layout.plints.append(spec)
+        try:
+            self._layout.validate()
+        except LayoutError as exc:
+            self._layout.plints = old
+            self._set_status(f"Cannot add plint: {exc}")
+            return None
+        self._plints_changed()
+        return len(self._layout.plints) - 1
+
+    def remove_plint(self, index):
+        plints = self.plints
+        if not 0 <= index < len(plints):
+            return False
+        self._make_explicit()
+        del self._layout.plints[index]
+        self._plints_changed()
+        return True
+
+    def set_plint(self, index, **fields):
+        plints = self.plints
+        if not 0 <= index < len(plints):
+            raise IndexError(index)
+        unknown = set(fields) - {"layer", "x_mm", "y_mm", "width_mm", "length_mm", "thickness_mm"}
+        if unknown:
+            raise TypeError(f"unknown plint fields {sorted(unknown)}")
+        old = list(self._layout.plints)
+        self._make_explicit()
+        self._layout.plints[index] = replace(self._layout.plints[index], **fields)
+        try:
+            self._layout.validate()
+        except LayoutError as exc:
+            self._layout.plints = old
+            self._set_status(f"Invalid plint value: {exc}")
+            self._fill_plint_table()
+            return False
+        self._plints_changed()
+        return True
+
+    def auto_fit_plints(self):
+        """Clear the explicit plints; the auto plint around each layer's SiPMs is used again."""
+        self._layout.plints = []
+        self._plints_changed()
+        self._set_status("Plints fitted to the SiPMs.")
+
+    def _plints_changed(self):
+        self._rebuild_scene()
+        self._fill_plint_table()
+        self._update_controls()
+        self._refresh_items()
+
+    def _fill_plint_table(self):
+        self._plint_table_busy = True
+        try:
+            explicit = self.plints_are_explicit
+            plints = self.plints
+            self.plint_table.setRowCount(len(plints))
+            for row, p in enumerate(plints):
+                for col, text in enumerate((str(p.layer), f"{p.x_mm:g}", f"{p.y_mm:g}", f"{p.width_mm:g}",
+                                            f"{p.length_mm:g}", f"{p.thickness_mm:g}")):
+                    item = QTableWidgetItem(text)
+                    item.setTextAlignment(Qt.AlignCenter)
+                    if not explicit:
+                        item.setForeground(QBrush(QColor(140, 140, 150)))
+                        font = item.font()
+                        font.setItalic(True)
+                        item.setFont(font)
+                        item.setToolTip("Automatic plint around the SiPMs; edit a cell to make it explicit")
+                    self.plint_table.setItem(row, col, item)
+        finally:
+            self._plint_table_busy = False
+
+    _PLINT_FIELDS = ("layer", "x_mm", "y_mm", "width_mm", "length_mm", "thickness_mm")
+
+    def _plint_cell_changed(self, item):
+        if self._plint_table_busy:
+            return
+        row, col = item.row(), item.column()
+        try:
+            text = item.text().strip()
+            value = int(text) if col == 0 else float(text)
+        except ValueError:
+            self._set_status(f"Plint value {item.text()!r} is not a number.")
+            self._fill_plint_table()
+            return
+        self.set_plint(row, **{self._PLINT_FIELDS[col]: value})
+
+    def _add_plint_clicked(self):
+        row = self.plint_table.currentRow()
+        plints = self.plints
+        layer = plints[row].layer if 0 <= row < len(plints) else (self._layout.layers() or [0])[0]
+        same = [p for p in plints if p.layer == layer]
+        base = same[-1] if same else None
+        if base is None:
+            self.add_plint(layer)
+        else:
+            self.add_plint(layer, base.x_mm, base.y_mm, base.width_mm, base.length_mm, base.thickness_mm)
+
+    def _remove_plint_clicked(self):
+        row = self.plint_table.currentRow()
+        if row < 0:
+            self._set_status("Select a plint row to remove.")
+            return
+        self.remove_plint(row)
+
+    def _plint_dragged(self, item):
+        if self._building or item.index >= len(self.plints):
+            return
+        layer = self._plint_layer(item.index)
+        cx = self._panel_centre_x(layer)
+        self._make_explicit()
+        self._layout.plints[item.index] = replace(self._layout.plints[item.index],
+                                                  x_mm=float(round(item.pos().x() - cx)),
+                                                  y_mm=float(-round(item.pos().y())))
+        self._fill_plint_table()
+
     def _after_layout_change(self, structural):
         self._reanalyse(refresh=False)
         if structural:
             self._rebuild_scene()
+            self._fill_plint_table()
         self._update_controls()
         self._refresh_items()
 
@@ -434,8 +744,11 @@ class MuonView(QWidget):
         lay = self._layout
         self._panel_layers = lay.layers() or [0]
         pad = lay.sipm_size_mm / 2 + 6
+        plints = [p for p in lay.effective_plints() if p.layer in self._panel_layers]
         ext_x = max([abs(s.x_mm) for s in lay.sipms] + [0.0]) + pad
         ext_y = max([abs(s.y_mm) for s in lay.sipms] + [0.0]) + pad
+        ext_x = max([ext_x] + [abs(p.x_mm) + p.width_mm / 2 + 2.0 for p in plints])
+        ext_y = max([ext_y] + [abs(p.y_mm) + p.length_mm / 2 + 2.0 for p in plints])
         self._panel_half = float(max(30.0, math.ceil(ext_x / 5.0) * 5.0))
         self._panel_half_y = float(max(30.0, math.ceil(ext_y / 5.0) * 5.0))
         half, half_y = self._panel_half, self._panel_half_y
@@ -460,6 +773,16 @@ class MuonView(QWidget):
                 c.setZValue(5)
                 c.setVisible(False)
             self._crosses.append((layer, cross))
+        self._plint_items = []
+        for index, p in enumerate(lay.effective_plints()):
+            if p.layer not in self._panel_layers:
+                continue
+            pitem = PlintItem(self, index, p.width_mm, p.length_mm)
+            pitem.setPos(self._panel_centre_x(p.layer) + p.x_mm, -p.y_mm)
+            pitem.setZValue(0)
+            pitem.setToolTip(f"Plint: {p.width_mm:g} x {p.length_mm:g} x {p.thickness_mm:g} mm")
+            self.scene.addItem(pitem)
+            self._plint_items.append(pitem)
         for s in lay.sipms:
             item = SipmItem(self, s.channel, lay.sipm_size_mm)
             item.setPos(self._panel_centre_x(s.layer) + s.x_mm, -s.y_mm)
@@ -488,6 +811,9 @@ class MuonView(QWidget):
             item.setFlag(QGraphicsItem.ItemIsMovable, self._edit_mode)
             item.setFlag(QGraphicsItem.ItemIsSelectable, self._edit_mode)
             item.setCursor(Qt.OpenHandCursor if self._edit_mode else Qt.ArrowCursor)
+        for item in self._plint_items:
+            item.setFlag(QGraphicsItem.ItemIsMovable, self._edit_mode)
+            item.setCursor(Qt.OpenHandCursor if self._edit_mode else Qt.ArrowCursor)
 
     def _item_dragged(self, item):
         if self._building:
@@ -514,6 +840,8 @@ class MuonView(QWidget):
         if on:
             self.pause()
         self._editing_items = self._edit_mode
+        if not on and not self._layout.plints:
+            self._plints_changed()  # automatic plints follow the SiPMs that were moved
         self._apply_edit_flags()
         self._update_controls()
         self._set_status("Edit mode: drag SiPMs to move them (1 mm steps)." if on else "")
@@ -613,11 +941,10 @@ class MuonView(QWidget):
             events = list(muon_analysis.load_events(Path(path)))
             if not events:
                 raise ValueError("the run contains no events")
-            pedestals = muon_analysis.estimate_pedestals(events, gain="hg")
         except Exception as exc:  # noqa: BLE001
             self._set_status(f"Could not open run: {exc}")
             return False
-        self._install_events(events, dict(pedestals))
+        self._install_events(events, None)
         data = {c for e in events for c in e.hg}
         extra = sorted(data - set(self._layout.channels()))
         note = f" Ignored channels not in the layout: {extra}." if extra else ""
@@ -628,27 +955,177 @@ class MuonView(QWidget):
         """Hook for a future live feed: add events to the replay list."""
         self.events.extend(events)
         self._data_channels |= {c for e in events for c in e.hg}
+        self._recompute_pedestals(reanalyse=False)
         self._reanalyse()
 
-    def _install_events(self, events, pedestals):
+    def _install_events(self, events, simulator_pedestals):
+        """Install a new event list. ``simulator_pedestals`` (true values) switches to manual mode with
+        those values; real data keeps a chosen file/manual source, else uses the median estimate."""
         self.pause()
         self.events = events
-        self._pedestals = pedestals
         self._data_channels = {c for e in events for c in e.hg}
+        if simulator_pedestals is not None:
+            self._manual_pedestals = dict(simulator_pedestals)
+            self._pedestals_from_simulator = True
+            self._pedestal_mode = "manual"
+        elif self._pedestals_from_simulator:
+            self._pedestals_from_simulator = False
+            self._pedestal_mode = "auto"
         self._brightness.clear()
         self.current_index = -1
+        self._recompute_pedestals(reanalyse=False)
         self._reanalyse(refresh=False)
-        if pedestals:
-            vals = sorted(pedestals.values())
-            self.pedestal_label.setText(
-                f"Pedestals (HG, {len(vals)} ch): median {vals[len(vals) // 2]:.0f}, range {vals[0]:.0f}..{vals[-1]:.0f}")
-        else:
-            self.pedestal_label.setText("Pedestals: none")
         self._update_controls()
         if events:
             self.show_event(0)
         else:
             self._refresh_items()
+
+    # -------------------------------------------------------- pedestals ----
+    @property
+    def pedestals(self) -> dict[int, float]:
+        """The effective high-gain pedestals used by the analysis."""
+        return dict(self._pedestals)
+
+    @property
+    def pedestal_mode(self) -> str:
+        return self._pedestal_mode
+
+    @property
+    def pedestal_warning(self) -> str:
+        return self._pedestal_warning
+
+    def _recompute_pedestals(self, reanalyse=True):
+        mode = self._pedestal_mode
+        if mode == "file":
+            self._pedestals = dict(self._file_pedestals)
+        elif mode == "manual":
+            self._pedestals = dict(self._manual_pedestals)
+        else:
+            self._pedestals = dict(muon_analysis.estimate_pedestals(self.events, gain="hg")) if self.events else {}
+        for radio, name in ((self.ped_auto_radio, "auto"), (self.ped_file_radio, "file"),
+                            (self.ped_manual_radio, "manual")):
+            radio.setChecked(name == mode)
+        self._update_pedestal_labels()
+        if reanalyse:
+            self._reanalyse()
+
+    def _update_pedestal_labels(self):
+        peds = self._pedestals
+        layout_channels = [c for c in self._layout.channels() if c in peds] or sorted(peds)
+        if not peds:
+            text = "Pedestals: none" if self.events else "Pedestals: no events"
+        elif len(layout_channels) <= 6:
+            text = "Pedestals: " + ", ".join(f"ch{c} {peds[c]:.0f}" for c in layout_channels)
+        else:
+            vals = sorted(peds[c] for c in layout_channels)
+            text = f"Pedestals (HG, {len(vals)} ch): median {vals[len(vals) // 2]:.0f}, range {vals[0]:.0f}..{vals[-1]:.0f}"
+        source = {"auto": "estimate", "file": "file/run", "manual": "simulator" if self._pedestals_from_simulator
+                  else "manual"}[self._pedestal_mode]
+        self.pedestal_label.setText(f"{text} ({source})")
+        warning = ""
+        wanted = [c for c in self._layout.channels() if c in self._data_channels]
+        missing = [c for c in wanted if c not in peds]
+        if self.events and missing and self._pedestal_mode != "auto":
+            warning = f"No pedestal for channel(s) {', '.join(map(str, missing))}: counts are not pedestal-subtracted"
+        elif self.events and self._pedestal_mode == "auto":
+            biased = [c for c in muon_analysis.pedestals_look_biased(
+                self.events, peds, float(self.threshold_spin.value())) if c in wanted]
+            if biased:
+                warning = "Estimate may include muon signal: load a pedestal run or enter values"
+        self._pedestal_warning = warning
+        self.pedestal_warning_label.setText(warning)
+        self.pedestal_warning_label.setVisible(bool(warning))
+
+    def set_pedestal_mode(self, mode):
+        if mode not in ("auto", "file", "manual"):
+            raise ValueError(f"unknown pedestal mode {mode!r}")
+        if mode == "file" and not self._file_pedestals:
+            self._set_status("Choose a pedestal file or run folder first.")
+            self._recompute_pedestals(reanalyse=False)  # restores the radio buttons
+            return False
+        if mode == "manual" and not self._manual_pedestals:
+            self._manual_pedestals = dict(self._pedestals)
+        self._pedestal_mode = mode
+        self._pedestals_from_simulator = self._pedestals_from_simulator and mode == "manual"
+        self._recompute_pedestals()
+        return True
+
+    def set_pedestals(self, pedestals):
+        """Use these pedestals (channel -> counts) manually."""
+        try:
+            clean = {int(c): float(v) for c, v in dict(pedestals).items()}
+        except (TypeError, ValueError) as exc:
+            self._set_status(f"Invalid pedestals: {exc}")
+            return False
+        if any(not math.isfinite(v) for v in clean.values()):
+            self._set_status("Invalid pedestals: values must be finite numbers.")
+            return False
+        self._manual_pedestals = clean
+        self._pedestals_from_simulator = False
+        self._pedestal_mode = "manual"
+        self._recompute_pedestals()
+        return True
+
+    def load_pedestal_source(self, path):
+        try:
+            peds = muon_analysis.load_pedestals(Path(path))
+        except (ValueError, OSError) as exc:
+            self._set_status(f"Could not load pedestals: {exc}")
+            return False
+        self._file_pedestals = dict(peds)
+        self._pedestals_from_simulator = False
+        self._pedestal_mode = "file"
+        self._recompute_pedestals()
+        self._set_status(f"Pedestals loaded from {path} ({len(peds)} channels).")
+        return True
+
+    def save_pedestals_to(self, path):
+        try:
+            saved = muon_analysis.save_pedestals(Path(path), self._pedestals)
+        except (OSError, ValueError) as exc:
+            self._set_status(f"Could not save pedestals: {exc}")
+            return False
+        self._set_status(f"Pedestals saved to {saved}")
+        return True
+
+    def _pedestal_radio_clicked(self, mode):
+        if mode == "manual":
+            self._edit_manual_pedestals()
+        elif mode == "file" and not self._file_pedestals:
+            self._pedestal_file_clicked()
+        else:
+            self.set_pedestal_mode(mode)
+
+    def _pedestal_file_clicked(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Open pedestal file", str(Path.cwd() / "radioroc_runs"),
+                                              "Pedestal file (*.json)")
+        if path:
+            self.load_pedestal_source(path)
+        else:
+            self._recompute_pedestals(reanalyse=False)
+
+    def _pedestal_run_clicked(self):
+        folder = QFileDialog.getExistingDirectory(self, "Open pedestal run folder", str(Path.cwd() / "radioroc_runs"))
+        if folder:
+            self.load_pedestal_source(folder)
+        else:
+            self._recompute_pedestals(reanalyse=False)
+
+    def _edit_manual_pedestals(self):
+        channels = self._layout.channels() or sorted(self._data_channels)
+        start = {**self._pedestals, **self._manual_pedestals} if self._manual_pedestals else dict(self._pedestals)
+        dialog = ManualPedestalDialog(channels, start, self)
+        if dialog.exec() == QDialog.Accepted:
+            self.set_pedestals({**self._manual_pedestals, **dialog.values()})
+        else:
+            self._recompute_pedestals(reanalyse=False)
+
+    def _save_pedestals_clicked(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Save pedestals", str(Path.cwd() / "radioroc_runs" / "pedestals.json"),
+                                              "Pedestal file (*.json)")
+        if path:
+            self.save_pedestals_to(path)
 
     def _reanalyse(self, refresh=True):
         self.analyses = []

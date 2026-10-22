@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 from statistics import median
@@ -56,6 +57,66 @@ def estimate_pedestals(events: list[MuonEvent], *, gain: str = "hg") -> dict[int
         for ch, v in (event.hg if gain == "hg" else event.lg).items():
             values.setdefault(ch, []).append(v)
     return {ch: float(median(v)) for ch, v in sorted(values.items())}
+
+
+def load_pedestals(path, *, gain: str = "hg") -> dict[int, float]:
+    """Pedestals from a JSON file ({"schema_version":1,"gain":"hg","pedestals":{"6":92.0}}) or from a saved
+    acquisition run directory (per-channel median of that run's events). Raises ValueError with a clear text."""
+    path = Path(path)
+    if path.is_dir():
+        try:
+            events = load_events(path)
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"cannot use {path} as a pedestal run: {exc}") from exc
+        return estimate_pedestals(events, gain=gain)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"cannot read pedestal file {path}: {exc}") from exc
+    if not isinstance(data, dict) or data.get("schema_version") != 1 or not isinstance(data.get("pedestals"), dict):
+        raise ValueError(f"{path} is not a pedestal file (schema_version 1 with a 'pedestals' object expected)")
+    if data.get("gain", "hg") != gain:
+        raise ValueError(f"pedestal file is for gain {data.get('gain')!r}, expected {gain!r}")
+    result = {}
+    try:
+        for key, value in data["pedestals"].items():
+            channel, value = int(key), float(value)
+            if not 0 <= channel < 64 or not math.isfinite(value):
+                raise ValueError(key)
+            result[channel] = value
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"pedestal file {path} has an invalid channel or value") from exc
+    if not result:
+        raise ValueError(f"pedestal file {path} contains no pedestals")
+    return dict(sorted(result.items()))
+
+
+def save_pedestals(path, pedestals: dict[int, float], gain: str = "hg") -> Path:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {"schema_version": 1, "gain": gain,
+            "pedestals": {str(int(ch)): float(v) for ch, v in sorted(pedestals.items())}}
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def pedestals_look_biased(events: list[MuonEvent], pedestals: dict[int, float], threshold_counts: float, *,
+                          gain: str = "hg") -> list[int]:
+    """Channels whose pedestal exceeds the 10th percentile of that channel's values by more than
+    threshold_counts (probably a median estimate that contains muon signal). A warning heuristic only."""
+    values: dict[int, list[float]] = {}
+    for event in events:
+        for ch, v in (event.hg if gain == "hg" else event.lg).items():
+            values.setdefault(ch, []).append(v)
+    biased = []
+    for ch, vals in sorted(values.items()):
+        if ch not in pedestals:
+            continue
+        vals.sort()
+        p10 = vals[int(0.1 * (len(vals) - 1))]
+        if pedestals[ch] - p10 > threshold_counts:
+            biased.append(ch)
+    return biased
 
 
 def _pitch(layout: DetectorLayout, layer: int) -> float:

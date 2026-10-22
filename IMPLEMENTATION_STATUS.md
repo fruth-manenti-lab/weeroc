@@ -11,6 +11,18 @@ SiPM layers (two panels, 1 mm scale auto-fitted) with event replay. It never ope
 - Edit layout mode: drag (1 mm snap, inside the panel), Add SiPM, Remove selected, context menu "Move to other layer";
   replay disabled while editing. Grid rebuild, layer spacing, SiPM size, Save/Load layout (errors in the status label).
 - Replay: play/pause, step, speed, coincidences-only, slider; statistics and truth angle for simulated events.
+- Plints (scintillator bars): `PlintSpec` / `DetectorLayout.plints` (optional JSON key `plints`, schema stays 1);
+  without explicit plints one auto plint per layer (SiPM bounding box + 5 mm, 10 mm thick). Right-column Plints table
+  (editing an auto row makes it explicit), Add/Remove/Auto-fit, drawn to scale behind the SiPMs, draggable in Edit mode
+  (1 mm snap). The simulator samples the entry point over layer 0's plint area and keeps tracks crossing a plint of every
+  layer; light sharing is unchanged, so on wide plints most muons land far from the SiPMs (low recognised fraction).
+- Pedestals group: median estimate, pedestal JSON / run folder (`muon_analysis.load_pedestals`), or manual table;
+  `pedestals_look_biased` shows a warning when the median estimate probably contains muon signal; Save pedestals as JSON.
+- Using recorded data: for runs taken with the coincidence trigger every event holds a muon pulse, so the median estimate
+  lands on the pulse height and most coincidences are missed. Take pedestals from a separate pedestal run or enter them
+  manually. Channel numbers in the layout must match the board channels. Events carry no timestamps, so replay follows
+  event order (batch, event). `tests/fixtures/muon_run_ch6_ch32` approximates the 2026-10-21 run (11/12 recognised with
+  true pedestals 92/100 at threshold 40, all 12 at 35; the median estimate recognises fewer).
 - Tests: `tests/test_muon_view.py` (Qt guarded, skips without PySide6; fake logic plus real-logic tests when available),
   `tests/test_main_window.py` page order and Ctrl+4. Limitation: live board data and a layer-stacked side view are not implemented.
 

@@ -5,9 +5,12 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from radioroc.data.muon_analysis import analyse_event, estimate_pedestals, events_from_rows, load_events
+from radioroc.data.muon_analysis import (
+    analyse_event, estimate_pedestals, events_from_rows, load_events, load_pedestals, pedestals_look_biased,
+    save_pedestals,
+)
 from radioroc.data.muon_simulator import simulate_events
-from radioroc.data.muon_types import DetectorLayout, MuonEvent
+from radioroc.data.muon_types import DetectorLayout, MuonEvent, SiPMPlacement
 
 
 def _write_run(directory: Path, rows, channels, batches):
@@ -89,6 +92,8 @@ class AnalysisTests(unittest.TestCase):
             if not e.truth["is_muon"] or not r.coincidence:
                 continue
             for layer, (hx, hy) in e.truth["hit_xy"].items():
+                if abs(hx) > 35.0 or abs(hy) > 15.0:
+                    continue  # plint margin outside the SiPM bounding box: a centroid cannot leave the SiPMs
                 total += 1
                 hit = r.hits[layer]
                 good += math.hypot(hit.x_mm - hx, hit.y_mm - hy) <= 6.0
@@ -137,6 +142,76 @@ class AnalysisTests(unittest.TestCase):
         muon = next(e for e in self.events if e.truth["is_muon"])
         r = analyse_event(muon, self.layout, lg_peds, threshold_counts=10.0, gain="lg")
         self.assertTrue(r.coincidence)
+
+
+FIXTURE = Path(__file__).parent / "fixtures" / "muon_run_ch6_ch32"
+
+
+class PedestalSourceTests(unittest.TestCase):
+    def test_json_round_trip_and_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            path = save_pedestals(tmp / "sub" / "ped.json", {6: 92.0, 32: 100.5})
+            self.assertEqual(load_pedestals(path), {6: 92.0, 32: 100.5})
+            self.assertEqual(json.loads(path.read_text())["gain"], "hg")
+            with self.assertRaisesRegex(ValueError, "cannot read"):
+                load_pedestals(tmp / "missing.json")
+            (tmp / "bad.json").write_text("{nope")
+            with self.assertRaisesRegex(ValueError, "cannot read"):
+                load_pedestals(tmp / "bad.json")
+            (tmp / "schema.json").write_text(json.dumps({"schema_version": 2, "pedestals": {}}))
+            with self.assertRaisesRegex(ValueError, "not a pedestal file"):
+                load_pedestals(tmp / "schema.json")
+            (tmp / "lg.json").write_text(json.dumps({"schema_version": 1, "gain": "lg", "pedestals": {"1": 90}}))
+            with self.assertRaisesRegex(ValueError, "gain"):
+                load_pedestals(tmp / "lg.json")
+            (tmp / "val.json").write_text(json.dumps({"schema_version": 1, "pedestals": {"x": 1}}))
+            with self.assertRaisesRegex(ValueError, "invalid"):
+                load_pedestals(tmp / "val.json")
+            (tmp / "range.json").write_text(json.dumps({"schema_version": 1, "pedestals": {"99": 1}}))
+            with self.assertRaisesRegex(ValueError, "invalid"):
+                load_pedestals(tmp / "range.json")
+            (tmp / "none.json").write_text(json.dumps({"schema_version": 1, "pedestals": {}}))
+            with self.assertRaisesRegex(ValueError, "no pedestals"):
+                load_pedestals(tmp / "none.json")
+
+    def test_pedestal_run_directory(self):
+        rows = [{"batch": 0, "event": e, "channel": c, "hg": 90 + c + e, "lg": 80} for e in range(5) for c in (1, 2)]
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_run(Path(tmp) / "ped", rows, [1, 2], 1)
+            self.assertEqual(load_pedestals(Path(tmp) / "ped"), {1: 93.0, 2: 94.0})
+            _write_run(Path(tmp) / "empty", [], [1], 1)
+            with self.assertRaisesRegex(ValueError, "pedestal run"):
+                load_pedestals(Path(tmp) / "empty")
+            with self.assertRaisesRegex(ValueError, "pedestal run"):
+                load_pedestals(Path(tmp))
+
+    def test_biased_heuristic(self):
+        quiet = [MuonEvent(i, 0, i, {0: 100.0 + i % 3}, {0: 90.0}) for i in range(20)]
+        self.assertEqual(pedestals_look_biased(quiet, estimate_pedestals(quiet), 40.0), [])
+        hot = [MuonEvent(i, 0, i, {0: 250.0 + 10 * (i % 5), 1: 100.0}, {0: 90.0, 1: 90.0}) for i in range(20)]
+        hot += [MuonEvent(20, 0, 20, {0: 100.0, 1: 100.0}, {0: 90.0, 1: 90.0})] * 6
+        self.assertEqual(pedestals_look_biased(hot, estimate_pedestals(hot), 40.0), [0])
+        self.assertEqual(pedestals_look_biased(hot, {1: 100.0}, 40.0), [])
+
+    def test_recorded_coincidence_run(self):
+        # tests/fixtures/muon_run_ch6_ch32 approximates the 2026-10-21 coincidence-trigger run: every event holds a
+        # muon pulse on both channels, so the median of the events sits on the pulse height. No real run
+        # folders are committed.
+        layout = DetectorLayout([SiPMPlacement(6, 0, 0, 0), SiPMPlacement(32, 1, 0, 0)])
+        events = load_events(FIXTURE)
+        self.assertEqual(len(events), 12)
+        true_peds = {6: 92.0, 32: 100.0}
+        good = [analyse_event(e, layout, true_peds, threshold_counts=40.0) for e in events]
+        # ch6 of event 9 is only 129 - 92 = 37 counts, just under the threshold of 40: 11 of 12 at 40, all 12 at 35.
+        self.assertEqual(sum(a.coincidence for a in good), 11)
+        self.assertTrue(all(analyse_event(e, layout, true_peds, threshold_counts=35.0).coincidence for e in events))
+        estimate = estimate_pedestals(events)
+        # ch32 is flagged; ch6 (median 169.5 vs 10th percentile 138) is below the 40-count warning margin.
+        self.assertIn(32, pedestals_look_biased(events, estimate, 40.0))
+        self.assertEqual(pedestals_look_biased(events, true_peds, 40.0), [])
+        biased = [analyse_event(e, layout, estimate, threshold_counts=40.0) for e in events]
+        self.assertLess(sum(a.coincidence for a in biased), 12)
 
 
 if __name__ == "__main__":

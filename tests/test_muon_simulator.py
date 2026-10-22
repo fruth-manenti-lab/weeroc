@@ -2,7 +2,7 @@ import math
 import unittest
 
 from radioroc.data.muon_simulator import simulate_events
-from radioroc.data.muon_types import DetectorLayout
+from radioroc.data.muon_types import DetectorLayout, PlintSpec
 
 
 class MuonSimulatorTests(unittest.TestCase):
@@ -61,6 +61,26 @@ class MuonSimulatorTests(unittest.TestCase):
         for ev in events:
             self.assertEqual(list(ev.truth["hit_xy"]), [0])
             self.assertEqual(len(ev.hg), 32)
+
+    def test_entry_points_follow_plints(self):
+        layout = DetectorLayout.grid(4, 8, 10, layers=2, plint_width_mm=200, plint_length_mm=40)
+        events, _ = simulate_events(layout, 300, seed=7, muon_fraction=1.0)
+        xs = [ev.truth["hit_xy"][0][0] for ev in events]
+        self.assertGreater(max(xs), 60.0)          # beyond the SiPM bounding box (35 mm)
+        self.assertLessEqual(max(abs(x) for x in xs), 100.0)
+        for ev in events:                           # every track crosses a plint of each layer
+            for layer, (x, y) in ev.truth["hit_xy"].items():
+                self.assertLessEqual(abs(x), 100.0 + 1e-9)
+                self.assertLessEqual(abs(y), 20.0 + 1e-9)
+
+    def test_two_plints_in_first_layer(self):
+        layout = DetectorLayout.grid(4, 8, 10, layers=2)
+        layout.plints = [PlintSpec(0, -50, 0, 20, 20, 10), PlintSpec(0, 50, 0, 20, 20, 10),
+                         PlintSpec(1, 0, 0, 200, 40, 10)]
+        events, _ = simulate_events(layout, 200, seed=3, muon_fraction=1.0)
+        starts = [ev.truth["hit_xy"][0][0] for ev in events]
+        self.assertTrue(any(x < -30 for x in starts) and any(x > 30 for x in starts))
+        self.assertTrue(all(abs(abs(x) - 50) <= 10 + 1e-9 for x in starts))
 
     def test_zero_events(self):
         self.assertEqual(simulate_events(self.layout, 0)[0], [])

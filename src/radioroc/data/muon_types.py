@@ -27,12 +27,28 @@ class SiPMPlacement:
     y_mm: float
 
 
+@dataclass(frozen=True)
+class PlintSpec:
+    """A scintillator bar (plint): centre (x, y) within its layer panel; x extent = width, y extent = length."""
+    layer: int
+    x_mm: float
+    y_mm: float
+    width_mm: float
+    length_mm: float
+    thickness_mm: float = 10.0
+
+
+AUTO_PLINT_MARGIN_MM = 5.0
+AUTO_PLINT_THICKNESS_MM = 10.0
+
+
 @dataclass
 class DetectorLayout:
     sipms: list[SiPMPlacement] = field(default_factory=list)
     layer_spacing_mm: float = 100.0
     sipm_size_mm: float = 6.0
     name: str = "layout"
+    plints: list[PlintSpec] = field(default_factory=list)
 
     # -- queries ------------------------------------------------------------
     def channels(self) -> list[int]:
@@ -50,6 +66,19 @@ class DetectorLayout:
                 return s
         raise KeyError(channel)
 
+    def effective_plints(self) -> list[PlintSpec]:
+        """Explicit plints if any, else one auto plint per layer: SiPM bounding box + 5 mm each side."""
+        if self.plints:
+            return list(self.plints)
+        auto = []
+        for layer in self.layers():
+            xs = [s.x_mm for s in self.in_layer(layer)]
+            ys = [s.y_mm for s in self.in_layer(layer)]
+            m = AUTO_PLINT_MARGIN_MM
+            auto.append(PlintSpec(layer, (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2,
+                                  max(xs) - min(xs) + 2 * m, max(ys) - min(ys) + 2 * m, AUTO_PLINT_THICKNESS_MM))
+        return auto
+
     # -- validation ---------------------------------------------------------
     def validate(self) -> None:
         seen = set()
@@ -64,6 +93,15 @@ class DetectorLayout:
             for value in (s.x_mm, s.y_mm):
                 if not isinstance(value, (int, float)) or value != value or abs(value) > 1e5:
                     raise LayoutError(f"position {value!r} is not a usable number of millimetres")
+        for p in self.plints:
+            if p.layer not in (0, 1):
+                raise LayoutError(f"plint layer {p.layer!r} must be 0 or 1")
+            for value in (p.x_mm, p.y_mm):
+                if not isinstance(value, (int, float)) or value != value or abs(value) > 1e5:
+                    raise LayoutError(f"plint position {value!r} is not a usable number of millimetres")
+            for value in (p.width_mm, p.length_mm, p.thickness_mm):
+                if not isinstance(value, (int, float)) or not 0 < value < 1e5:
+                    raise LayoutError(f"plint size {value!r} must be between 0 and 100000 mm")
         if not self.layer_spacing_mm > 0:
             raise LayoutError("layer_spacing_mm must be positive")
         if not self.sipm_size_mm > 0:
@@ -72,8 +110,13 @@ class DetectorLayout:
     # -- construction -------------------------------------------------------
     @classmethod
     def grid(cls, rows: int, cols: int, pitch_mm: float = 10.0, layers: int = 1, first_channel: int = 0,
-             layer_spacing_mm: float = 100.0, sipm_size_mm: float = 6.0, name: str = "grid") -> "DetectorLayout":
-        """A rows x cols grid per layer, centred on (0, 0); channels run on across layers."""
+             layer_spacing_mm: float = 100.0, sipm_size_mm: float = 6.0, name: str = "grid",
+             plint_width_mm: float | None = None, plint_length_mm: float | None = None,
+             plint_thickness_mm: float | None = None) -> "DetectorLayout":
+        """A rows x cols grid per layer, centred on (0, 0); channels run on across layers.
+
+        If any plint size is given, one explicit plint per layer is added, centred on the layer grid
+        (missing sizes default to the auto plint size / 10 mm thickness)."""
         if layers not in (1, 2):
             raise LayoutError("layers must be 1 or 2")
         sipms = []
@@ -86,15 +129,27 @@ class DetectorLayout:
                     sipms.append(SiPMPlacement(channel, layer, x, y))
                     channel += 1
         layout = cls(sipms, layer_spacing_mm, sipm_size_mm, name)
+        if any(v is not None for v in (plint_width_mm, plint_length_mm, plint_thickness_mm)):
+            auto = layout.effective_plints()
+            for p in auto:
+                layout.plints.append(PlintSpec(
+                    p.layer, 0.0, 0.0,
+                    p.width_mm if plint_width_mm is None else float(plint_width_mm),
+                    p.length_mm if plint_length_mm is None else float(plint_length_mm),
+                    p.thickness_mm if plint_thickness_mm is None else float(plint_thickness_mm)))
         layout.validate()
         return layout
 
     # -- json ---------------------------------------------------------------
     def to_dict(self) -> dict:
-        return {"schema_version": SCHEMA_VERSION, "name": self.name,
+        data = {"schema_version": SCHEMA_VERSION, "name": self.name,
                 "layer_spacing_mm": self.layer_spacing_mm, "sipm_size_mm": self.sipm_size_mm,
                 "sipms": [{"channel": s.channel, "layer": s.layer, "x_mm": s.x_mm, "y_mm": s.y_mm}
                           for s in sorted(self.sipms, key=lambda s: s.channel)]}
+        if self.plints:
+            data["plints"] = [{"layer": p.layer, "x_mm": p.x_mm, "y_mm": p.y_mm, "width_mm": p.width_mm,
+                               "length_mm": p.length_mm, "thickness_mm": p.thickness_mm} for p in self.plints]
+        return data
 
     @classmethod
     def from_dict(cls, data) -> "DetectorLayout":
@@ -103,8 +158,11 @@ class DetectorLayout:
         try:
             sipms = [SiPMPlacement(int(s["channel"]), int(s["layer"]), float(s["x_mm"]), float(s["y_mm"]))
                      for s in data["sipms"]]
+            plints = [PlintSpec(int(p["layer"]), float(p["x_mm"]), float(p["y_mm"]), float(p["width_mm"]),
+                                float(p["length_mm"]), float(p["thickness_mm"]))
+                      for p in data.get("plints") or []]
             layout = cls(sipms, float(data["layer_spacing_mm"]), float(data["sipm_size_mm"]),
-                         str(data.get("name", "layout")))
+                         str(data.get("name", "layout")), plints)
         except (KeyError, TypeError, ValueError) as exc:
             raise LayoutError(f"layout file is incomplete or malformed: {exc}") from exc
         layout.validate()

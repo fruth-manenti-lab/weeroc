@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from radioroc.data.muon_types import DetectorLayout, LayoutError, SiPMPlacement
+from radioroc.data.muon_types import DetectorLayout, LayoutError, PlintSpec, SiPMPlacement
 
 
 class MuonLayoutTests(unittest.TestCase):
@@ -63,6 +63,44 @@ class MuonLayoutTests(unittest.TestCase):
                                               encoding="utf-8")
             with self.assertRaises(LayoutError):
                 DetectorLayout.load_json(tmp / "partial.json")
+
+    def test_auto_plints(self):
+        layout = DetectorLayout.grid(4, 8, 10, layers=2)
+        self.assertEqual(layout.plints, [])
+        auto = layout.effective_plints()
+        self.assertEqual([p.layer for p in auto], [0, 1])
+        self.assertEqual((auto[0].x_mm, auto[0].y_mm, auto[0].width_mm, auto[0].length_mm, auto[0].thickness_mm),
+                         (0.0, 0.0, 80.0, 40.0, 10.0))
+        self.assertNotIn("plints", layout.to_dict())
+
+    def test_explicit_plints_and_grid_arguments(self):
+        layout = DetectorLayout.grid(4, 8, 10, layers=2, plint_width_mm=400, plint_length_mm=120,
+                                     plint_thickness_mm=10)
+        self.assertEqual(len(layout.plints), 2)
+        self.assertEqual(layout.effective_plints(), layout.plints)
+        self.assertEqual(layout.plints[1], PlintSpec(1, 0.0, 0.0, 400.0, 120.0, 10.0))
+        partial = DetectorLayout.grid(4, 8, 10, layers=1, plint_thickness_mm=20)
+        self.assertEqual((partial.plints[0].width_mm, partial.plints[0].thickness_mm), (80.0, 20.0))
+
+    def test_plint_json_round_trip_and_old_files(self):
+        layout = DetectorLayout.grid(2, 3, 12.5, layers=2)
+        layout.plints = [PlintSpec(0, 1.0, 2.0, 300.0, 100.0, 10.0), PlintSpec(1, 0.0, 0.0, 200.0, 90.0, 20.0)]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = layout.save_json(Path(tmp) / "layout.json")
+            loaded = DetectorLayout.load_json(path)
+            self.assertEqual(loaded.plints, layout.plints)
+            data = json.loads(path.read_text())
+            self.assertEqual(data["schema_version"], 1)
+            del data["plints"]
+            path.write_text(json.dumps(data))
+            self.assertEqual(DetectorLayout.load_json(path).plints, [])
+
+    def test_plint_validation(self):
+        base = [SiPMPlacement(0, 0, 0, 0)]
+        for bad in (PlintSpec(2, 0, 0, 10, 10, 10), PlintSpec(0, 0, 0, 0, 10, 10), PlintSpec(0, 0, 0, 10, 1e5, 10),
+                    PlintSpec(0, 0, 0, 10, 10, -1), PlintSpec(0, float("nan"), 0, 10, 10, 10)):
+            with self.assertRaises(LayoutError):
+                DetectorLayout(base, plints=[bad]).validate()
 
 
 if __name__ == "__main__":

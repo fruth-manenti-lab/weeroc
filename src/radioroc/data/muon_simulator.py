@@ -13,12 +13,6 @@ MAX_ZENITH_DEG = 60.0
 _MAX_TRACK_TRIES = 200
 
 
-def _bbox(layout: DetectorLayout, layer: int):
-    xs = [s.x_mm for s in layout.in_layer(layer)]
-    ys = [s.y_mm for s in layout.in_layer(layer)]
-    return min(xs), max(xs), min(ys), max(ys)
-
-
 def _zenith(rng: random.Random) -> float:
     """Zenith angle (radians) for intensity cos^2(theta) per solid angle, limited to 0..60 degrees."""
     c60 = math.cos(math.radians(MAX_ZENITH_DEG))
@@ -27,19 +21,24 @@ def _zenith(rng: random.Random) -> float:
 
 
 def _track(layout: DetectorLayout, layers: list[int], rng: random.Random):
-    """Pick a straight track; only tracks that cross every layer inside its footprint are kept
-    (a coincidence trigger would never record the others). Falls back to a vertical track."""
-    boxes = {layer: _bbox(layout, layer) for layer in layers}
-    x_lo, x_hi, y_lo, y_hi = boxes[layers[0]]
+    """Pick a straight track entering over the first layer's plint footprint(s) (area weighted); only tracks
+    that cross a plint of every layer are kept (a coincidence trigger would never record the others).
+    Falls back to a vertical track."""
+    plints = layout.effective_plints()
+    by_layer = {layer: [p for p in plints if p.layer == layer] for layer in layers}
+    first = by_layer[layers[0]]
+    weights = [p.width_mm * p.length_mm for p in first]
     for _ in range(_MAX_TRACK_TRIES):
-        x0, y0 = rng.uniform(x_lo, x_hi), rng.uniform(y_lo, y_hi)
+        p0 = rng.choices(first, weights)[0] if len(first) > 1 else first[0]
+        x0 = rng.uniform(p0.x_mm - p0.width_mm / 2, p0.x_mm + p0.width_mm / 2)
+        y0 = rng.uniform(p0.y_mm - p0.length_mm / 2, p0.y_mm + p0.length_mm / 2)
         theta, phi = _zenith(rng), rng.uniform(0.0, 2.0 * math.pi)
         hits = {}
         for layer in layers:
             z = layout.layer_spacing_mm * layer
             hits[layer] = (x0 + math.tan(theta) * math.cos(phi) * z, y0 + math.tan(theta) * math.sin(phi) * z)
-        if all(boxes[l][0] <= hits[l][0] <= boxes[l][1] and boxes[l][2] <= hits[l][1] <= boxes[l][3]
-               for l in layers):
+        if all(any(abs(hits[l][0] - p.x_mm) <= p.width_mm / 2 and abs(hits[l][1] - p.y_mm) <= p.length_mm / 2
+                   for p in by_layer[l]) for l in layers):
             return hits, theta
     return {layer: (x0, y0) for layer in layers}, 0.0
 
@@ -50,8 +49,8 @@ def simulate_events(layout: DetectorLayout, n_events: int, *, seed: int = 1, muo
                     dark_hit_probability: float = 0.005) -> tuple[list[MuonEvent], dict[int, float]]:
     """Return (events, pedestals_hg). Deterministic for a given seed.
 
-    Every event holds all channels of the layout. Muon tracks are restricted to those that cross every
-    layer inside its SiPM bounding box. Non-muon events carry dark-count bumps (30..80 counts, hg only),
+    Every event holds all channels of the layout. Muon tracks are restricted to those that enter over the first
+    layer's plint(s) and cross a plint of every layer. Non-muon events carry dark-count bumps (30..80 counts, hg only),
     at least one per event. Only the high-gain pedestals are returned (the analysis input).
     """
     layout.validate()
