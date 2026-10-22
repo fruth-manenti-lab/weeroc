@@ -257,6 +257,8 @@ class ScurveWindow(QMainWindow):
         # (and trigger spin boxes) and mirror the model into them.
         self.shared_selection = selection
         if selection is not None:
+            from radioroc.gui.calibration_selection import bind_trigger_gain
+            bind_trigger_gain(self.trigger_preamp_gain, selection)
             from radioroc.gui.calibration_selection_panel import bind_shared_selection
             self._sync_shared_selection = bind_shared_selection(
                 selection, form, self.channel_select)

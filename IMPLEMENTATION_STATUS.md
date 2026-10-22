@@ -1,5 +1,23 @@
 # Implementation status
 
+## RADIOROC 44 — shared trigger gain and operating threshold
+
+Root cause of the zero-trigger acquisition: scans ran at trigger gain code 1 while Autocalibration and Acquisition ran
+on "Keep current" (chip default 8), so a threshold chosen at gain 1 was far too high at gain 8. Offline-tested only.
+
+- `CalibrationSelection` now also owns `trigger_gain` (1..63, default 1) and `operating_threshold` (0..1023, default
+  540) with change signals and validation, like the hold delay.
+- Calibration bar: Operating threshold and new Trigger gain (paT) spins are bound two-way to the model; row order is
+  threshold, gain, hold delay, Save, Load. Bias (V) and Note moved into a dialog shown by Save calibration… after the
+  file name is chosen (hidden `bias_text`/`note_edit` keep the last values; `save_to` never opens a dialog).
+- Calibration file: optional `trigger_gain_code` (1..63), schema_version still 1; old files load and leave the gain alone.
+- With a shared selection, the trigger gain spin of the Threshold, Autocalibration, Hold scan, S-curve and Acquisition
+  windows (no more "Keep current") and the Acquisition Threshold DAC follow the model both ways. Standalone windows
+  keep "Keep current". Hold scan's own "Set threshold DAC before scan" stays independent.
+- Test change: the "Keep current spinbox is wide enough" test now checks standalone windows and the remaining
+  Keep-current spins, since the embedded gain spins no longer have that text; no size floor was lowered.
+- Limitation: the app still cannot read the chip's gain back, so the gain shown is what scans will write, not a readback.
+
 ## RADIOROC 44 — lead summary, hardware findings and guide (2026-10-21)
 
 Session work, all offline-tested (`tools/check_development.py`: 546 tests OK, 18 CLI help checks) except where marked

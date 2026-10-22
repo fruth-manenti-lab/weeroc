@@ -101,6 +101,55 @@ class WindowsUseSharedSelectionTests(_QtCase):
         acq.hold_delay_ns.setValue(540)
         self.assertEqual(self.sel.hold_delay_ns, 540)
 
+    def test_trigger_gain_follows_shared_value_in_every_window(self):
+        from radioroc.gui.threshold_window import ThresholdWindow
+        from radioroc.gui.hold_scan_window import HoldScanWindow
+        from radioroc.gui.scurve_window import ScurveWindow
+        from radioroc.gui.autocalibration_window import AutocalibrationWindow
+        from radioroc.gui.acquisition_window import AcquisitionWindow
+        from radioroc.gui.calibration_selection import CalibrationSelection
+        for cls, name in ((ThresholdWindow, "gain"), (HoldScanWindow, "trigger_preamp_gain"),
+                          (ScurveWindow, "trigger_preamp_gain"),
+                          (AutocalibrationWindow, "trigger_preamp_gain"),
+                          (AcquisitionWindow, "trigger_preamp_gain")):
+            with self.subTest(window=cls.__name__):
+                sel = CalibrationSelection()
+                win = cls(selection=sel)
+                spin = getattr(win, name)
+                self.assertEqual(spin.value(), 1)
+                sel.set_trigger_gain(8)
+                self.assertEqual(spin.value(), 8)
+                spin.setValue(3)
+                self.assertEqual(sel.trigger_gain, 3)
+
+    def test_standalone_windows_keep_current_gain(self):
+        from radioroc.gui.threshold_window import ThresholdWindow
+        from radioroc.gui.acquisition_window import AcquisitionWindow
+        self.assertEqual(ThresholdWindow().gain.value(), 0)
+        acq = AcquisitionWindow()
+        self.assertEqual(acq.trigger_preamp_gain.value(), 0)
+        self.assertEqual(acq.threshold_dac.value(), 0)
+
+    def test_acquisition_threshold_and_gain_follow_shared_values(self):
+        from radioroc.gui.acquisition_window import AcquisitionWindow
+        acq = AcquisitionWindow(selection=self.sel)
+        self.assertEqual(acq.threshold_dac.value(), 540)
+        self.sel.set_operating_threshold(612)
+        self.assertEqual(acq.threshold_dac.value(), 612)
+        acq.threshold_dac.setValue(600)
+        self.assertEqual(self.sel.operating_threshold, 600)
+        self.sel.set_trigger_gain(8)
+        self.assertEqual(acq.trigger_preamp_gain.value(), 8)
+
+    def test_model_validates_gain_and_threshold(self):
+        with self.assertRaises(ValueError):
+            self.sel.set_trigger_gain(0)
+        with self.assertRaises(ValueError):
+            self.sel.set_trigger_gain(64)
+        with self.assertRaises(ValueError):
+            self.sel.set_operating_threshold(1024)
+        self.assertEqual((self.sel.trigger_gain, self.sel.operating_threshold), (1, 540))
+
     def test_autocalibration_saved_channels_set_selection(self):
         from radioroc.gui.threshold_window import ThresholdWindow
         from radioroc.gui.hold_scan_window import HoldScanWindow

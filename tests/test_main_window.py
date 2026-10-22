@@ -506,10 +506,17 @@ class MainWindowTests(unittest.TestCase):
 
     def test_keep_current_spinbox_is_wide_enough_for_its_text(self):
         window = self._make_window()
-        spins = [window.scurve_window.trigger_preamp_gain,
-                 window.autocalibration_window.trigger_preamp_gain,
-                 window.threshold_window.gain,
-                 window.hold_scan_window.trigger_preamp_gain]
+        # The trigger gain spins of the embedded windows are bound to the shared
+        # model (no "Keep current"); check the remaining Keep-current spins here and
+        # the standalone windows' gain spins, which still have it.
+        from radioroc.gui.scurve_window import ScurveWindow
+        from radioroc.gui.threshold_window import ThresholdWindow
+        standalone_scurve, standalone_threshold = ScurveWindow(), ThresholdWindow()
+        spins = [standalone_scurve.trigger_preamp_gain,
+                 standalone_threshold.gain,
+                 window.hold_scan_window.high_gain_code,
+                 window.hold_scan_window.low_gain_code,
+                 window.acquisition_window.high_gain_code]
         for spin in spins:
             text = spin.specialValueText()
             self.assertEqual(text, "Keep current")

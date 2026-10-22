@@ -132,6 +132,48 @@ class CalibrationFileBarTests(unittest.TestCase):
         self.assertEqual(bar.selection.hold_delay_ns, 525)
         self.assertEqual(bar.hold_delay.value(), 525)
 
+    def test_trigger_gain_and_threshold_are_shared_saved_and_loaded(self):
+        bar = self._bar()
+        self.assertEqual(bar.trigger_gain.value(), 1)
+        self.assertEqual(bar.trigger_gain.accessibleName(), "Trigger gain (paT)")
+        bar.trigger_gain.setValue(8)
+        bar.operating_threshold.setValue(612)
+        self.assertEqual(bar.selection.trigger_gain, 8)
+        self.assertEqual(bar.selection.operating_threshold, 612)
+        path = self.tmp / "gain.json"
+        self.assertTrue(bar.save_to(path))
+        self.assertEqual(json.loads(path.read_text())["trigger_gain_code"], 8)
+        bar.selection.set_trigger_gain(2)
+        bar.selection.set_operating_threshold(100)
+        self.assertEqual((bar.trigger_gain.value(), bar.operating_threshold.value()), (2, 100))
+        self.assertTrue(bar.load_from(path))
+        self.assertEqual((bar.trigger_gain.value(), bar.operating_threshold.value()), (8, 612))
+
+    def test_old_file_without_gain_leaves_gain_unchanged(self):
+        bar = self._bar()
+        path = self.tmp / "old.json"
+        bar.save_to(path)
+        data = json.loads(path.read_text())
+        del data["trigger_gain_code"]
+        path.write_text(json.dumps(data))
+        bar.selection.set_trigger_gain(5)
+        self.assertTrue(bar.load_from(path))
+        self.assertEqual(bar.selection.trigger_gain, 5)
+
+    def test_bias_and_note_are_asked_by_save_button_only(self):
+        from unittest import mock
+        bar = self._bar()
+        bar.bias_text.setText("54")
+        with mock.patch("radioroc.gui.calibration_file_bar.QFileDialog.getSaveFileName",
+                        return_value=(str(self.tmp / "d.json"), "")):
+            bar._ask_bias_and_note = lambda: False
+            bar._choose_save()
+            self.assertFalse((self.tmp / "d.json").exists())
+            bar._ask_bias_and_note = lambda: True
+            bar._choose_save()
+            self.assertTrue((self.tmp / "d.json").exists())
+        self.assertTrue(bar.bias_text.isHidden() and bar.note_edit.isHidden())
+
     def test_bad_hold_delay_in_file_is_refused(self):
         bar = self._bar()
         path = self.tmp / "bad_hold.json"

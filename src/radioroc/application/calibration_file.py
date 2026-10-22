@@ -85,7 +85,7 @@ def find_autocalibration_trims(directory=None, runs_root=None):
 
 def build_document(*, channels, trigger_channel, trigger_channel_2, auto_triggers,
                    operating_threshold_dac, bias_voltage_text="", note="",
-                   autocalibration=None, hold_scan=None, now=None) -> dict:
+                   autocalibration=None, hold_scan=None, trigger_gain_code=None, now=None) -> dict:
     doc = {
         "schema_version": SCHEMA_VERSION,
         "created": (now or datetime.now()).astimezone().isoformat(timespec="seconds"),
@@ -101,6 +101,8 @@ def build_document(*, channels, trigger_channel, trigger_channel_2, auto_trigger
     }
     if hold_scan:
         doc["hold_scan"] = hold_scan
+    if trigger_gain_code is not None:
+        doc["trigger_gain_code"] = int(trigger_gain_code)
     return doc
 
 
@@ -172,10 +174,13 @@ def validate_document(data) -> dict:
         value = hold["hold_delay_ns"]
         if not _is_int(value) or not 0 <= value <= 100000:
             raise CalibrationFileError(f"'hold_delay_ns' must be a whole number 0..100000, got {value!r}")
+    gain = data.get("trigger_gain_code")
+    if gain is not None and (not _is_int(gain) or not 1 <= gain <= 63):
+        raise CalibrationFileError(f"'trigger_gain_code' must be a whole number 1..63, got {gain!r}")
     return {"channels": channels, "trigger_channel": t1, "trigger_channel_2": t2,
             "auto_triggers": auto, "operating_threshold_dac": dac,
             "bias_voltage_text": data.get("bias_voltage_text", ""), "note": data.get("note", ""),
-            "autocalibration": autocal, "hold_scan": hold,
+            "autocalibration": autocal, "hold_scan": hold, "trigger_gain_code": gain,
             "created": data.get("created"), "app_version": data.get("app_version")}
 
 

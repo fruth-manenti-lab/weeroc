@@ -37,6 +37,19 @@ class CalibrationFileTests(unittest.TestCase):
         self.assertEqual((data["bias_voltage_text"], data["note"]), ("55.2", "hi"))
         self.assertEqual(data["autocalibration"]["trims"], {4: 31, 5: 28})
 
+    def test_trigger_gain_code(self):
+        path = cf.save_document(self.tmp / "g.json", _doc(trigger_gain_code=8))
+        self.assertEqual(json.loads(path.read_text())["trigger_gain_code"], 8)
+        self.assertEqual(cf.load_document(path)["trigger_gain_code"], 8)
+        old = cf.save_document(self.tmp / "o.json", _doc())
+        self.assertNotIn("trigger_gain_code", json.loads(old.read_text()))
+        self.assertIsNone(cf.load_document(old)["trigger_gain_code"])
+        for bad in (0, 64, "1", True, 1.5):
+            data = json.loads(path.read_text())
+            data["trigger_gain_code"] = bad
+            with self.assertRaises(cf.CalibrationFileError):
+                cf.validate_document(data)
+
     def test_no_trims(self):
         path = cf.save_document(self.tmp / "a.json", _doc())
         self.assertIsNone(cf.load_document(path)["autocalibration"])

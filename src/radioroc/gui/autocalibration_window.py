@@ -221,6 +221,8 @@ class AutocalibrationWindow(QMainWindow):
         # (and trigger spin boxes) and mirror the model into them.
         self.shared_selection = selection
         if selection is not None:
+            from radioroc.gui.calibration_selection import bind_trigger_gain
+            bind_trigger_gain(self.trigger_preamp_gain, selection)
             from radioroc.gui.calibration_selection_panel import bind_shared_selection
             self._sync_shared_selection = bind_shared_selection(
                 selection, form, self.channel_select)
@@ -540,7 +542,9 @@ class AutocalibrationWindow(QMainWindow):
         put("use_mask", self.use_mask.setChecked, bool)
         put("use_ctest", self.use_ctest.setChecked, bool)
         put("trigger_level", self.trigger_level.setChecked, bool)
-        self.trigger_preamp_gain.setValue(int(operation.get("trigger_preamp_gain") or 0))
+        saved_gain = int(operation.get("trigger_preamp_gain") or 0)
+        if saved_gain or self.shared_selection is None:
+            self.trigger_preamp_gain.setValue(saved_gain)
         for name in ("clock_index", "probe_dac_min", "probe_dac_max", "probe_dac_step",
                      "transition_dac_step", "transition_margin", "transition_dac_floor",
                      "transition_dac_cap", "final_window_before", "final_window_after",

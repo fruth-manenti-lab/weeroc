@@ -18,6 +18,11 @@ _FALLBACK_T1 = 4
 _FALLBACK_T2 = 5
 DEFAULT_HOLD_DELAY_NS = 530
 MAX_HOLD_DELAY_NS = 100000
+DEFAULT_TRIGGER_GAIN = 1
+MIN_TRIGGER_GAIN = 1
+MAX_TRIGGER_GAIN = 63
+DEFAULT_OPERATING_THRESHOLD = 540
+MAX_OPERATING_THRESHOLD = 1023
 
 
 class CalibrationSelection(QObject):
@@ -25,12 +30,16 @@ class CalibrationSelection(QObject):
     triggers_changed = Signal(int, int)   # T1, T2
     auto_changed = Signal(bool)
     hold_delay_changed = Signal(int)      # external hold delay, ns
+    trigger_gain_changed = Signal(int)    # trigger preamp gain code 1..63
+    operating_threshold_changed = Signal(int)  # threshold DAC code 0..1023
 
     def __init__(self, channels=(4, 5), parent=None):
         super().__init__(parent)
         self._channels = self._clean(channels)
         self._auto = True
         self._hold_delay_ns = DEFAULT_HOLD_DELAY_NS
+        self._trigger_gain = DEFAULT_TRIGGER_GAIN
+        self._operating_threshold = DEFAULT_OPERATING_THRESHOLD
         self._t1, self._t2 = self._auto_triggers()
 
     @staticmethod
@@ -63,6 +72,14 @@ class CalibrationSelection(QObject):
     @property
     def hold_delay_ns(self) -> int:
         return self._hold_delay_ns
+
+    @property
+    def trigger_gain(self) -> int:
+        return self._trigger_gain
+
+    @property
+    def operating_threshold(self) -> int:
+        return self._operating_threshold
 
     @property
     def auto_triggers(self) -> bool:
@@ -111,3 +128,41 @@ class CalibrationSelection(QObject):
         if value != self._hold_delay_ns:
             self._hold_delay_ns = value
             self.hold_delay_changed.emit(value)
+
+    def set_trigger_gain(self, value: int) -> None:
+        value = int(value)
+        if not MIN_TRIGGER_GAIN <= value <= MAX_TRIGGER_GAIN:
+            raise ValueError(
+                f"trigger gain {value} is outside {MIN_TRIGGER_GAIN}..{MAX_TRIGGER_GAIN}")
+        if value != self._trigger_gain:
+            self._trigger_gain = value
+            self.trigger_gain_changed.emit(value)
+
+    def set_operating_threshold(self, value: int) -> None:
+        value = int(value)
+        if not 0 <= value <= MAX_OPERATING_THRESHOLD:
+            raise ValueError(
+                f"operating threshold {value} is outside 0..{MAX_OPERATING_THRESHOLD}")
+        if value != self._operating_threshold:
+            self._operating_threshold = value
+            self.operating_threshold_changed.emit(value)
+
+
+def bind_trigger_gain(spin, selection) -> None:
+    """Two-way bind a QSpinBox to ``selection.trigger_gain`` (drops 'Keep current')."""
+    spin.setSpecialValueText("")
+    spin.setRange(MIN_TRIGGER_GAIN, MAX_TRIGGER_GAIN)
+    spin.setValue(selection.trigger_gain)
+    spin.valueChanged.connect(selection.set_trigger_gain)
+    selection.trigger_gain_changed.connect(
+        lambda value: spin.setValue(value) if spin.value() != value else None)
+
+
+def bind_operating_threshold(spin, selection) -> None:
+    """Two-way bind a QSpinBox to ``selection.operating_threshold`` (drops 'Keep current')."""
+    spin.setSpecialValueText("")
+    spin.setRange(0, MAX_OPERATING_THRESHOLD)
+    spin.setValue(selection.operating_threshold)
+    spin.valueChanged.connect(selection.set_operating_threshold)
+    selection.operating_threshold_changed.connect(
+        lambda value: spin.setValue(value) if spin.value() != value else None)

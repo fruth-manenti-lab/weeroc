@@ -178,14 +178,14 @@ The **Calibration** page has four tabs, in this order: **Threshold scan**, **Aut
 
 Everything above the tabs is shared by all of them (and by the **Acquisition** page):
 
-- The **Save/Load calibration** bar: **Operating threshold**, **Hold delay (ns)**, **Bias (V)**, **Note**, **Save calibration…**, **Load calibration…**.
+- The **Save/Load calibration** bar: **Operating threshold**, **Trigger gain (paT)**, **Hold delay (ns)**, **Save calibration…**, **Load calibration…**. These three values are shared: every scan tab and the **Acquisition** page use them, so you set each once. **Bias (V)** and **Note** are asked for in the dialog when you click **Save calibration…**.
 - One **channel selection**: the **Channels** button (click it to open the 64-channel grid, with **Select all** and **Select none**), **Trigger channel (T1)**, **Trigger channel (T2)**, and the tick box **Choose trigger channels automatically**.
 
 While **Choose trigger channels automatically** is ticked, T1 is the lowest selected channel and T2 is the next one (or T1 again if you select only one channel). If you type a trigger channel by hand, the tick box switches itself off. Leave it ticked unless you have a reason.
 
 The scan tabs have no channel grids of their own. Choose the channels once, here.
 
-**Saving your work.** Click **Save calibration…** to write a JSON file (default folder `radioroc_runs/calibration/`). It holds the channels, trigger channels, **Operating threshold**, **Hold delay (ns)**, **Bias (V)**, **Note**, and the trims from the last verified autocalibration run. **Load calibration…** puts all of these back. If the board is connected it can offer to write the trims into the chip again. That re-apply path is **untested on hardware**: after using it, always run a threshold scan to check the result. **What the file does not hold.** It does not save the whole chip. The other registers (gains, masks, input DACs, probe settings) and the threshold the chip is using right now are not in it. After a power cycle the chip is back at its defaults, so to get ready again: (1) run the first Threshold scan with **Initialize FPGA (persists)** and **Apply defaults (persists)** ticked; (2) click **Load calibration…** and let it re-apply the trims (untested on hardware); (3) run a quick threshold scan to check the channels look aligned. If only the app crashed and the board stayed powered, the chip is probably still calibrated: reconnect and check with a threshold scan. Save at three points:
+**Saving your work.** Click **Save calibration…** to write a JSON file (default folder `radioroc_runs/calibration/`). It holds the channels, trigger channels, **Operating threshold**, **Trigger gain (paT)**, **Hold delay (ns)**, **Bias (V)**, **Note**, and the trims from the last verified autocalibration run. **Load calibration…** puts all of these back. If the board is connected it can offer to write the trims into the chip again. That re-apply path is **untested on hardware**: after using it, always run a threshold scan to check the result. **What the file does not hold.** It does not save the whole chip. The other registers (gains, masks, input DACs, probe settings) and the threshold the chip is using right now are not in it. After a power cycle the chip is back at its defaults, so to get ready again: (1) run the first Threshold scan with **Initialize FPGA (persists)** and **Apply defaults (persists)** ticked; (2) click **Load calibration…** and let it re-apply the trims (untested on hardware); (3) run a quick threshold scan to check the channels look aligned. If only the app crashed and the board stayed powered, the chip is probably still calibrated: reconnect and check with a threshold scan. Save at three points:
 
 1. Right after autocalibration (Step 2).
 2. Again after you choose the operating threshold (Step 5).
@@ -198,7 +198,7 @@ If you save without a verified autocalibration in this session, the file holds s
 1. Click **Calibration** in the sidebar.
 2. Click the **Channels** button. In the grid click **Select none**, then click the buttons for channels N and M. Close the grid by clicking the **Channels** button again.
 3. Check **Trigger channel (T1)** and **Trigger channel (T2)**. With **Choose trigger channels automatically** ticked, T1 is the lower of N and M and T2 is the other. That is fine.
-4. Type the bias voltage you set into **Bias (V)** and add a short **Note** (for example the date and "plints 1 and 2").
+4. Check that **Trigger gain (paT)** on the bar is 1. When you click **Save calibration…** later you will be asked for the bias voltage and a short note (for example the date and "plints 1 and 2").
 
 ### Step 0b: Check the analog signal (gain and shaping time; optional but recommended)
 
@@ -238,7 +238,7 @@ High gain is for small pulses and low gain is for large ones. A muon pulse from 
 7. **When you are done, switch the probe off:** **Probes/Masks** tab > **Off, all channels**. Leaving the probe on degrades the chip's performance, so it must be off for every scan and for the muon run.
 8. Write the gain and shaping codes you ended with in the log (section 10).
 
-If you change **Gain (paT)** (the trigger preamplifier), use the new code instead of 1 everywhere in the "Trigger gain must match" rule (section 6). If you change any gain or shaping time, redo Step 1 onwards: the noise floor, trims and hold delay all move with them.
+If you change **Gain (paT)** (the trigger preamplifier), type the new code into **Trigger gain (paT)** on the bar (see "Trigger gain must match", section 6). If you change any gain or shaping time, redo Step 1 onwards: the noise floor, trims and hold delay all move with them.
 
 ### Step 1: Noise floor (Threshold scan tab, no test signal)
 
@@ -261,7 +261,7 @@ Dark box closed, bias on, generator outputs off.
 | **Counter window (ms)** | 100 | **Change** (default is 50). Longer window, less scatter in the rate. |
 | **Averages** | 1 | Leave at default. |
 | **Discriminator** | T1 | Leave at default. |
-| **Trigger gain code** | 1 | **Change.** Use the same code here, in the Autocalibration tab and on the Acquisition page (see "Trigger gain must match" in section 6). 1 is the highest trigger gain; the bench noise floors were measured at 1. |
+| **Trigger gain code** | 1 (follows the bar) | Leave alone: it follows **Trigger gain (paT)** on the bar, so every scan and the Acquisition page use the same gain (see "Trigger gain must match" in section 6). 1 is the highest trigger gain; the bench noise floors were measured at 1. |
 | **Mask other channels** | Ticked | Leave at default. Only the selected channels count. |
 | **Enable Ctest** | Unticked | Leave unticked: this is a noise scan with no test signal. |
 | **Initialize FPGA (persists)** | Ticked on the first scan after every power cycle only | Later scans: unticked. |
@@ -311,7 +311,7 @@ Check the bias is really on: a biased SiPM shows a rate 2 to 5 times higher than
 | **Enable Ctest** | Ticked | **Change.** Autocalibration needs the internal test charge to find each channel's crossing. |
 | **S-curve clock index (0..3)** | 3 | Leave at default. |
 | **Count trigger level instead of rising edge** | Unticked | Leave at default. |
-| **Trigger preamp gain code** (in **Optional gain override**) | 1 | **Change.** The same code as the Threshold scan and the Acquisition page. Trims depend on the gain, so redo autocalibration if you change it. |
+| **Trigger preamp gain code** (in **Optional gain override**) | 1 (follows the bar) | Leave alone: it follows **Trigger gain (paT)** on the bar. Trims depend on the gain, so redo autocalibration if you change it. |
 | **Step 1: reference-channel LSB-ratio probe**: **First DAC code**, **Last DAC code**, **DAC step** | 0, 1000, 50 | Leave at default. |
 | **Step 2: transition scan across selected channels**: **DAC step**, **Upper-bound margin**, **Upper-bound floor**, **Upper-bound cap** | 10, 150, 300, 1023 | Leave at default. |
 | **Final: verification scan window**: **Codes before mean crossing**, **Codes after mean crossing**, **DAC step** | 50, 120, 2 | Leave at default. |
@@ -410,14 +410,14 @@ Use exactly these values on the **Acquisition** page. The rest stay at their def
 | **Trigger source (T2 slot)** | Individual trigger | **Change from the default NORT1.** T2 must be the discriminator of channel **T2** (the second channel). NORT1 is the OR of all channels and would make it a coincidence with any channel. |
 | **Coincidence/time window (ns)** | 50 | Both pulses must arrive within this time. Start with 50; see below. |
 | **Time-window trigger count** | 1 | Only used by the **Time window** trigger type. Leave it. |
-| **Threshold DAC** | The operating threshold from section 5 | If left at **Keep current** it uses whatever the chip has now. |
+| **Threshold DAC** | Follows **Operating threshold** on the bar | Leave alone. There is no Keep current here any more. |
 | **Mask other channels** (tick box lower on the page) | Ticked (the default) | With both sources on Individual trigger, the app unmasks exactly the two named channels and no others. |
-| **Trigger preamp gain code** | 1 | Must equal the Threshold scan and Autocalibration value (see below). |
+| **Trigger preamp gain code** | 1 (follows the bar) | The same gain as the scans (see below). |
 | **Use external ASIC acquisition trigger (IO_FPGA6)** | Unticked | Muon runs use the self-trigger. |
 
 The coincidence needs both channels to cross threshold inside the window, so the rate is much lower than a single channel's. **Check that it works:** after a short run click **Open saved run…** and look at the spectra and the events: in every event both channels should be above their pedestal. If many events show only one channel above pedestal, the coincidence is not being enforced, so keep both channels recorded and apply the coincidence offline (the open Priority 0 item in the project).
 
-**Trigger gain must match.** Set **Trigger preamp gain code** on the Acquisition page to 1, the same as the Threshold scan and the Autocalibration tab. The scans change the gain only while they run. An acquisition left on **Keep current** uses the chip's own value (8 after defaults). The threshold DAC means a different pulse height at each gain, so a threshold chosen at gain 1 is far too high at gain 8: no pulse crosses it and no batch ever fills. This is what happened on 2026-10-21, when the app got zero batches in 105 s while a script that applies gain 1 itself did not. Trims also depend on gain, so redo autocalibration if the gain you use changes.
+**Trigger gain must match.** **Trigger gain (paT)** on the Calibration bar is used by every scan and by the Acquisition page, so they cannot disagree. Keep it at 1. If you ever use an older version of the app, or the scripts, make sure each place uses the same code: on 2026-10-21 the scans ran at gain 1 while an acquisition left on **Keep current** ran at the chip's own value (8). The threshold DAC means a different pulse height at each gain, so a threshold chosen at gain 1 is far too high at gain 8: no pulse crosses it and no batch ever fills (the app got zero batches in 105 s). Trims also depend on gain, so redo autocalibration if the gain you use changes.
 
 **Choose the hold delay for the muon run**
 
@@ -444,7 +444,7 @@ The pedestal is about 90 to 100. The pulses are tallest around 20 to 55 ns and f
 1. Confirm sections 4 and 5 are done in this power-on session, with the calibration saved, the generator outputs are off, and the dark box is closed.
 2. Click **Acquisition** in the sidebar. Set **Device / mode** to **Hardware connection**.
 3. Check the line at the top of the page. It reads "Channels … · trigger T1=…, T2=… (set on the Calibration page)". The channels and trigger channels come from the shared selection on the **Calibration** page: T1 is the first channel and T2 is the second. If they are wrong, go back to **Calibration** and change them there. This page has no channel grid of its own.
-4. Set the trigger as in the table above, and set **Threshold DAC** to the operating threshold.
+4. Set the trigger as in the table above. **Threshold DAC** and **Trigger preamp gain code** follow the bar: check they read your operating threshold and 1.
     - **Hold delay (ns)** and **Conversion delay (ns)** are on this page too. Set **Hold delay (ns)** to the value you chose above (the app starts at 530, which is wrong for muon runs). Leave **Conversion delay (ns)** at 400.
 5. Set **Acquisitions per batch** and **Batches**. Events requested = acquisitions per batch × batches. Aim for at least **400 accepted events** (see the table below).
 6. Set **Timeout (s)** longer than the time one batch needs to fill. The default 5 s is far too short for muons and the run will fail with a timeout. At about 1 muon per cm² per minute a plint of A cm² gives about A events per minute in single mode, and fewer in coincidence (only muons through both plints), so a batch of 10 events can take 10 / A minutes or more. Use at least three times your estimate, and keep **Acquisitions per batch** small (about 10) so a timeout loses little. Worked example for a 5 × 5 cm plint (about 25 per minute alone; assume 10 to 20 per minute in coincidence with the other plint stacked on top of it): a batch of 10 events takes about 30 to 60 s, so use **Acquisitions per batch** 10, **Timeout (s)** 300 and **Batches** 40 for 400 events (about 16 to 40 minutes). If the plints are side by side instead of stacked, almost no muon crosses both, and every batch will time out. If a batch times out at 300 s, do not just raise the timeout: first run a short single-channel acquisition to check each plint sees about 25 per minute alone.
@@ -546,7 +546,7 @@ Where the reference rate comes from, in order of preference:
 
 | Symptom | Likely cause | What to do |
 | --- | --- | --- |
-| Acquisition never fills a batch although the plints are fine | Trigger gain on the Acquisition page differs from the gain used for the scans, so the threshold is too high | Set **Trigger preamp gain code** to the same value as the scans (1) and redo autocalibration |
+| Acquisition never fills a batch although the plints are fine | Trigger gain on the Acquisition page differs from the gain used for the scans, so the threshold is too high | Set **Trigger gain (paT)** on the bar to the value used for the scans (1) and redo autocalibration |
 | App cannot connect | Another program owns the port, or board unpowered | Close other programs (`lsof /dev/cu.usbserial-RD3_32*`), check 5 V and USB |
 | "no response" or "i2c FIFO timed out", or scans blocked after a fault | Known board hang, often when the board shares a USB hub | Click **Acknowledge fault review** on **ASIC config.** (no disconnect needed). If the board answers, scans work again. If not: bias off, power-cycle 5 V and USB, disconnect and reconnect, re-apply defaults, redo autocalibration. Move the board to a USB port of its own |
 | Trims lost after loading a calibration file | Trim re-apply is untested on hardware | Run a threshold scan to check; if it looks wrong, redo autocalibration |

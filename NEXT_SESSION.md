@@ -5,10 +5,11 @@ Read `AGENTS.md`, the RADIOROC 44 entries at the top of `IMPLEMENTATION_STATUS.m
 offline tests, fake transports or saved data unless the operator explicitly asks for a hardware check.
 
 ## Next tasks, in order
-1. DONE offline: cause of the app's zero batches = trigger gain mismatch (scans at gain 1, autocalibration and
-   acquisition at the chip's 8), see the RADIOROC 44 lead entry. Next: add a shared Trigger gain code to the Calibration
-   bar so Threshold scan, Autocalibration, Hold scan and Acquisition read one value; make `scripts/radioroc_acquire.py`
-   print its hidden defaults (threshold 530, pat gain 1). Operator then redoes autocalibration at gain 1 and takes the run.
+1. DONE offline (RADIOROC 44): zero batches = trigger gain mismatch (scans at gain 1, autocalibration and acquisition on the
+   chip's 8). The Calibration bar now holds shared Operating threshold, Trigger gain (paT) and Hold delay, used by every scan
+   and the Acquisition page. Operator: redo autocalibration at gain 1 in the new app, then run the coincidence acquisition
+   (Trigger type 2 channels coincidence, both source slots Individual trigger, hold delay about 30 ns). Still to do: make
+   `scripts/radioroc_acquire.py` print its hidden defaults (threshold 530, pat gain 1).
 2. Decide with the operator whether to change the Acquisition/hold-delay default from 530 to about 30 ns, and add a
    hold-delay sweep helper if useful. Muon runs need 20-55 ns (see the hardware findings).
 3. Operator re-runs the whole calibration process from the guide on the board; collect every label or step that was
