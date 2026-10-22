@@ -110,7 +110,9 @@ class MainWindowTests(unittest.TestCase):
         # since collecting data is a distinct phase from calibrating (see
         # PLINT_STUDENT_MVP_DIRECTIVE.md's target workflow).
         window = self._make_window()
-        self.assertEqual(window.sidebar.count(), 3)
+        self.assertEqual(window.sidebar.count(), 4)
+        self.assertEqual(window.sidebar.item(3).text(), "Muon")
+        self.assertIs(window.pages.widget(3), window.muon_view)
         self.assertEqual(window.sidebar.item(0).text(), "ASIC config.")
         self.assertEqual(window.sidebar.item(1).text(), "Calibration")
         self.assertEqual(window.sidebar.item(2).text(), "Acquisition")
@@ -134,13 +136,15 @@ class MainWindowTests(unittest.TestCase):
     def test_page_menu_switches_the_sidebar_page(self):
         window = self._make_window()
         self.assertEqual([a.text() for a in window.page_actions],
-                         ["ASIC config.", "Calibration", "Acquisition"])
+                         ["ASIC config.", "Calibration", "Acquisition", "Muon"])
         self.assertEqual([a.shortcut().toString() for a in window.page_actions],
-                         ["Ctrl+1", "Ctrl+2", "Ctrl+3"])
+                         ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4"])
         window.page_actions[2].trigger()
         self.assertEqual(window.sidebar.currentRow(), 2)
         self.assertIs(window.pages.currentWidget().layout().itemAt(0).widget(),
                       window.acquisition_window)
+        window.page_actions[3].trigger()
+        self.assertIs(window.pages.currentWidget(), window.muon_view)
         window.page_actions[1].trigger()
         self.assertIs(window.pages.currentWidget(), window.calibration_tabs.parentWidget())
         window.page_actions[0].trigger()

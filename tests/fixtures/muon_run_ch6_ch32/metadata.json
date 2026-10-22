@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "status": "completed",
+  "execution_mode": "simulation",
+  "operation": {
+    "acquisition": {
+      "channels": [
+        6,
+        32
+      ],
+      "batches": 1,
+      "start_batch": 0
+    }
+  },
+  "completed_points": 1
+}

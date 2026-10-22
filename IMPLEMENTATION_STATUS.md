@@ -1,5 +1,58 @@
 # Implementation status
 
+## RADIOROC 45 — muon detector view tab
+
+New offline sidebar page **Muon** (after Acquisition; Page menu Ctrl+4): `gui/muon_view.py` `MuonView`, a top view of the
+SiPM layers (two panels, 1 mm scale auto-fitted) with event replay. It never opens the board connection; events come from
+`muon_simulator.simulate_events` or a saved run (`muon_analysis.load_events`), with a `append_events` hook for a future live feed.
+
+- SiPMs glow dark grey to yellow to white with amplitude / full scale, decaying exponentially (glow time, default 600 ms);
+  `advance(dt_ms)` applies one step so tests need no real time. Seed SiPM outlined, centroid cross per layer, numbers in the info label.
+- Edit layout mode: drag (1 mm snap, inside the panel), Add SiPM, Remove selected, context menu "Move to other layer";
+  replay disabled while editing. Grid rebuild, layer spacing, SiPM size, Save/Load layout (errors in the status label).
+- Replay: play/pause, step, speed, coincidences-only, slider; statistics and truth angle for simulated events.
+- Plints (scintillator bars): `PlintSpec` / `DetectorLayout.plints` (optional JSON key `plints`, schema stays 1);
+  without explicit plints one auto plint per layer (SiPM bounding box + 5 mm, 10 mm thick). Right-column Plints table
+  (editing an auto row makes it explicit), Add/Remove/Auto-fit, drawn to scale behind the SiPMs, draggable in Edit mode
+  (1 mm snap). The simulator samples the entry point over layer 0's plint area and keeps tracks crossing a plint of every
+  layer; light sharing is unchanged, so on wide plints most muons land far from the SiPMs (low recognised fraction).
+- Pedestals group: median estimate, pedestal JSON / run folder (`muon_analysis.load_pedestals`), or manual table;
+  `pedestals_look_biased` shows a warning when the median estimate probably contains muon signal; Save pedestals as JSON.
+- Using recorded data: for runs taken with the coincidence trigger every event holds a muon pulse, so the median estimate
+  lands on the pulse height and most coincidences are missed. Take pedestals from a separate pedestal run or enter them
+  manually. Channel numbers in the layout must match the board channels. Events carry no timestamps, so replay follows
+  event order (batch, event). `tests/fixtures/muon_run_ch6_ch32` approximates the 2026-10-21 run (11/12 recognised with
+  true pedestals 92/100 at threshold 40, all 12 at 35; the median estimate recognises fewer).
+- Channel lists and SiPM table (user feedback: "which channels are layer 0 / layer 1"): Layout group has `Layer 0 channels` /
+  `Layer 1 channels` fields (e.g. `0-31` / `32-63`, or `6` / `32`; pre-filled from the layout, layer 1 off when Layers = 1)
+  and `Build from channel lists`, which fills each layer row-major with Columns SiPMs per row at the Pitch
+  (`parse_channel_list`, `format_channel_list`, `DetectorLayout.from_channel_lists` in `muon_types.py`; errors such as
+  "channel 70 is outside 0..63" or "channel 6 is listed twice" go to the status label and change nothing; view API
+  `set_channel_lists`, `channel_list_text`). A `SiPMs` table (channel, layer, x, y; editable with validation and revert,
+  selection synchronised with the canvas) replaces guessing; `Add SiPM` opens a dialog (layer, lowest free channel, position
+  = next slot right of the layer's rightmost SiPM by Pitch, or (0, 0)); `add_sipm(layer, channel=None, x_mm=None, y_mm=None)`
+  uses the same defaults (it no longer stacks at the centre). Generate events / Open saved run moved to the start of the
+  replay row; plint table headers read "Centre X/Y (mm)".
+- Tests: `tests/test_muon_view.py` (Qt guarded, skips without PySide6; fake logic plus real-logic tests when available),
+  `tests/test_main_window.py` page order and Ctrl+4. Limitation: live board data and a layer-stacked side view are not implemented.
+
+## RADIOROC 45 — muon view logic (layout, simulator, analysis)
+
+Pure-Python (no Qt, no matplotlib) logic for the demo muon detector view; offline-tested only.
+
+- `data/muon_types.py` (layout/event types), `data/muon_simulator.py` (`simulate_events`: seeded, stdlib `random`),
+  `data/muon_analysis.py` (`events_from_rows`, `load_events` via `acquisition_reader` using all rows,
+  `estimate_pedestals`, `analyse_event`).
+- Simulator: muon tracks are rejection-sampled so every layer is crossed inside its SiPM bounding box (a
+  coincidence trigger would not record the others); `dark_hit_probability` default lowered to 0.005 so non-muon
+  events rarely fake a two-layer coincidence. hg saturates at 4095; lg amplitude = hg amplitude / 8.
+- Measured (4x8x2 grid, 2000 events, 80% muons, 3 seeds): coincidence recognised for 100% of muons, false
+  coincidences 0-1.1% of non-muons, centroid within 6 mm 100%, mean angle error ~1 deg (angle > 10 deg).
+- Limitation: median pedestals are biased upward (up to ~30 counts for central SiPMs) when 80% of events are muons;
+  accurate with a muon-poor sample. Saturated hg uses lg scaled by the event's median hg/lg ratio (lg baseline = event
+  median since no lg pedestals are passed).
+- Tests: `tests/test_muon_layout.py`, `test_muon_simulator.py`, `test_muon_analysis.py`.
+
 ## RADIOROC 44 — shared trigger gain and operating threshold
 
 Root cause of the zero-trigger acquisition: scans ran at trigger gain code 1 while Autocalibration and Acquisition ran
