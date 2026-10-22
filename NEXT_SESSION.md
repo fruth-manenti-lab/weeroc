@@ -18,6 +18,17 @@ offline tests, fake transports or saved data unless the operator explicitly asks
 5. Priority 0: controlled demonstration that the coincidence needs two distinct channels.
 6. Guide open items: operating threshold choice, hold delay confirmation, label check against the real screens.
 
+## Separate goals (do not block the muon count)
+- **Gain calibration with the board** (idea from the cryo Attocube work, 2026-10-22): first look at dark pulses on a scope via
+  Analog_Probe (Probes/Masks tab, Shaper output high gain, persistence on) to see whether 1/2/3 photoelectron levels resolve;
+  if yes, an LED or dark-count finger plot per channel at 2-3 bias values (onsemi MICROFC-60035-SMT, Vbr temperature
+  coefficient 21.5 mV/degC), then equalise with the per-channel input DACs. Ctest charge injection converts ADC counts to
+  fC for an absolute gain. Cryo analysis code is in `cryo_detector/Gain/analyze_gain_advanced.py`.
+- **64-SiPM, two-layer detector trigger**: test layer-OR coincidence with the two SiPMs now on ch6/ch32 (ch6 only in the T1
+  mask, ch32 only in the T2 mask, trigger sources NORT1 and NORT2, type 2 channels coincidence) and compare with the
+  Individual-trigger result (about 18/min). Needs a mask-group mode in the acquisition job. The vendor guide does not
+  document NORT1/NORT2/NORTQ/OR64; confirm with the Weeroc datasheet if obtainable.
+
 ## Environment reminders
 - `.venv-foundation` with `PYTHONPATH=src` for the app and `tools/check_development.py` (about a minute); board control
   port `/dev/cu.usbserial-RD3_320`; keep the board on its own USB port; close the app before running any script.
