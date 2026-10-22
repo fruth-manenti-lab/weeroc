@@ -5,10 +5,10 @@ Read `AGENTS.md`, the RADIOROC 44 entries at the top of `IMPLEMENTATION_STATUS.m
 offline tests, fake transports or saved data unless the operator explicitly asks for a hardware check.
 
 ## Next tasks, in order
-1. Reproduce headlessly why the app's coincidence acquisition got zero batches while the CLI
-   (`scripts/radioroc_acquire.py`, same settings) filled batches in seconds. Compare the app's job path
-   (`AcquisitionWindow` -> `ConnectionWorker` -> `AcquisitionJob`) with the CLI's, offline first (fake transport,
-   saved run configs 20261021-164706-7a50dea4 and 20261021-160106-c89b2a43), then ask the operator for a hardware run.
+1. DONE offline: cause of the app's zero batches = trigger gain mismatch (scans at gain 1, autocalibration and
+   acquisition at the chip's 8), see the RADIOROC 44 lead entry. Next: add a shared Trigger gain code to the Calibration
+   bar so Threshold scan, Autocalibration, Hold scan and Acquisition read one value; make `scripts/radioroc_acquire.py`
+   print its hidden defaults (threshold 530, pat gain 1). Operator then redoes autocalibration at gain 1 and takes the run.
 2. Decide with the operator whether to change the Acquisition/hold-delay default from 530 to about 30 ns, and add a
    hold-delay sweep helper if useful. Muon runs need 20-55 ns (see the hardware findings).
 3. Operator re-runs the whole calibration process from the guide on the board; collect every label or step that was

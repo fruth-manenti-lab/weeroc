@@ -238,7 +238,7 @@ High gain is for small pulses and low gain is for large ones. A muon pulse from 
 7. **When you are done, switch the probe off:** **Probes/Masks** tab > **Off, all channels**. Leaving the probe on degrades the chip's performance, so it must be off for every scan and for the muon run.
 8. Write the gain and shaping codes you ended with in the log (section 10).
 
-If you change **Gain (paT)** (the trigger preamplifier), type the same code into **Trigger gain code** on the Threshold scan tab and **Trigger preamp gain code** on the Acquisition page, so every scan and the muon run use the same trigger gain. If you change any gain or shaping time, redo Step 1 onwards: the noise floor, trims and hold delay all move with them.
+If you change **Gain (paT)** (the trigger preamplifier), use the new code instead of 1 everywhere in the "Trigger gain must match" rule (section 6). If you change any gain or shaping time, redo Step 1 onwards: the noise floor, trims and hold delay all move with them.
 
 ### Step 1: Noise floor (Threshold scan tab, no test signal)
 
@@ -261,7 +261,7 @@ Dark box closed, bias on, generator outputs off.
 | **Counter window (ms)** | 100 | **Change** (default is 50). Longer window, less scatter in the rate. |
 | **Averages** | 1 | Leave at default. |
 | **Discriminator** | T1 | Leave at default. |
-| **Trigger gain code** | Keep current | Leave at default. If you changed **Gain (paT)** in Step 0b, type the same code here and in **Trigger preamp gain code** on the Acquisition page, so every scan and the muon run use the same trigger gain. |
+| **Trigger gain code** | 1 | **Change.** Use the same code here, in the Autocalibration tab and on the Acquisition page (see "Trigger gain must match" in section 6). 1 is the highest trigger gain; the bench noise floors were measured at 1. |
 | **Mask other channels** | Ticked | Leave at default. Only the selected channels count. |
 | **Enable Ctest** | Unticked | Leave unticked: this is a noise scan with no test signal. |
 | **Initialize FPGA (persists)** | Ticked on the first scan after every power cycle only | Later scans: unticked. |
@@ -311,7 +311,7 @@ Check the bias is really on: a biased SiPM shows a rate 2 to 5 times higher than
 | **Enable Ctest** | Ticked | **Change.** Autocalibration needs the internal test charge to find each channel's crossing. |
 | **S-curve clock index (0..3)** | 3 | Leave at default. |
 | **Count trigger level instead of rising edge** | Unticked | Leave at default. |
-| **Trigger preamp gain code** (in **Optional gain override**) | Keep current | Leave at default. |
+| **Trigger preamp gain code** (in **Optional gain override**) | 1 | **Change.** The same code as the Threshold scan and the Acquisition page. Trims depend on the gain, so redo autocalibration if you change it. |
 | **Step 1: reference-channel LSB-ratio probe**: **First DAC code**, **Last DAC code**, **DAC step** | 0, 1000, 50 | Leave at default. |
 | **Step 2: transition scan across selected channels**: **DAC step**, **Upper-bound margin**, **Upper-bound floor**, **Upper-bound cap** | 10, 150, 300, 1023 | Leave at default. |
 | **Final: verification scan window**: **Codes before mean crossing**, **Codes after mean crossing**, **DAC step** | 50, 120, 2 | Leave at default. |
@@ -412,9 +412,12 @@ Use exactly these values on the **Acquisition** page. The rest stay at their def
 | **Time-window trigger count** | 1 | Only used by the **Time window** trigger type. Leave it. |
 | **Threshold DAC** | The operating threshold from section 5 | If left at **Keep current** it uses whatever the chip has now. |
 | **Mask other channels** (tick box lower on the page) | Ticked (the default) | With both sources on Individual trigger, the app unmasks exactly the two named channels and no others. |
+| **Trigger preamp gain code** | 1 | Must equal the Threshold scan and Autocalibration value (see below). |
 | **Use external ASIC acquisition trigger (IO_FPGA6)** | Unticked | Muon runs use the self-trigger. |
 
 The coincidence needs both channels to cross threshold inside the window, so the rate is much lower than a single channel's. **Check that it works:** after a short run click **Open saved run…** and look at the spectra and the events: in every event both channels should be above their pedestal. If many events show only one channel above pedestal, the coincidence is not being enforced, so keep both channels recorded and apply the coincidence offline (the open Priority 0 item in the project).
+
+**Trigger gain must match.** Set **Trigger preamp gain code** on the Acquisition page to 1, the same as the Threshold scan and the Autocalibration tab. The scans change the gain only while they run. An acquisition left on **Keep current** uses the chip's own value (8 after defaults). The threshold DAC means a different pulse height at each gain, so a threshold chosen at gain 1 is far too high at gain 8: no pulse crosses it and no batch ever fills. This is what happened on 2026-10-21, when the app got zero batches in 105 s while a script that applies gain 1 itself did not. Trims also depend on gain, so redo autocalibration if the gain you use changes.
 
 **Choose the hold delay for the muon run**
 
@@ -543,6 +546,7 @@ Where the reference rate comes from, in order of preference:
 
 | Symptom | Likely cause | What to do |
 | --- | --- | --- |
+| Acquisition never fills a batch although the plints are fine | Trigger gain on the Acquisition page differs from the gain used for the scans, so the threshold is too high | Set **Trigger preamp gain code** to the same value as the scans (1) and redo autocalibration |
 | App cannot connect | Another program owns the port, or board unpowered | Close other programs (`lsof /dev/cu.usbserial-RD3_32*`), check 5 V and USB |
 | "no response" or "i2c FIFO timed out", or scans blocked after a fault | Known board hang, often when the board shares a USB hub | Click **Acknowledge fault review** on **ASIC config.** (no disconnect needed). If the board answers, scans work again. If not: bias off, power-cycle 5 V and USB, disconnect and reconnect, re-apply defaults, redo autocalibration. Move the board to a USB port of its own |
 | Trims lost after loading a calibration file | Trim re-apply is untested on hardware | Run a threshold scan to check; if it looks wrong, redo autocalibration |

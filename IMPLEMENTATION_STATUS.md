@@ -45,6 +45,14 @@ jobs, `test_desktop_icon.test_icon_resource_is_a_png` -> `No module named 'radio
 143d4a8) passed ubuntu-24.04 and macos-14 on Python 3.11 and 3.13 including the offscreen GUI steps. Only a Node.js 20
 deprecation warning for actions/checkout@v4 and setup-python@v5 remains (bump later). `main` stays red until the fix is merged.
 
+Zero-batch app runs explained offline (2026-10-22, no hardware): saved run configs show the user's Threshold scans ran with
+`trigger_preamp_gain` 1 (the guide said so), while Autocalibration and the Acquisition used "Keep current" (chip value 8
+after defaults). A threshold chosen at gain 1 (470-540) is far too high at gain 8, so nothing triggers. The "reproducing"
+CLI runs worked only because `scripts/radioroc_acquire.py` silently defaults to `--threshold-dac 530` and `--pat-gain 1`.
+Guide now fixes trigger gain at 1 in the Threshold scan, Autocalibration and Acquisition ("Trigger gain must match").
+Follow-ups: a shared trigger-gain field on the Calibration bar (like Hold delay) so the three windows cannot disagree;
+the CLI's hidden defaults should be printed or removed; autocalibration must be redone at gain 1.
+
 Limitations: no dead-time measurement yet; Priority 0 (formal coincidence verification with controlled inputs) still
 open; the Acquisition hold delay still defaults to 530 (wrong for muon runs); guide labels not seen rendered for the
 grid Select all/none captions and some Hold-scan field labels.
