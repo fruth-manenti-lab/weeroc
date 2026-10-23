@@ -16,7 +16,9 @@ from PySide6.QtCore import QObject, Signal
 N_CHANNELS = 64
 _FALLBACK_T1 = 4
 _FALLBACK_T2 = 5
-DEFAULT_HOLD_DELAY_NS = 530
+# Self-triggered muon runs peak at 20-55 ns (bench sweep 2026-10-21); the external-trigger /
+# synchro-pulser scan peak near 525 ns does not apply to them.
+DEFAULT_HOLD_DELAY_NS = 30
 MAX_HOLD_DELAY_NS = 100000
 DEFAULT_TRIGGER_GAIN = 1
 MIN_TRIGGER_GAIN = 1
@@ -166,3 +168,28 @@ def bind_operating_threshold(spin, selection) -> None:
     spin.valueChanged.connect(selection.set_operating_threshold)
     selection.operating_threshold_changed.connect(
         lambda value: spin.setValue(value) if spin.value() != value else None)
+
+
+def channels_from_manifest(manifest):
+    """Channel list a saved run's manifest recorded, or None when absent/unusable."""
+    operation = manifest.get("operation") if isinstance(manifest, dict) else None
+    if not isinstance(operation, dict):
+        return None
+    for holder in (operation.get("scan"), operation.get("acquisition"), operation):
+        channels = holder.get("channels") if isinstance(holder, dict) else None
+        if isinstance(channels, list) and channels:
+            try:
+                return [int(c) for c in channels]
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def apply_saved_channels(selection, channels) -> None:
+    """Carry a reopened result's channels into the shared selection (no-op if unknown)."""
+    if selection is None or not channels:
+        return
+    try:
+        selection.set_channels(channels)
+    except (TypeError, ValueError):
+        pass

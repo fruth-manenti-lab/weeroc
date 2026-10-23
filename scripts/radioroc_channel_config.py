@@ -21,6 +21,8 @@ if __package__:
         apply_preset_defaults,
         connection_config_from_args,
         load_preset_from_argv,
+        print_effective_settings,
+        unset_args,
         prepare_device,
     )
 else:
@@ -30,6 +32,8 @@ else:
         apply_preset_defaults,
         connection_config_from_args,
         load_preset_from_argv,
+        print_effective_settings,
+        unset_args,
         prepare_device,
     )
 from radioroc.application.channel_config import ChannelConfigOperation, apply_channel_config
@@ -81,6 +85,7 @@ def main() -> int:
 
     preset_path, preset = load_preset_from_argv()
     args = build_parser(preset, preset_path).parse_args()
+    script_defaulted = unset_args(args, ["tq_mask_value", "input_dac_enable_value"])
     if args.tq_mask_value is None:
         args.tq_mask_value = 1
     if args.input_dac_enable_value is None:
@@ -107,6 +112,21 @@ def main() -> int:
     )
 
     connection = connection_config_from_args(args)
+    print_effective_settings(
+        "radioroc_channel_config",
+        {
+            "TQ mask channels": args.tq_mask, "TQ mask value": args.tq_mask_value,
+            "input DAC enable channels": args.input_dac_enable,
+            "input DAC enable value": args.input_dac_enable_value,
+            "input DAC value channels": args.input_dac_value, "input DAC value": args.value,
+            "input DAC impedance": args.input_dac_impedance,
+            "verify": args.verify, "restore": args.restore,
+            "apply defaults": args.apply_defaults, "skip fpga init": args.skip_fpga_init,
+        },
+        {label: None for label, arg in (
+            ("TQ mask value", "tq_mask_value"),
+            ("input DAC enable value", "input_dac_enable_value")) if arg in script_defaulted},
+    )
     try:
         with RadiorocSerial.from_config(connection) as transport:
             device = RadiorocDevice(transport, dry_run=not args.execute)

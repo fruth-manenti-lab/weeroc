@@ -42,6 +42,17 @@ def _describe(error):
     return f"{type(error).__name__}: {error}" if error is not None else None
 
 
+def reject_same_channel_coincidence(config) -> None:
+    """2-channel coincidence of a channel with itself is meaningless: reject it."""
+    if (config.trigger_type == 1 and config.trigger_source == 3
+            and config.trigger_source_2 == 3
+            and config.trigger_channel == config.trigger_channel_2):
+        raise ValueError(
+            f"2-channel coincidence needs two different channels, but both trigger channels are "
+            f"{config.trigger_channel}. Select two channels on the Calibration page (T1 and T2 "
+            'follow the selection), or choose Trigger type "Simple trigger".')
+
+
 @dataclass(frozen=True)
 class AcquisitionJobConfig:
     acquisition: AcquisitionConfig
@@ -52,6 +63,7 @@ class AcquisitionJobConfig:
 
     def validate(self) -> None:
         self.acquisition.validate()
+        reject_same_channel_coincidence(self.acquisition)
         for name in ("initialize_fpga", "apply_defaults", "clear_analog_probe"):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be boolean")

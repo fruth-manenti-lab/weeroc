@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QSizePolicy, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QVBoxLayout, QLineEdit, QMessageBox,
                                QPushButton, QSpinBox, QWidget)
 
+from radioroc.gui.spin_util import select_all_on_focus
 from radioroc.application import calibration_file as cf
 
 
@@ -51,12 +52,12 @@ class CalibrationFileBar(QWidget):
         self.runs_root = Path(runs_root) if runs_root is not None else Path.cwd() / "radioroc_runs"
         self.folder = self.runs_root / "calibration"
 
-        self.operating_threshold = QSpinBox()
+        self.operating_threshold = select_all_on_focus(QSpinBox())
         self.operating_threshold.setRange(0, 1023)
         self.operating_threshold.setValue(selection.operating_threshold)
         self.operating_threshold.valueChanged.connect(selection.set_operating_threshold)
         selection.operating_threshold_changed.connect(self._show_operating_threshold)
-        self.trigger_gain = QSpinBox()
+        self.trigger_gain = select_all_on_focus(QSpinBox())
         self.trigger_gain.setRange(1, 63)
         self.trigger_gain.setValue(selection.trigger_gain)
         self.trigger_gain.setAccessibleName("Trigger gain (paT)")
@@ -66,12 +67,14 @@ class CalibrationFileBar(QWidget):
         self.trigger_gain.valueChanged.connect(selection.set_trigger_gain)
         selection.trigger_gain_changed.connect(self._show_trigger_gain)
         self.operating_threshold.setAccessibleName("Operating threshold DAC")
-        self.hold_delay = QSpinBox()
+        self.hold_delay = select_all_on_focus(QSpinBox())
         self.hold_delay.setRange(0, 100000)
         self.hold_delay.setSingleStep(5)
         self.hold_delay.setValue(selection.hold_delay_ns)
         self.hold_delay.setAccessibleName("Hold delay (ns)")
-        self.hold_delay.setToolTip("External hold delay in ns, read off the peak of the Hold scan. "
+        self.hold_delay.setToolTip("Hold delay in ns. Self-triggered muon runs: about 30 ns (20 to 55 ns measured on the bench); "
+                                   "with the external ASIC trigger or a pulser fired by the synchro pulse, "
+                                   "read the peak (near 525 ns) off the Hold scan. "
                                    "Saved in the calibration file and used by the Acquisition page.")
         self.hold_delay.valueChanged.connect(selection.set_hold_delay_ns)
         selection.hold_delay_changed.connect(self._show_hold_delay)

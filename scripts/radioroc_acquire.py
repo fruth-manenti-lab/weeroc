@@ -19,6 +19,8 @@ if __package__:
         apply_preset_defaults,
         connection_config_from_args,
         load_preset_from_argv,
+        print_effective_settings,
+        unset_args,
         run_metadata,
         settings_from_args,
     )
@@ -29,6 +31,8 @@ else:
         apply_preset_defaults,
         connection_config_from_args,
         load_preset_from_argv,
+        print_effective_settings,
+        unset_args,
         run_metadata,
         settings_from_args,
     )
@@ -179,6 +183,27 @@ def build_parser(preset: dict[str, object] | None = None, preset_path: Path | No
     return parser
 
 
+# label -> (argparse attribute, explanation of how the script default differs from the desktop app)
+_DEFAULT_NOTES: dict[str, tuple[str, str | None]] = {
+    "channels": ("channels", None),
+    "trigger channel 2": ("trigger_channel_2", None),
+    "trigger type": ("adc_trigger_type", None),
+    "trigger source": ("adc_trigger_source", None),
+    "trigger source 2": ("adc_trigger_source_2", None),
+    "threshold DAC": ("threshold_dac", "not the chip's current threshold; the desktop app uses the "
+                                       "operating threshold from the Calibration bar"),
+    "trigger preamp gain code (paT)": ("pat_gain", "not the chip's current gain (8 after defaults); "
+                                                   "the desktop app uses Trigger gain (paT) from the Calibration bar"),
+    "hold delay ns": ("hold_delay_ns", "not the chip's current hold delay"),
+    "conversion delay ns": ("conversion_delay_ns", None),
+    "window ns": ("adc_window_ns", None),
+    "ADC time-window trigger count": ("adc_nb_trig", None),
+    "acquisitions per batch": ("acquisitions_per_batch", None),
+    "batches": ("batches", None),
+    "timeout s": ("timeout_s", None),
+}
+
+
 def main() -> int:
     """Run ADC event acquisition.
 
@@ -191,6 +216,7 @@ def main() -> int:
 
     preset_path, preset = load_preset_from_argv()
     args = build_parser(preset, preset_path).parse_args()
+    script_defaulted = unset_args(args, [arg for arg, _note in _DEFAULT_NOTES.values()])
     if args.channels is None:
         args.channels = "4"
     if args.threshold_dac is None:
@@ -231,6 +257,40 @@ def main() -> int:
     channels = parse_channels(args.channels)
     trigger_channel = args.trigger_channel if args.trigger_channel is not None else channels[0]
     plot_channel = args.plot_channel if args.plot_channel is not None else trigger_channel
+    defaulted = {label: note for label, (arg, note) in _DEFAULT_NOTES.items() if arg in script_defaulted}
+    if args.trigger_channel is None:
+        defaulted["trigger channel"] = "first saved channel"
+    print_effective_settings(
+        "radioroc_acquire",
+        {
+            "channels": args.channels,
+            "trigger channel": trigger_channel,
+            "trigger channel 2": args.trigger_channel_2,
+            "trigger type": args.adc_trigger_type,
+            "trigger source": args.adc_trigger_source,
+            "trigger source 2": args.adc_trigger_source_2,
+            "threshold DAC": args.threshold_dac,
+            "trigger preamp gain code (paT)": args.pat_gain,
+            "hold delay ns": args.hold_delay_ns,
+            "conversion delay ns": args.conversion_delay_ns,
+            "window ns": args.adc_window_ns,
+            "ADC time-window trigger count": args.adc_nb_trig,
+            "acquisitions per batch": args.acquisitions_per_batch,
+            "batches": args.batches,
+            "timeout s": args.timeout_s,
+            "threshold": "T2" if args.t2 else "T1",
+            "mask": "off" if args.no_mask else "on",
+            "peak sensing": args.peak_sensing,
+            "synchro trigger": args.synchro_trigger,
+            "rstn manual": args.rstn_manual,
+            "apply defaults": args.apply_defaults,
+            "skip fpga init": args.skip_fpga_init,
+        },
+        defaulted,
+    )
+    if args.hold_delay_ns > 200 and not args.synchro_trigger:
+        print("  note: long hold for a self-triggered run; muon pulses peak at 20-55 ns on the bench",
+              file=sys.stderr)
     out_dir = Path(args.out_dir) if args.out_dir else default_run_dir("acquire", channels=channels)
     csv_path = out_dir / "events.csv"
     plot_path = Path(args.plot_out) if args.plot_out else out_dir / f"live_spectrum_ch{plot_channel}_{args.plot_gain}.png"

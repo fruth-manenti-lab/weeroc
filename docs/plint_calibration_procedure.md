@@ -1,5 +1,21 @@
 # Plint calibration procedure (Priority 2, `PLINT_STUDENT_MVP_DIRECTIVE.md`)
 
+> **Status note (2026-10-22).** The student-facing procedure is now
+> `docs/muon_rate_measurement_guide.md`. Use it; this file is the older
+> design record. Changes since it was written:
+>
+> - **Step 6 tool exists.** `radioroc.data.calibration_record`,
+>   `scripts/radioroc_save_calibration_record.py`, and the Save/Load
+>   calibration bar in the app.
+> - **Threshold.** The operating threshold is about 540 at trigger gain 1
+>   (it was 575). Threshold scan, Autocalibration and Acquisition must use the
+>   same trigger gain. The Calibration bar holds it.
+> - **Hold delay.** The external-synchro Ctest hold scan peaks near 525 ns
+>   (pulser reference). Self-triggered muon runs need about 30 ns (sweep
+>   20 to 55 ns), measured with muons.
+> - **Channels.** The two-SiPM bench setup uses channels 6 and 32.
+> - **Settings.** See section 5 of the guide for the settings tables.
+
 This is the calibration procedure a student runs before collecting plint
 data, using tools already built into the RADIOROC desktop app (no new
 software required for any step below except recording the results). It
@@ -30,7 +46,7 @@ be re-measured with SiPMs actually biased, not assumed from an
 unbiased/Ctest-only scan.
 
 **Suggested settings**: `dac_min=0, dac_max=1023, dac_step=10-20,
-window_ms=100, pat_gain=1` (or whatever gain the calibration ultimately
+window_ms=100, pat_gain=1` (the guide requires the same trigger gain in scan, autocalibration and acquisition; or whatever gain the calibration ultimately
 settles on — redo this step if gain changes later). A finer `dac_step`
 resolves the pedestal shape better; a coarser one is faster. Start coarse,
 re-scan narrower around anything that looks wrong.
@@ -80,6 +96,8 @@ enough to still catch real SiPM pulses. **Do not hardcode a single
 that threshold/window/cuts are unsettled until the operator decides them
 for the actual experiment; record whatever is chosen, and why, in Step 6.
 
+**Superseded: see note.** The bench value is now about 540 at trigger gain 1 (was 575).
+
 **Acceptance**: a specific DAC value, with the reasoning (margin above
 which channel's noise floor) written down, not just a number.
 
@@ -117,6 +135,8 @@ configuration is actually in use for the real experiment). Sweep
 found a clean peak within 100-900ns at 50ns steps for one specific
 setup), then narrow.
 
+**Superseded: see note.** An external-synchro scan peaks near 525 ns, but self-triggered muon runs need about 30 ns.
+
 **Acceptance**: a `hold_delay_ns`/`conversion_delay_ns` pair with the
 scan showing a clear, unambiguous peak (not a flat or ambiguous curve) —
 record which point was chosen and why (e.g. "peak center," not "first
@@ -124,9 +144,10 @@ point above baseline").
 
 ## Step 6 — Save an attributable calibration record
 
-No dedicated tool exists yet for this step (a real gap — see
-`NEXT_SESSION.md`). Until a saved-calibration-record feature exists in the
-app, record the following by hand, dated and attributed, alongside the
+**Superseded: see note.** The tool now exists (calibration bar, `scripts/radioroc_save_calibration_record.py`). The text below is the original manual list of what the record must hold; the record is dated and attributed, alongside the
+run(s) it applies to:
+
+Original text: record the following by hand, dated and attributed, alongside the
 run(s) it applies to:
 
 - Excluded channels from Step 1, and why.

@@ -25,6 +25,7 @@ from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.application.hold_scan import HoldScanJob, HoldScanJobConfig
 from radioroc.application.hold_scan_worker import HoldScanWorker
 from radioroc.data.hold_reader import read_hold_run
+from radioroc.gui.spin_util import select_all_on_focus
 from radioroc.gui.layout_util import fit_controls_pane, fit_special_text, wrap_plot_title
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
 from radioroc.gui.channel_select import ChannelSelectGrid
@@ -38,7 +39,7 @@ def _integer(low, high, value):
     field = QSpinBox()
     field.setRange(low, high)
     field.setValue(value)
-    return field
+    return select_all_on_focus(field)
 
 
 def _decimal(low, high, value):
@@ -46,7 +47,7 @@ def _decimal(low, high, value):
     field.setDecimals(3)
     field.setRange(low, high)
     field.setValue(value)
-    return field
+    return select_all_on_focus(field)
 
 
 def _new_directory(execution_mode="simulation"):
@@ -911,6 +912,9 @@ class HoldScanWindow(QMainWindow):
         try:
             saved = read_hold_run(Path(path))
             label = saved.execution_mode.upper()
+            if self.shared_selection is not None:
+                from radioroc.gui.calibration_selection import apply_saved_channels, channels_from_manifest
+                apply_saved_channels(self.shared_selection, channels_from_manifest(saved.manifest))
             self.banner.setText(f"SAVED RESULT · {label} · {saved.status} · {saved.directory} · Controls show current settings, not this run's")
             self._plot(saved.rows, saved.x_name, f"{label} · {saved.status} · {len(saved.rows)} saved points")
             status = f"{label} · {saved.status} · {len(saved.rows)} points"

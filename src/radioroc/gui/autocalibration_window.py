@@ -29,6 +29,7 @@ from matplotlib.figure import Figure
 
 from radioroc.application.autocalibration import AutocalibrationJob, AutocalibrationJobConfig
 from radioroc.data.autocalibration_reader import read_autocalibration_run
+from radioroc.gui.spin_util import select_all_on_focus
 from radioroc.gui.layout_util import fit_controls_pane, fit_special_text, wrap_plot_title
 from radioroc.gui.channel_select import ChannelSelectGrid
 from radioroc.gui.hint_bar import HintBar
@@ -40,7 +41,7 @@ def _integer(low, high, value):
     field = QSpinBox()
     field.setRange(low, high)
     field.setValue(value)
-    return field
+    return select_all_on_focus(field)
 
 
 def _new_directory():

@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
+from radioroc.gui.spin_util import select_all_on_focus
 from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.transport.config import (
     DEFAULT_BAUD, DEFAULT_TIMEOUT_SECONDS, RadiorocConnectionConfig,
@@ -26,7 +27,7 @@ def _integer(low, high, value):
     field = QSpinBox()
     field.setRange(low, high)
     field.setValue(value)
-    return field
+    return select_all_on_focus(field)
 
 
 def _decimal(low, high, value):
@@ -34,7 +35,7 @@ def _decimal(low, high, value):
     field.setDecimals(3)
     field.setRange(low, high)
     field.setValue(value)
-    return field
+    return select_all_on_focus(field)
 
 
 class ConnectionPanel(QWidget):

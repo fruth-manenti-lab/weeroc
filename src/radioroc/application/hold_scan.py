@@ -45,6 +45,8 @@ class HoldScanJobConfig:
 
     def validate(self) -> None:
         self.scan.validate()
+        from radioroc.application.acquisition import reject_same_channel_coincidence
+        reject_same_channel_coincidence(self.scan)
         for name in ("initialize_fpga", "apply_defaults"):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be boolean")

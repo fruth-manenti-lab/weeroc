@@ -16,6 +16,8 @@ if __package__:
         apply_preset_defaults,
         connection_config_from_args,
         load_preset_from_argv,
+        print_effective_settings,
+        unset_args,
         run_metadata,
         settings_from_args,
     )
@@ -26,6 +28,8 @@ else:
         apply_preset_defaults,
         connection_config_from_args,
         load_preset_from_argv,
+        print_effective_settings,
+        unset_args,
         run_metadata,
         settings_from_args,
     )
@@ -89,11 +93,23 @@ def main() -> int:
 
     preset_path, preset = load_preset_from_argv()
     args = build_parser(preset, preset_path).parse_args()
+    channels_defaulted = args.channels is None
     if args.channels is None:
         args.channels = "4"
     connection = connection_config_from_args(args)
     channels = parse_channels(args.channels)
     out_dir = Path(args.out_dir) if args.out_dir else default_run_dir("autocalibrate", channels=channels)
+    print_effective_settings(
+        "radioroc_autocalibrate",
+        {
+            "channels": args.channels,
+            "trigger preamp gain code (paT)": args.pat_gain,
+            "threshold": "T2" if args.t2 else "T1", "mask": "off" if args.no_mask else "on",
+            "ctest": args.use_ctest,
+            "apply defaults": args.apply_defaults, "skip fpga init": args.skip_fpga_init,
+        },
+        {"channels": None} if channels_defaulted else None,
+    )
     config_kwargs = dict(
         channels=channels,
         t1=not args.t2,

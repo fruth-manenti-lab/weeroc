@@ -196,3 +196,45 @@ def settings_from_args(args: argparse.Namespace, **extra: object) -> dict[str, o
     for key, value in {**vars(args), **extra}.items():
         settings[key] = str(value) if isinstance(value, Path) else value
     return settings
+
+
+def unset_args(args: argparse.Namespace, names: list[str]) -> set[str]:
+    """Return the argument names still `None` (not given on CLI or preset).
+
+    Call this before applying script defaults, then pass the result to
+    `print_effective_settings` as `defaulted`.
+    """
+
+    return {name for name in names if getattr(args, name, None) is None}
+
+
+def print_effective_settings(
+    title: str,
+    items: dict[str, object],
+    defaulted: dict[str, str | None] | set[str] | None = None,
+    *,
+    file=None,
+) -> None:
+    """Print a compact 'Effective settings' block, marking script defaults.
+
+    **Inputs**
+    - `title` (`str`): Command name for the header.
+    - `items` (`dict[str, object]`): Label to effective value, in print order.
+    - `defaulted` (`dict | set | None`): Labels whose value came from a script
+      default. A dict value is an optional explanation appended after the marker.
+    - `file`: Output stream; defaults to stderr so stdout JSON stays valid.
+
+    **Returns**
+    - `None`
+    """
+
+    out = file if file is not None else sys.stderr
+    marks = defaulted if isinstance(defaulted, dict) else {key: None for key in (defaulted or ())}
+    print(f"Effective settings ({title}):", file=out)
+    for label, value in items.items():
+        text = "chip as is" if value is None else str(value)
+        if label in marks:
+            note = marks[label]
+            text += f" (script default; {note})" if note else " (script default)"
+        print(f"  {label}: {text}", file=out)
+    print("  (values marked 'script default' were not given on the command line)", file=out)

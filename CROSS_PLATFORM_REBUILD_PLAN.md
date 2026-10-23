@@ -3,15 +3,14 @@
 Planning baseline: 9 September 2026. This document defines the target architecture
 and scope; completed slices and remaining validation are tracked separately.
 
-Implementation update: packaging, transport/board ownership, the shared threshold
-job lifecycle, simulation desktop and desktop hardware connection are implemented.
-Desktop hardware threshold Run is implemented through one `ConnectionWorker`
-owner and the shared `ThresholdJob`; physical GUI validation remains pending.
-Earlier read-only board status returned 5 and cross-interface ownership was
-verified. The executed CLI restoration evidence remains a separate historical
-record; it does not authorize GUI scans. See `IMPLEMENTATION_STATUS.md` for
-current versions, evidence and limits, and `NEXT_SESSION.md` for the next bounded
-task.
+> **Status (2026-10-22).** This plan is the original scope. For current state,
+> evidence and limits, see `IMPLEMENTATION_STATUS.md`.
+>
+> - The package layout in use is `src/radioroc/{application,data,gui,protocol,transport}`,
+>   with CLIs in `scripts/`. The plan's `device/config/workflows/analysis/cli`
+>   layout was not adopted.
+> - The parity table `docs/parity/` is being built.
+> - The desktop has Calibration, Acquisition and Muon pages.
 
 The target is one maintained Python package with a desktop interface and a CLI,
 covering the behavior of the Windows RADIOROC application on macOS, Debian, and

@@ -366,7 +366,7 @@ After the hold scan, for a light check with real SiPM pulses, move the CH1 cable
 
 Switch the generator outputs **off** afterwards.
 
-**Hold delay (ns) on the bar.** After you choose the hold delay for the muon run (section 6), type it into **Hold delay (ns)** on the Save/Load bar. It is saved in the calibration file and restored by **Load calibration…**, and the **Acquisition** page's **Hold delay (ns)** takes the same value (changing either one changes the other). The app starts at 530, which is wrong for muon runs: change it.
+**Hold delay (ns) on the bar.** After you choose the hold delay for the muon run (section 6), type it into **Hold delay (ns)** on the Save/Load bar. It is saved in the calibration file and restored by **Load calibration…**, and the **Acquisition** page's **Hold delay (ns)** takes the same value (changing either one changes the other). The app starts at 30 ns, which suits muon runs; confirm it with your own sweep (section 6).
 
 ### Step 4: S-curve (optional)
 
@@ -394,14 +394,14 @@ You take two kinds of run: a **signal run** (muons present) and a **background r
 
 A single SiPM channel above threshold is not proof of a muon, because dark counts and electronic noise also cross a low threshold. We have two plints with a SiPM each, so two cleaner options exist:
 
-- **Coincidence of the two channels:** the Acquisition page offers **Trigger type: 2 channels coincidence**, with a **Coincidence/time window (ns)**. Whether this really requires two distinct channels inside the window is still being verified in the project (see `PLINT_STUDENT_MVP_DIRECTIVE.md`, Priority 0). Until that is confirmed, record both channels and apply the coincidence **offline** from the saved data, and say so in the report. Offline cuts after a looser trigger carry dead-time effects, so keep the trigger rate low.
+- **Coincidence of the two channels:** the Acquisition page offers **Trigger type: 2 channels coincidence**, with a **Coincidence/time window (ns)**. **Verified on the bench.** In the pulser test (September 2026: 10 kHz, threshold 550, channels 4 and 6) one channel alone was rejected, both channels together were accepted (10 of 10, then 20 of 20 events), and an excluded channel paired with either real channel was rejected. In the muon data of 2026-10-21 (channels 6 and 32, hold delay 70 ns) all 12 of 12 coincidence events had pulses in both channels. **Still open:** two channels firing outside the coincidence window (this needs a second, independently timed pulse path that the bench did not have), and the exact timing and order details of the window. Still keep both channels recorded and check offline that both are above pedestal in every event, and say so in the report. Offline cuts after a looser trigger carry dead-time effects, so keep the trigger rate low.
 - **Amplitude cut:** a muon crossing a plastic scintillator gives a pulse many photoelectrons tall, far above single-photoelectron dark counts. Choose a threshold (or an offline cut on the recorded amplitude) above the single-photoelectron level. Check the amplitude histogram: a broad muon peak should stand clear of a noise spike at low amplitude.
 
 Call the result **accepted events**. Do not call it "muon rate" until the detector's known rate has been reproduced (section 8). Two SiPMs seeing a light pulse does not by itself prove the event was a muon.
 
 **Trigger settings for the two-plint coincidence**
 
-Use exactly these values on the **Acquisition** page. The rest stay at their defaults.
+Use exactly these values on the **Acquisition** page. The rest stay at their defaults. **T1 and T2 must be two different channels.** Once both source slots are on **Individual trigger**, the app refuses the same channel twice and tells you to select two channels.
 
 | Setting | Value | Why |
 | --- | --- | --- |
@@ -415,7 +415,7 @@ Use exactly these values on the **Acquisition** page. The rest stay at their def
 | **Trigger preamp gain code** | 1 (follows the bar) | The same gain as the scans (see below). |
 | **Use external ASIC acquisition trigger (IO_FPGA6)** | Unticked | Muon runs use the self-trigger. |
 
-The coincidence needs both channels to cross threshold inside the window, so the rate is much lower than a single channel's. **Check that it works:** after a short run click **Open saved run…** and look at the spectra and the events: in every event both channels should be above their pedestal. If many events show only one channel above pedestal, the coincidence is not being enforced, so keep both channels recorded and apply the coincidence offline (the open Priority 0 item in the project).
+The coincidence needs both channels to cross threshold inside the window, so the rate is much lower than a single channel's. **Check that it works:** after a short run click **Open saved run…** and look at the spectra and the events: in every event both channels should be above their pedestal. If many events show only one channel above pedestal, something is wrong: stop, check the trigger table above, and apply the coincidence offline from the saved data.
 
 **Trigger gain must match.** **Trigger gain (paT)** on the Calibration bar is used by every scan and by the Acquisition page, so they cannot disagree. Keep it at 1. If you ever use an older version of the app, or the scripts, make sure each place uses the same code: on 2026-10-21 the scans ran at gain 1 while an acquisition left on **Keep current** ran at the chip's own value (8). The threshold DAC means a different pulse height at each gain, so a threshold chosen at gain 1 is far too high at gain 8: no pulse crosses it and no batch ever fills (the app got zero batches in 105 s). Trims also depend on gain, so redo autocalibration if the gain you use changes.
 
@@ -445,7 +445,7 @@ The pedestal is about 90 to 100. The pulses are tallest around 20 to 55 ns and f
 2. Click **Acquisition** in the sidebar. Set **Device / mode** to **Hardware connection**.
 3. Check the line at the top of the page. It reads "Channels … · trigger T1=…, T2=… (set on the Calibration page)". The channels and trigger channels come from the shared selection on the **Calibration** page: T1 is the first channel and T2 is the second. If they are wrong, go back to **Calibration** and change them there. This page has no channel grid of its own.
 4. Set the trigger as in the table above. **Threshold DAC** and **Trigger preamp gain code** follow the bar: check they read your operating threshold and 1.
-    - **Hold delay (ns)** and **Conversion delay (ns)** are on this page too. Set **Hold delay (ns)** to the value you chose above (the app starts at 530, which is wrong for muon runs). Leave **Conversion delay (ns)** at 400.
+    - **Hold delay (ns)** and **Conversion delay (ns)** are on this page too. Set **Hold delay (ns)** to the value you chose above (the app starts at 30 ns). Leave **Conversion delay (ns)** at 400.
 5. Set **Acquisitions per batch** and **Batches**. Events requested = acquisitions per batch × batches. Aim for at least **400 accepted events** (see the table below).
 6. Set **Timeout (s)** longer than the time one batch needs to fill. The default 5 s is far too short for muons and the run will fail with a timeout. At about 1 muon per cm² per minute a plint of A cm² gives about A events per minute in single mode, and fewer in coincidence (only muons through both plints), so a batch of 10 events can take 10 / A minutes or more. Use at least three times your estimate, and keep **Acquisitions per batch** small (about 10) so a timeout loses little. Worked example for a 5 × 5 cm plint (about 25 per minute alone; assume 10 to 20 per minute in coincidence with the other plint stacked on top of it): a batch of 10 events takes about 30 to 60 s, so use **Acquisitions per batch** 10, **Timeout (s)** 300 and **Batches** 40 for 400 events (about 16 to 40 minutes). If the plints are side by side instead of stacked, almost no muon crosses both, and every batch will time out. If a batch times out at 300 s, do not just raise the timeout: first run a short single-channel acquisition to check each plint sees about 25 per minute alone.
 7. Check **New run directory** and note its name in the log. Name it `plintID_chN-chM_thrDAC_biasV_signal_YYYYMMDD` if you can edit it.

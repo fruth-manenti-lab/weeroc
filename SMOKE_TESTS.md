@@ -1,5 +1,9 @@
 # RADIOROC Smoke Tests
 
+> **Note (2026-10-22): historical.** These commands date from 2026-09 and use
+> channel 4, a 500 mVpp generator setup and IO1 mux index 5. The current
+> workflow is `docs/muon_rate_measurement_guide.md`.
+
 Use these commands after refactor chunks to confirm the known-good workflows
 still run. Hardware write commands require the RADIOROC board to be connected
 and powered. The synchronized Ctest commands assume:

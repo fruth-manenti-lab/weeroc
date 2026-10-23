@@ -16,6 +16,8 @@ if __package__:
         apply_preset_defaults,
         connection_config_from_args,
         load_preset_from_argv,
+        print_effective_settings,
+        unset_args,
         run_metadata,
         settings_from_args,
     )
@@ -26,6 +28,8 @@ else:
         apply_preset_defaults,
         connection_config_from_args,
         load_preset_from_argv,
+        print_effective_settings,
+        unset_args,
         run_metadata,
         settings_from_args,
     )
@@ -76,6 +80,7 @@ def main() -> int:
 
     preset_path, preset = load_preset_from_argv()
     args = build_parser(preset, preset_path).parse_args()
+    script_defaulted = unset_args(args, ["channels", "dac_min", "dac_max", "dac_step", "clock_index"])
     if args.channels is None:
         args.channels = "4"
     if args.dac_min is None:
@@ -89,6 +94,20 @@ def main() -> int:
     connection = connection_config_from_args(args)
     channels = parse_channels(args.channels)
     out_dir = Path(args.out_dir) if args.out_dir else default_run_dir("scurve", channels=channels)
+    print_effective_settings(
+        "radioroc_scurve",
+        {
+            "channels": args.channels, "DAC min": args.dac_min, "DAC max": args.dac_max, "DAC step": args.dac_step,
+            "clock index": args.clock_index, "trigger level": args.trigger_level,
+            "trigger preamp gain code (paT)": args.pat_gain,
+            "threshold": "T2" if args.t2 else "T1", "mask": "off" if args.no_mask else "on",
+            "ctest": args.use_ctest,
+            "apply defaults": args.apply_defaults, "skip fpga init": args.skip_fpga_init,
+        },
+        {label: None for label, arg in (
+            ("channels", "channels"), ("DAC min", "dac_min"), ("DAC max", "dac_max"), ("DAC step", "dac_step"),
+            ("clock index", "clock_index")) if arg in script_defaulted},
+    )
     scan_config = ScurveConfig(
         channels=channels,
         dac_min=args.dac_min,
