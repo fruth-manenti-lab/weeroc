@@ -40,6 +40,12 @@ class FaultAcknowledgeTests(unittest.TestCase):
     started = _Base.started
     operation = _Base.operation
 
+    def setUp(self):
+        # Cleanups run last-in first-out. Register the temp-directory cleanup BEFORE any worker is started so the
+        # worker is shut down (and finished writing) before the directory is removed; otherwise CI saw
+        # 'OSError: Directory not empty' when a started acquisition was still writing at teardown.
+        self.operation("setup")
+
     def faulted_worker(self):
         transport = GatedTransport(nb_acq=1)
         transport.fail_snapshot = True

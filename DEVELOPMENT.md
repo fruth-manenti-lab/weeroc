@@ -25,6 +25,9 @@ Install `[gui]` for the optional PySide6/Matplotlib threshold desktop. The
 historical conda environment remains available for
 existing lab work.
 
+On Debian or Ubuntu, the board may need serial-port permissions: see
+[`docs/linux_usb_permissions.md`](docs/linux_usb_permissions.md).
+
 ## Commands and compatibility
 
 The installed `radioroc` command and `python -m radioroc` dispatch to the current

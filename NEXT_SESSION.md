@@ -1,22 +1,48 @@
-# RADIOROC 45 — Acquisition path: find why the app saw zero batches, then take the muon rate run
+# RADIOROC 47 — Bench day: calibrate at gain 1, app coincidence run, muon rate per minute
 
-Read `AGENTS.md`, the RADIOROC 44 entries at the top of `IMPLEMENTATION_STATUS.md`, and
-`docs/muon_rate_measurement_guide.md`. Branch `lab/newest-app-test`. Only the operator accesses the board; agents use
-offline tests, fake transports or saved data unless the operator explicitly asks for a hardware check.
+Read `AGENTS.md`, `NEXT_SESSION.md` (this file), the RADIOROC 44 to 46 entries at the top of `IMPLEMENTATION_STATUS.md`, and
+`docs/muon_rate_measurement_guide.md` (the step-by-step bench guide; section 5 has per-tab settings tables). Only the operator
+(Tengiz) accesses the board; agents use offline tests, fake transports or saved data unless the operator asks for a hardware check.
+`gh` is logged in as F7East (CI logs are readable). Before any push that may become a PR: `python tools/check_ci_parity.py`.
+Merge long-lived branches with "Create a merge commit" (squash makes the next PR conflict; see DEVELOPMENT.md).
+PR #6 (`feat/offline-hardening`) holds the 30 ns hold-delay default, same-channel coincidence refusal, CLI effective-settings
+blocks, parity table and doc reconciliation; check whether it is merged and start new work from `main`.
 
-## Next tasks, in order
-1. DONE offline (RADIOROC 44): zero batches = trigger gain mismatch (scans at gain 1, autocalibration and acquisition on the
-   chip's 8). The Calibration bar now holds shared Operating threshold, Trigger gain (paT) and Hold delay, used by every scan
-   and the Acquisition page. Operator: redo autocalibration at gain 1 in the new app, then run the coincidence acquisition
-   (Trigger type 2 channels coincidence, both source slots Individual trigger, hold delay about 30 ns). Still to do: make
-   `scripts/radioroc_acquire.py` print its hidden defaults (threshold 530, pat gain 1).
-2. Decide with the operator whether to change the Acquisition/hold-delay default from 530 to about 30 ns, and add a
-   hold-delay sweep helper if useful. Muon runs need 20-55 ns (see the hardware findings).
-3. Operator re-runs the whole calibration process from the guide on the board; collect every label or step that was
-   unclear. Hardware tests still owed: acknowledge-fault-without-disconnect, trim re-apply from a calibration file.
-4. Muon run: dead-time check with a pulser, background run, rate per minute with uncertainty, compare with the reference.
-5. Priority 0: controlled demonstration that the coincidence needs two distinct channels.
-6. Guide open items: operating threshold choice, hold delay confirmation, label check against the real screens.
+## What was established (so you do not redo it)
+- Zero batches in the app on 2026-10-21 = trigger gain mismatch (scans at gain 1, autocalibration and acquisition at the chip's 8).
+  The Calibration bar now holds one Trigger gain (paT), Operating threshold and Hold delay used by every scan and Acquisition.
+- Muon hold delay for self-triggered coincidence runs is about 30 ns (pulses tallest 20-55 ns; ch6/ch32 at gain 1, threshold 540).
+  The ~525 ns Ctest peak is the synchro-fired pulser reference and is wrong for muons.
+- Coincidence on ch6 + ch32 gave about 18 events/min with both channels above pedestal in 12/12 events (script run, gain 1).
+  September bench test (ch4/ch6, pulser): single channel rejected, pair accepted, excluded channel rejected. Still open: pair
+  outside the window (needs a second independently timed pulse path).
+- Real coincidence runs contain a muon in every event, so the median pedestal is wrong: use a pedestal run or manual values
+  (ch6 about 92, ch32 about 100 at HG gain defaults) on the Muon page.
+
+## Bench plan for today, in order
+1. Power-up per guide section 4: dark box closed, 5 V, own USB port, app, Connect (Firmware status 0x05), then bias.
+2. First Threshold scan on ch6 + ch32 with Initialize FPGA and Apply defaults ticked, trigger gain 1 (bar). Healthy curve: pedestal
+   peak near DAC 100-150, shoulder, floor near 10^2 Hz by DAC 400-480. A channel with no shoulder means no bias/SiPM.
+3. Autocalibration at gain 1 (generator CH1 through 20 dB to IN_TEST1, board IO1 to the generator's external trigger input,
+   Enable Ctest). Save calibration. Choose the operating threshold (about 40-70 codes above the common floor, about 540).
+4. Short coincidence acquisition in the APP (the path that gave zero batches): Trigger type 2 channels coincidence, BOTH source
+   slots Individual trigger, T1 = 6, T2 = 32, hold 30 ns, 5-10 events per batch, Timeout 300 s. Expect a batch in 20-40 s.
+   If it still fails, compare with `scripts/radioroc_acquire.py` (it prints its effective settings now) and report what differs.
+5. Muon rate run: signal run >= 400 accepted events (about 25-40 min), background estimate offline, optional dead-time check
+   with a pulser, rate per minute with uncertainty (guide sections 6-8), compare with the reference rate if one exists.
+   While it runs: use the Muon page to replay the recorded run (pedestals from a short pedestal run or manual values).
+6. Hardware tests owed (ask before each): acknowledge-fault-without-disconnect (cause a real fault safely, e.g. a 2 s timeout
+   batch), trim re-apply from a saved calibration file, Probes/Masks "Off, all channels", analog probe on the scope
+   (Shaper output high gain, persistence on) to see whether 1/2/3 photoelectron levels resolve (gain-calibration feasibility).
+
+## Offline work that can run in parallel (no equipment)
+- Layer-OR trigger mode in the acquisition job (layer 1 channels in the T1 mask, layer 2 in the T2 mask, sources NORT1/NORT2,
+  type 2 channels coincidence) for the 64-SiPM two-layer detector; unit-test with the fake transport, then bench-test on ch6/ch32
+  against the Individual-trigger result.
+- Muon page: per-channel pedestals and HG/LG handling for real data, live feed via `MuonView.append_events`, bigger SiPM squares,
+  comparison with the Geant4 simulations in `~/cosmic-geant`.
+- From `docs/parity/gaps.md`: saved preferences (QSettings), vendor config import/export, probe/mask readback panel, calibration
+  quality pass/fail checker (needs operator tolerances).
 
 ## Muon detector view (branch feat/muon-coincidence-view, RADIOROC 45)
 New sidebar page "Muon": editable 1- or 2-layer SiPM layout (drag, add/remove, save/load JSON), replay of simulated or

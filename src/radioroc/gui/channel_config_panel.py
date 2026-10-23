@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from radioroc_client import parse_channels
+from radioroc.gui.spin_util import select_all_on_focus
 from radioroc.application.channel_config import ChannelConfigOperation
 
 
@@ -22,7 +23,7 @@ def _integer(low, high, value):
     field = QSpinBox()
     field.setRange(low, high)
     field.setValue(value)
-    return field
+    return select_all_on_focus(field)
 
 
 class ChannelConfigPanel(QWidget):

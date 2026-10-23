@@ -16,6 +16,8 @@ if __package__:
         apply_preset_defaults,
         connection_config_from_args,
         load_preset_from_argv,
+        print_effective_settings,
+        unset_args,
         run_metadata,
         settings_from_args,
     )
@@ -26,6 +28,8 @@ else:
         apply_preset_defaults,
         connection_config_from_args,
         load_preset_from_argv,
+        print_effective_settings,
+        unset_args,
         run_metadata,
         settings_from_args,
     )
@@ -94,6 +98,9 @@ def main() -> int:
 
     preset_path, preset = load_preset_from_argv()
     args = build_parser(preset, preset_path).parse_args()
+    script_defaulted = unset_args(args, [
+        "mode", "channels", "hold_min", "acquisitions", "conversion_delay_ns", "sync_io", "adc_trigger_type",
+        "adc_trigger_source", "adc_window_ns", "adc_nb_trig", "timeout_s", "hold_max", "hold_step"])
     if args.mode is None:
         args.mode = "external"
     if args.channels is None:
@@ -122,6 +129,37 @@ def main() -> int:
     hold_max = args.hold_max if args.hold_max is not None else (255 if args.mode == "internal" else 800)
     hold_step = args.hold_step if args.hold_step is not None else (5 if args.mode == "internal" else 25)
     out_dir = Path(args.out_dir) if args.out_dir else default_run_dir(f"{args.mode}_hold_scan", channels=channels)
+    hold_labels = (
+        ("mode", "mode"), ("channels", "channels"), ("hold min ns", "hold_min"), ("hold max ns", "hold_max"),
+        ("hold step ns", "hold_step"), ("acquisitions", "acquisitions"),
+        ("conversion delay ns", "conversion_delay_ns"), ("sync IO", "sync_io"),
+        ("trigger type", "adc_trigger_type"), ("trigger source", "adc_trigger_source"),
+        ("window ns", "adc_window_ns"), ("ADC time-window trigger count", "adc_nb_trig"),
+        ("timeout s", "timeout_s"),
+    )
+    hold_defaulted = {label: None for label, arg in hold_labels if arg in script_defaulted}
+    if args.trigger_channel is None:
+        hold_defaulted["trigger channel"] = "first scanned channel"
+    if args.threshold_dac is None:
+        hold_defaulted["threshold DAC"] = "chip's current threshold is left unchanged"
+    print_effective_settings(
+        "radioroc_hold_scan",
+        {
+            "mode": args.mode, "channels": args.channels, "trigger channel": trigger_channel,
+            "threshold DAC": args.threshold_dac,
+            "trigger preamp gain code (paT)": args.pat_gain,
+            "hold min ns": args.hold_min, "hold max ns": hold_max, "hold step ns": hold_step,
+            "acquisitions": args.acquisitions, "conversion delay ns": args.conversion_delay_ns,
+            "trigger type": args.adc_trigger_type, "trigger source": args.adc_trigger_source,
+            "window ns": args.adc_window_ns, "ADC time-window trigger count": args.adc_nb_trig,
+            "timeout s": args.timeout_s, "sync IO": args.sync_io,
+            "external trigger": args.external_trigger, "synchro trigger": args.synchro_trigger,
+            "rstn manual": args.rstn_manual, "peak sensing": args.peak_sensing,
+            "threshold": "T2" if args.t2 else "T1", "mask": "off" if args.no_mask else "on",
+            "apply defaults": args.apply_defaults, "skip fpga init": args.skip_fpga_init,
+        },
+        hold_defaulted,
+    )
     scan_config = HoldScanConfig(
         mode=args.mode,
         channels=channels,

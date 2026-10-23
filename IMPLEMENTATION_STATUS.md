@@ -1,5 +1,52 @@
 # Implementation status
 
+## RADIOROC 46 — offline hardening: hold default, coincidence validation, reopen carries channels
+
+Offline only. Hold delay default 530 -> 30 ns (Calibration selection and standalone Acquisition; hints explain 30 ns
+self-triggered vs ~525 ns external/synchro scan; Preview notes a hold delay above 200 ns on a self-triggered run).
+`AcquisitionJobConfig`/`HoldScanJobConfig` reject 2-channel coincidence with both slots on the same channel (message
+points to the Calibration page; GUI default T2 source is NORT1, so it triggers once source T2 is "Individual trigger").
+Reopening a saved Threshold/Hold/S-curve result or Acquisition run (current segment) copies its channels into the shared
+selection when one is bound. Spin boxes select all on focus (`gui/spin_util.py`) so typing replaces. Tests:
+`tests/test_offline_hardening.py`. Checks: check_development 648 OK; no-PySide6 discover OK.
+
+## RADIOROC 46 — parity table (docs/parity)
+
+Documentation only, no code or hardware. New `docs/parity/README.md`, `parity_table.md` and `gaps.md`: the per-feature
+parity table the plan (M0, section 3) asked for. 54 rows (F01..F17 plus sub-rows); 41 leaf rows: 17 Delivered, 13 Partial,
+6 Needs hardware, 4 Not started, 1 Excluded (F15). Cells are backed by file paths, register-map sections, user-guide
+sections or log entries cited by title; `unknown` where no evidence was found. Limitation: no row is compared against the
+running Windows 2.2.0.5 app, so Delivered means offline tests plus board evidence only. Next: use `gaps.md` to pick the
+next offline task.
+
+## RADIOROC 46 — CLI effective-settings blocks
+
+Cause: on 2026-10-21 a "reproduction" of an app run via `scripts/radioroc_acquire.py` silently used script defaults
+(threshold DAC 530, paT gain 1, hold 530 ns) while the app used the chip's operating threshold and gain 8.
+
+- `scripts/radioroc_cli_common.py`: `print_effective_settings(title, items, defaulted)` and `unset_args(args, names)`.
+  The block goes to **stderr** (dry-run stdout stays valid JSON) before any transport is touched, in dry-run and `--execute`.
+  Values not given on the command line are marked `(script default)`; `None` shows as `chip as is`.
+- Applied to `radioroc_acquire.py` (threshold, gain and hold defaults say how they differ from the desktop app; a note
+  appears for hold > 200 ns without `--synchro-trigger`), `radioroc_threshold_scan.py`, `radioroc_hold_scan.py`,
+  `radioroc_scurve.py`, `radioroc_autocalibrate.py`, `radioroc_channel_config.py`. No default VALUE changed.
+- Limitation: `radioroc_autocalibrate.py` shows only channels as defaulted; its probe/transition step defaults live in the
+  library config. Values coming from `--preset` count as given.
+- Tests: `tests/test_cli_defaults.py` (offline; serial opener patched to fail).
+
+## RADIOROC 46 — documentation reconciliation
+
+Documentation only; no code, hardware or tests touched. Other workers add sibling entries.
+
+- `docs/muon_rate_measurement_guide.md` section 6: the coincidence text now separates verified from open (verified:
+  RADIOROC 39 pulser test and the 2026-10-21 muon data; open: case (c) outside the window, window timing and order).
+  T1 and T2 must be different channels. The app starts at a hold delay of 30 ns (default change made by another worker).
+- `docs/plint_calibration_procedure.md`: status note (2026-10-22) and "superseded" marks in Steps 3, 5 and 6.
+- `CROSS_PLATFORM_REBUILD_PLAN.md`: stale intro replaced by a status box. `SMOKE_TESTS.md`: historical note.
+- `REFACTOR_CHECKLIST.md`: ticked the progress/cancel and legacy-script items; open items carry a reason.
+- New `docs/linux_usb_permissions.md`, linked from `DEVELOPMENT.md`. Only the `/dev/ttyUSB0` port name was seen on a Pi
+  (RADIOROC 24); group, udev and ModemManager steps are untested standard advice.
+
 ## RADIOROC 45 — muon detector view tab
 
 New offline sidebar page **Muon** (after Acquisition; Page menu Ctrl+4): `gui/muon_view.py` `MuonView`, a top view of the

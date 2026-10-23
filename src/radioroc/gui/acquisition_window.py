@@ -49,6 +49,7 @@ from radioroc.application.acquisition_worker import AcquisitionWorker
 from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.data.acquisition_reader import read_acquisition_run
 from radioroc.data.vendor_acquisition import read_vendor_acquisition_file
+from radioroc.gui.spin_util import select_all_on_focus
 from radioroc.gui.layout_util import fit_controls_pane, fit_special_text, wrap_plot_title
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
 from radioroc.gui.channel_select import ChannelSelectGrid
@@ -69,7 +70,7 @@ def _integer(low, high, value):
     field = QSpinBox()
     field.setRange(low, high)
     field.setValue(value)
-    return field
+    return select_all_on_focus(field)
 
 
 def _decimal(low, high, value):
@@ -77,7 +78,7 @@ def _decimal(low, high, value):
     field.setDecimals(3)
     field.setRange(low, high)
     field.setValue(value)
-    return field
+    return select_all_on_focus(field)
 
 
 def _new_directory(execution_mode="simulation"):
@@ -401,7 +402,7 @@ class AcquisitionWindow(QMainWindow):
         self.threshold_dac = _integer(0, 1023, 0)
         self.threshold_dac.setSpecialValueText("Keep current")
         fit_special_text(self.threshold_dac)
-        self.hold_delay_ns = _integer(0, 100000, 530)
+        self.hold_delay_ns = _integer(0, 100000, 30)
         self.hold_delay_ns.setSingleStep(5)
         self.conversion_delay_ns = _integer(0, 100000, 400)
         self.conversion_delay_ns.setSingleStep(40)
@@ -648,7 +649,9 @@ class AcquisitionWindow(QMainWindow):
         self.hint.attach(self.threshold_dac, "Optional T1/T2 threshold DAC to set before "
                           "running; leave at 'Keep current' to leave it alone.")
         self.hint.attach(self.hold_delay_ns, "External hold delay in nanoseconds, "
-                          "divisible by 5.")
+                          "divisible by 5. Self-triggered muon runs: about 30 ns (20 to 55 ns "
+                          "measured on the bench). With the external ASIC trigger or a pulser "
+                          "fired by the board's synchro pulse, the peak is near 525 ns.")
         self.hint.attach(self.conversion_delay_ns, "ADC conversion delay in nanoseconds, "
                           "divisible by 40.")
         self.hint.attach(self.acquisitions_per_batch, "Requested ADC acquisitions per batch.")
@@ -998,6 +1001,11 @@ class AcquisitionWindow(QMainWindow):
                     f"least {min_rate:.1f} pulses/s, or the batch times out after {timeout:g} s. "
                     "The board itself handles at most about 20 events/s.")
                 note = f" · IO6 pulses needed: at least {min_rate:.1f}/s"
+            if not operation.acquisition.external_trigger and operation.acquisition.hold_delay_ns > 200:
+                hold_note = (f"Hold delay {operation.acquisition.hold_delay_ns} ns is long for a "
+                             "self-triggered run (muon pulses peak at 20-55 ns on the bench)")
+                data["hold_delay_note"] = hold_note
+                note += f" · {hold_note}"
             self.details.setPlainText(json.dumps(data, indent=2))
             self.status.setText(f"Preview valid · {data['total_points']} batches · no output created{note}")
             return operation
@@ -1335,6 +1343,9 @@ class AcquisitionWindow(QMainWindow):
             # append-mode CSV history) matches the manifest's declared
             # channels -- see read_acquisition_run's module docstring.
             self._set_spectra_channels(saved.channels)
+            if self.shared_selection is not None:
+                from radioroc.gui.calibration_selection import apply_saved_channels
+                apply_saved_channels(self.shared_selection, saved.channels)
             self._live_reader = None
             self._spectra = _SpectraData()
             self._spectra.add_rows(saved.current_segment_rows)

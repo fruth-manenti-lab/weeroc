@@ -23,7 +23,8 @@ tested on the board or with compile checks before moving on.
 ## Phase 0: Safety And Baseline Preservation
 
 - [x] Confirm `main` is clean before each refactor chunk.
-- [ ] Keep `scripts/radioroc_standard_scurves.py` working until replacement scripts are verified.
+- [x] Keep `scripts/radioroc_standard_scurves.py` working until replacement scripts are verified.
+  - Kept as legacy (see Phase 10).
 - [x] Add a short smoke-test command list for known-good workflows.
 - [x] Record current known-good commands for:
   - [x] threshold scan / SiPM staircase
@@ -31,7 +32,8 @@ tested on the board or with compile checks before moving on.
   - [x] external peak-sensing Ctest scan
   - [x] IO mux scan
   - [x] sync pulse test
-- [ ] Decide whether old monolithic script will be kept as compatibility wrapper or deprecated.
+- [x] Decide whether old monolithic script will be kept as compatibility wrapper or deprecated.
+  - Kept as legacy compatibility/reference script (Phase 10).
 
 ## Phase 1: Library Skeleton
 
@@ -153,12 +155,18 @@ tested on the board or with compile checks before moving on.
 
 ## Phase 8: GUI Readiness
 
-- [ ] Add progress callback support to long scan functions.
-- [ ] Add cancellation callback/event support to long scan functions.
+- [x] Add progress callback support to long scan functions.
+  - `application/{threshold,scurve,hold_scan,acquisition}.py` call a progress callback.
+- [x] Add cancellation callback/event support to long scan functions.
+  - `CancellationToken` in `application/jobs.py`, used by the workers.
 - [ ] Ensure library scan functions do not call `argparse` or depend on terminal IO.
+  - Open: `src/radioroc` has no `print` outside `__main__` modules, but `radioroc_client.py` still has 4 `print` calls (dry-run messages, mux scan progress).
 - [ ] Replace direct `print` calls in library code with callback/log hooks or returned messages.
+  - Open: `radioroc_client.py` lines 1191, 1316, 1448 and 2962 still print.
 - [ ] Define stable library API examples for GUI use.
+  - Open: `DEVELOPMENT.md` has job examples, but no single stable-API page.
 - [ ] Keep write-capable operations explicit and easy to confirm in a GUI.
+  - Open: ongoing GUI design rule, not a finished task.
 
 ## Phase 9: Documentation
 
@@ -181,3 +189,4 @@ tested on the board or with compile checks before moving on.
 - [x] Ensure ignored local artifacts stay out of git.
 - [x] Run final compile/import checks.
 - [ ] Commit and push each completed group with a clear message.
+  - Open: a working habit, not a finished task.
