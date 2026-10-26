@@ -469,7 +469,8 @@ class MainWindowTests(unittest.TestCase):
     def test_minimum_size_fits_1024x768_display(self):
         window = self._make_window()
         hint = window.minimumSizeHint()
-        self.assertLessEqual(hint.width(), 1000)
+        # 1000 before the group-box title chips (any stylesheet adds ~17 px); still inside 1024.
+        self.assertLessEqual(hint.width(), 1020)
         # 620 plus the in-window Page menu bar (~23 px; on macOS it is the native bar).
         self.assertLessEqual(hint.height(), 650)
 

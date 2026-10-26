@@ -197,6 +197,8 @@ class HoldScanWindow(QMainWindow):
         self.conversion_delay_ns = _integer(0, 10000, 400)
         self.trigger_type = _integer(0, 3, 0)
         self.trigger_source = _integer(0, 7, 3)
+        self.trigger_channel_2 = _integer(0, 63, 5)
+        self.trigger_source_2 = _integer(0, 7, 0)
         self.adc_window_ns = _integer(0, 10000, 50)
         self.adc_nb_trig = _integer(0, 63, 1)
         self.rstn_manual = QCheckBox("Reset-n manual")
@@ -205,11 +207,16 @@ class HoldScanWindow(QMainWindow):
         for label, field in [("Conversion delay (ns)", self.conversion_delay_ns),
                              ("Trigger type", self.trigger_type),
                              ("Trigger source", self.trigger_source),
+                             ("Trigger channel (T2 slot)", self.trigger_channel_2),
+                             ("Trigger source (T2 slot)", self.trigger_source_2),
                              ("ADC window (ns)", self.adc_window_ns),
                              ("ADC trigger count", self.adc_nb_trig)]:
             external_form.addRow(label, field)
         for field in (self.rstn_manual, self.external_trigger, self.peak_sensing):
             external_form.addRow(field)
+        self.muon_preset_button = QPushButton("Muon coincidence preset")
+        external_form.addRow(self.muon_preset_button)
+        self.muon_preset_button.clicked.connect(self.apply_muon_preset)
         form.addRow(self.external_group)
 
         self.gain_group = QGroupBox("Optional gain overrides")
@@ -318,7 +325,8 @@ class HoldScanWindow(QMainWindow):
             bind_trigger_gain(self.trigger_preamp_gain, selection)
             from radioroc.gui.calibration_selection_panel import bind_shared_selection
             self._sync_shared_selection = bind_shared_selection(
-                selection, form, self.channel_select, trigger_1=self.trigger_channel)
+                selection, form, self.channel_select, trigger_1=self.trigger_channel,
+                trigger_2=self.trigger_channel_2)
         self.hint.attach(self.channel_select.toggle_button,
                          "Channels to record and plot. Click to choose which channels.")
         self.hint.attach(self.channel_select.select_all_button, "Select every channel.")
@@ -351,7 +359,7 @@ class HoldScanWindow(QMainWindow):
         self.hint.attach(self.synchro_trigger, "Pulse FPGA synchro trigger per ADC batch: "
                           "before each batch of acquisitions, the FPGA emits a sync pulse on "
                           "the Sync IO line below, used to fire an external pulse generator "
-                          "(or the on-board Ctest path) and the ADC read-out in lockstep so "
+                          "(set to triggered burst) and the ADC read-out in lockstep so "
                           "the hold scan can track a real pulse's timing precisely.")
         self.hint.attach(self.initialize, "Re-initialize the FPGA before running. This is a "
                           "persistent board change, not just a scan setting -- leave it off "
@@ -372,6 +380,14 @@ class HoldScanWindow(QMainWindow):
         self.hint.attach(self.trigger_source, "Vendor ADC trigger-source code: which signal "
                           "arms the ADC acquisition (e.g. a specific channel's discriminator, "
                           "or the FPGA synchro pulse) in external hold mode.")
+        self.hint.attach(self.trigger_channel_2, "Second trigger channel (T2 slot), used when "
+                          "Trigger source (T2 slot) is 3 (Individual trigger).")
+        self.hint.attach(self.trigger_source_2, "Second trigger-source code. 3 = Individual "
+                          "trigger on the T2 channel; with Trigger type 1 and both sources 3 this "
+                          "is a two-channel coincidence.")
+        self.hint.attach(self.muon_preset_button, "Fill in the muon scan: self-triggered "
+                          "two-channel coincidence, no Ctest, no synchro pulse, operating "
+                          "threshold, 0 to 150 ns in 20 ns steps, 10 events per point (about 5 min).")
         self.hint.attach(self.adc_window_ns, "Length of the ADC's acquisition window, in "
                           "nanoseconds, in external hold mode.")
         self.hint.attach(self.adc_nb_trig, "Number of ADC triggers to accept per acquisition "
@@ -650,6 +666,28 @@ class HoldScanWindow(QMainWindow):
             self.channel_config_group.setEnabled(hardware)
             self.channel_config_apply_button.setEnabled(hardware_run_available)
 
+    def apply_muon_preset(self):
+        """Self-triggered two-channel coincidence hold scan (real muon pulses, no pulser)."""
+        self.hold_mode.setCurrentIndex(1)
+        self.hold_min.setValue(0)
+        self.hold_max.setValue(150)
+        self.hold_step.setValue(20)
+        self.acquisitions.setValue(10)
+        self.timeout_s_scan.setValue(300.0)
+        self.discriminator.setCurrentIndex(0)
+        self.mask.setChecked(True)
+        self.ctest.setChecked(False)
+        self.synchro_trigger.setChecked(False)
+        self.set_sync_io_mux.setChecked(False)
+        self.external_trigger.setChecked(False)
+        self.peak_sensing.setChecked(False)
+        self.trigger_type.setValue(1)
+        self.trigger_source.setValue(3)
+        self.trigger_source_2.setValue(3)
+        self.set_threshold_dac.setChecked(True)
+        if self.shared_selection is not None:
+            self.threshold_dac.setValue(self.shared_selection.operating_threshold)
+
     def operation(self):
         channels = self.channel_select.selected_channels()
         output = self.output.text().strip()
@@ -668,6 +706,8 @@ class HoldScanWindow(QMainWindow):
             rstn_manual=self.rstn_manual.isChecked(), external_trigger=self.external_trigger.isChecked(),
             peak_sensing=self.peak_sensing.isChecked(), adc_window_ns=self.adc_window_ns.value(),
             adc_nb_trig=self.adc_nb_trig.value(), timeout_s=self.timeout_s_scan.value(),
+            trigger_source_2=self.trigger_source_2.value(),
+            trigger_channel_2=self.trigger_channel_2.value(),
             synchro_trigger=self.synchro_trigger.isChecked(),
             sync_io=self.sync_io.currentText(),
             sync_io_mux_index=self.sync_io_mux_index.value() if self.set_sync_io_mux.isChecked() else None,

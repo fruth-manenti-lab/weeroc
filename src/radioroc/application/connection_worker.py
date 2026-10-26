@@ -24,6 +24,7 @@ from .acquisition_worker import (
 )
 from .autocalibration import AutocalibrationJob, AutocalibrationJobConfig
 from .channel_config import ChannelConfigOperation, apply_channel_config
+from .chip_init import ChipInitOperation, run_chip_init
 from .hold_scan import HoldScanJob, HoldScanJobConfig
 from .jobs import CancellationToken, JobBusyError, JobCancelled, JobEvent
 from .raw_registers import RawRegisterWrite, read_all_registers, write_raw_register
@@ -130,6 +131,7 @@ class ConnectionWorker:
         self._acquisition_coalesced = 0
         self._acquisition_outcome = None
         self._channel_config_outcome = None
+        self._chip_init_outcome = None
         self._raw_registers_rows = None
         self._raw_register_write_result = None
         self._hold_shutdown_for_job_fault = False
@@ -228,6 +230,16 @@ class ConnectionWorker:
         """Apply one input DAC / TQ mask configuration on the owned session."""
         operation.validate()
         self._submit("apply_channel_config", operation, "configuring", {"connected"})
+
+    def chip_init(self, operation: ChipInitOperation):
+        """Initialize the FPGA and/or apply packaged ASIC defaults (persists)."""
+        operation.validate()
+        self._submit("chip_init", operation, "configuring", {"connected"})
+
+    def chip_init_snapshot(self):
+        """Result of the most recent `chip_init`, if it succeeded."""
+        with self._lock:
+            return deepcopy(self._chip_init_outcome)
 
     def read_all_registers(self):
         """Load (if needed) and re-read every ASIC register from hardware."""
@@ -611,6 +623,8 @@ class ConnectionWorker:
                 self._review_fault()
             elif command == "apply_channel_config":
                 self._apply_channel_config(argument)
+            elif command == "chip_init":
+                self._chip_init(argument)
             elif command == "read_all_registers":
                 self._read_all_registers()
             elif command == "write_raw_register":
@@ -1066,6 +1080,25 @@ class ConnectionWorker:
             self._publish("faulted", error=fault)
         else:
             self._publish("connected")
+
+    def _chip_init(self, operation):
+        try:
+            result = run_chip_init(self._device, operation)
+        except Exception as exc:
+            primary_error = self._describe(exc)
+            close_error = self._close_session()
+            if not close_error:
+                with self._lock:
+                    self._port = None
+                    self._status_word = None
+            with self._lock:
+                self._chip_init_outcome = None
+            self._publish("close_failed" if close_error else "error",
+                          error=primary_error, close_error=close_error)
+            return
+        with self._lock:
+            self._chip_init_outcome = result
+        self._publish("connected")
 
     def _read_all_registers(self):
         try:

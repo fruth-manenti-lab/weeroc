@@ -1,8 +1,59 @@
 # RADIOROC muon rate measurement guide
 
-For the operator and the students who follow. Last updated 2026-10-21.
+For the operator and the students who follow. Last updated 2026-10-26.
 
 Items marked **FILL IN** are facts about the detector that this guide cannot know. Fill them in once and keep them.
+
+## Contents
+
+| Section | What is in it |
+| --- | --- |
+| [1. What this guide is for](#1-what-this-guide-is-for) | The goal, the idea, the order of work and four rules that save days |
+| [2. Equipment and pre-checks](#2-equipment-and-pre-checks) | What to gather and check; facts about the detector to write down |
+| [3. Connections](#3-connections) | Connections, grounds and the **pulse generator** |
+| [4. Software start-up and first-light checks](#4-software-start-up-and-first-light-checks) | Launch the app, connect, check the board answers, then switch on bias |
+| [5. Calibration](#5-calibration) | **Calibration**: Steps 0 to 6 |
+| [6. Data acquisition](#6-data-acquisition) | **Data acquisition**: the muon run |
+| [7. From counts to a rate per minute](#7-from-counts-to-a-rate-per-minute) | Subtract background, uncertainty, flux per cm² |
+| [8. Judging the board](#8-judging-the-board) | Compare with a trusted reading and decide pass or fail |
+| [9. Troubleshooting](#9-troubleshooting) | Symptom, cause, fix |
+| [10. Lab log template](#10-lab-log-template) | Copy this and fill it in as you go |
+
+**Inside section 3 (Connections):** [What goes where](#what-goes-where) · [Signal path](#signal-path) · [Step by step](#step-by-step) · [Grounds (what not to connect)](#grounds-what-not-to-connect) · [The pulse generator (Aim-TTi TGF4162)](#the-pulse-generator-aim-tti-tgf4162) · [Connection checklist](#connection-checklist)
+
+**Inside section 5 (Calibration), in order:**
+
+- [Step 0: Choose the channels](#step-0-choose-the-channels)
+- [Step 0b: Check the analog signal on the scope (optional)](#step-0b-check-the-analog-signal-gain-and-shaping-time-optional-but-recommended)
+- [Step 1: Noise floor](#step-1-noise-floor-threshold-scan-tab-no-test-signal)
+- [Step 2: Align thresholds (autocalibration)](#step-2-align-thresholds-autocalibration-tab)
+- [Step 3: Choose the operating threshold](#step-3-choose-the-operating-threshold-then-check-it-with-a-plateau-scan)
+- [Step 4: Hold timing](#step-4-hold-timing-hold-scan-tab)
+- [Step 4a: Pulser (Ctest) timing, optional](#step-4a-pulser-ctest-timing-check-optional-not-the-muon-hold-delay)
+- [Step 4b: Muon hold scan, required](#step-4b-muon-hold-scan-required-for-the-muon-hold-delay-not-yet-run-on-the-bench)
+- [Step 5: S-curve, optional](#step-5-s-curve-optional)
+- [Step 6: Save the calibration record](#step-6-save-the-calibration-record)
+
+### I want to…
+
+| I want to… | Go to |
+| --- | --- |
+| plug everything in | [3. Connections](#3-connections) |
+| set up the pulse generator (pulse, burst, 50 mV) | [The pulse generator (Aim-TTi TGF4162)](#the-pulse-generator-aim-tti-tgf4162) |
+| get the board working after a power cycle | [Step 0b: Check the analog signal (gain and shaping time; optional but recommended)](#step-0b-check-the-analog-signal-gain-and-shaping-time-optional-but-recommended) |
+| find the noise floor | [Step 1: Noise floor (Threshold scan tab, no test signal)](#step-1-noise-floor-threshold-scan-tab-no-test-signal) |
+| align the channels (autocalibration) | [Step 2: Align thresholds (Autocalibration tab)](#step-2-align-thresholds-autocalibration-tab) |
+| choose the operating threshold | [Step 3: Choose the operating threshold, then check it with a plateau scan](#step-3-choose-the-operating-threshold-then-check-it-with-a-plateau-scan) |
+| find the hold delay for muons | [Step 4b: Muon hold scan (required for the muon hold delay; not yet run on the bench)](#step-4b-muon-hold-scan-required-for-the-muon-hold-delay-not-yet-run-on-the-bench) |
+| run the muon measurement | [6. Data acquisition](#6-data-acquisition) |
+| turn counts into a rate | [7. From counts to a rate per minute](#7-from-counts-to-a-rate-per-minute) |
+| something went wrong | [9. Troubleshooting](#9-troubleshooting) |
+| fill in the lab log | [10. Lab log template](#10-lab-log-template) |
+
+Each section ends with a link back to this list.
+
+---
+
 
 ## 1. What this guide is for
 
@@ -26,6 +77,10 @@ Work in this order:
 - Only one program may talk to the board. Close the desktop app before running any script, and the other way round.
 - After every power cycle the board forgets its settings. Re-apply defaults, then redo the calibration, before measuring anything.
 - Write every setting and every voltage in the lab log (section 10) at the time. A measurement without its settings cannot be reused.
+
+[↑ Back to contents](#contents)
+
+---
 
 ## 2. Equipment and pre-checks
 
@@ -60,6 +115,10 @@ Gather everything before you start. Tick each item.
 - Where the bench is (floor of the building, what is above it). Concrete above the detector removes some muons.
 - A rate for this detector from a trusted readout, if one exists: **FILL IN** (this is the reference for section 8).
 
+[↑ Back to contents](#contents)
+
+---
+
 ## 3. Connections
 
 **One USB port for the board only. No hub. No other device on that port.**
@@ -73,7 +132,7 @@ Gather everything before you start. Tick each item.
 | **HV** | Bias supply output | Always; bias stays off until section 4 passes |
 | SiPM input connector | Custom edge connector board, with the two SiPMs | Always |
 | **IN_TEST1** (SMA) | Generator CH1 **through the 20 dB attenuator** | Calibration: Ctest, S-curves, autocalibration, threshold scans with a test signal, hold scans |
-| **IO1** (SMA output) | Generator **external trigger input** (TRIG IN) | Calibration with a test pulse: Ctest scans, autocalibration, hold scans. The board sends its synchro trigger on IO1 (FPGA mux index 5), so each generator pulse lands inside an acquisition window. Not used for the muon run |
+| **IO1** (SMA output) | Generator **external trigger input** (TRIG IN) | Ctest hold scans only (Step 4a); autocalibration and S-curves use a free-running generator and do not need it. The board sends its synchro trigger on IO1 (FPGA mux index 5), so each generator pulse lands inside an acquisition window. Not used for the muon run |
 | **IO6** (SMA, IO_FPGA6, External Synchro) | Generator CH2 (2.5 V TTL maximum) | Hold scans and any acquisition that uses the external trigger, including LED acquisitions. Not used for the muon run |
 | IO7 (SMA, IO_FPGA7, External Hold) | Nothing | Not used |
 | Analog_Probe (SMA) | Oscilloscope | Optional, for looking at the shaper output |
@@ -103,7 +162,7 @@ Generator CH1 has one output. It drives either IN_TEST1 or the LED at a time, so
 Everything is **off** while you connect.
 
 1. Put the two plints flat and horizontal in the dark box, in the arrangement you wrote down in section 2. Check that each SiPM is firmly attached to its plint.
-2. Plug the two SiPMs into the custom edge connector board. Note which SiPM is on which edge-board position, and so which board channel it reads. Call them **channel N** (plint 1) and **channel M** (plint 2) and write them in the log. The existing bench has used channels 4, 6 and 32.
+2. Plug the two SiPMs into the custom edge connector board. Note which SiPM is on which edge-board position, and so which board channel it reads. Call them **channel N** (plint 1) and **channel M** (plint 2) and write them in the log. Channels **4, 6 and 32** are the ones already tested on this bench (pulser tests used 4 and 6; the muon data of 2026-10-21 used 6 and 32), so use two of them if you can. Any other channel is untested here: check its noise curve (section 5, Step 1) before you trust it.
 3. Seat the edge connector board in the board's SiPM input connector.
 4. Connect the bias supply to the board's **HV** connector. Set the supply to 0 V with the output off and the current limit at the datasheet maximum.
 5. Connect the 5 V / 1 A supply to the board's power input. Leave it switched off.
@@ -124,6 +183,62 @@ SiPM channels pick up false triggers when other equipment adds extra ground path
 
 If noise appears anyway, see the troubleshooting table.
 
+### The pulse generator (Aim-TTi TGF4162)
+
+The generator makes the fake pulses used for calibration. **Everything on it is set by hand on the front panel**: the app cannot set burst or trigger mode, cannot read the settings back, and the front panel locks while a script has the generator under remote control (press the **TRIGGER** key, which doubles as **Local**, to unlock it). Key names below are from the [TGF4000 series instruction manual](https://resources.aimtti.com/manuals/TGF4000_Series_Instruction_Manual-Iss3.pdf); the TGF4162 is in that series. So the setting you see on the display is the only record of what it is doing. Write the settings in the log.
+
+**Use channel 1 only.** CH1 makes the test pulse (or drives the LED). CH2 is used only as the 2.5 V TTL external trigger into **IO6** in LED runs, which the muon run does not need. The **CH 1** key is orange and **CH 2** is green: the colour of the settings on the screen tells you which channel you are editing. Press **CH 1** before you change anything.
+
+**Four terms**
+
+| Term | Meaning |
+| --- | --- |
+| **Continuous** (free-running) | The generator makes pulses by itself, one every period (for example 1 ms for 1 kHz), whether or not the board is ready. |
+| **Triggered burst** | The generator stays silent until it receives a trigger, then sends a fixed number of cycles (one pulse for "1 cycle") and waits again. |
+| **Trigger source: external** | The trigger comes from the TRIG IN socket, here from the board's **IO1**. The board only sends it during ADC-batch scans with the synchro tick box on. |
+| **High level, low level** | The pulse goes from the low level to the high level. The idle line sits at the low level. Set the low level to **0 V** or the idle line is not at zero. |
+
+**Which setup for which job**
+
+| Job | Mode | Trigger source | Wiring |
+| --- | --- | --- | --- |
+| Autocalibration, S-curve, threshold scan with Ctest (Steps 1 and 2) | Continuous | Internal | CH1 through the 20 dB attenuator to **IN_TEST1**. The IO1 cable does nothing here. |
+| Ctest hold scan (Step 4a) | Triggered burst, 1 cycle | External (TRIG IN) | As above, plus board **IO1** to the generator's TRIG IN. Tick **Pulse FPGA synchro trigger per ADC batch** and set the sync mux index to 5 in the app. |
+| LED light check | Continuous (or burst with CH2 into **IO6**, see section 3) | Internal | CH1 to the LED in the dark box instead of the attenuator. Tick the external trigger on the Acquisition page only when CH2 drives IO6. |
+| Muon run | None | None | Output **off**. Leave the cables in place. |
+
+**Setting up the Ctest pulse (continuous), step by step**
+
+1. Press **CH 1** (orange). If the **OUTPUT** key is lit, press it to switch the output **off**, and keep it off until the cabling is done.
+2. Press **WAVES**, then the **Pulse** soft-key.
+3. Set the pulse **Width** to **100 ns** and the frequency (or **Period**) to **1 kHz** (1 ms), the rate used on the bench. Edges can stay at their defaults.
+4. Levels: press the **Ampl** soft-key, then press **Ampl** or **Offset** again while it is highlighted to switch to **high and low levels** (the screen then shows High Level and Low Level). Set **low level 0 V** and **high level 1.0 V**. (Without high/low mode: amplitude 1.0 V and offset 0.5 V gives the same pulse.)
+5. Press the **Load** soft-key (in the output menu) until the screen shows **High-z**. The displayed amplitude is then the open-circuit value. The generator's own output impedance is always 50 Ω; the load setting only changes what the display assumes.
+6. Make sure **BURST** and **MOD** are not lit (otherwise the generator is not running continuously). Press **Done** to leave the menu.
+7. Press **OUTPUT** to switch it on. A pulse should now be on the scope (see "Checking it" below).
+
+**Why 1.0 V.** The pulse must be small by the time it reaches the chip. The 20 dB attenuator divides the voltage by 10. With the display on High-z, 1.0 V is the open-circuit value, so into a 50 Ω end the pulse is 0.5 V before the attenuator and about **50 mV** after it (the bench runbook value, `AMPL 1.0` with an open-circuit load). Into a high-impedance end it would be about 100 mV. Confirm what you actually have on the scope the first time (below). If it is larger or smaller than about 50 mV, scale the generator amplitude, not the attenuator.
+
+**Changing to the triggered burst (Step 4a only).** Keep the same pulse, levels, width and load. Then:
+
+1. Press **BURST**, then the **On/Off** soft-key (the BURST key lights).
+2. Press **Type** until it shows **Triggered** (not Gated).
+3. Press **Count** and enter **1** (one pulse per trigger).
+4. Press **SetTrg**, then **Source**, and choose **External Trigger**. The slope soft-key then lets you pick the positive or negative edge; use **positive**. The trigger input is the **TRIG / COUNT (DC) IN** connector: connect board **IO1** to it. Its threshold is about 1.2 V (input at least 100 mV peak to peak); never apply more than +5 V or less than -1 V.
+5. Switch the output on.
+
+The generator now sends one pulse only each time the board asks. If it is silent, that is the cause of the "timed out waiting for FPGA word 4 bit 5" error, so tick the synchro box in the app. To go back to continuous (Step 2), press **BURST** and the **On/Off** soft-key so the BURST key goes dark. (Source **Internal** with a **Period** would also fire repeated bursts by itself, but it is not what the hold scan needs.)
+
+**Checking it.** Put a scope on the generator end (after the attenuator, with a T) before connecting to the board, or use the same cable on a scope input. For continuous mode you should see a steady train of 100 ns pulses starting at 0 V. For burst mode you should see one pulse each time the board is asked for a batch and nothing between. A scope on **Analog_Probe** (section 5, Step 0b) shows the same pulse after the chip's shaper.
+
+**Common mistakes**
+
+- Left in **burst or external trigger** after a hold scan: autocalibration then gets no test pulse. Always set continuous before Step 2.
+- **Low level not 0 V**: the idle line sits above zero. With an LED connected it glows all the time, which gives a false "dark" run. Set the low level explicitly (0 V, with a tiny high level or the output off for a dark LED) rather than only reducing the amplitude.
+- **Settings shown in green** (channel 2): you are about to change the wrong channel. Press **CH 1**.
+- **Output left on** during the muon run: the pulses reach the chip and add false events. Switch it off before the muon run.
+- **Front panel locked** (REMOTE shown): press the **TRIGGER** key, which returns to local.
+
 ### Connection checklist
 
 - [ ] Plint areas measured and logged
@@ -135,6 +250,10 @@ If noise appears anyway, see the troubleshooting table.
 - [ ] Generator CH1 through the 20 dB attenuator on IN_TEST1; board IO1 to the generator's external trigger input; CH2 on IO6 if needed; outputs off
 - [ ] No extra ground leads from generator, oscilloscope or bias supply to the board
 - [ ] Dark box closed before any power or bias
+
+[↑ Back to contents](#contents)
+
+---
 
 ## 4. Software start-up and first-light checks
 
@@ -170,6 +289,10 @@ Defaults are not applied here. The first scan after every power cycle applies th
 
 **Pass criteria for this section:** Firmware status shows `0x05 (5)` after Connect, and the bias supply's own display shows the datasheet voltage with a steady current.
 
+[↑ Back to contents](#contents)
+
+---
+
 ## 5. Calibration
 
 Calibration answers one question: at what threshold does the board count real muon pulses but not noise? Repeat the whole section after any power cycle, bias change or detector change. Each run writes a folder under `radioroc_runs/` (shown in **New run directory**); never delete these.
@@ -188,7 +311,7 @@ The scan tabs have no channel grids of their own. Choose the channels once, here
 **Saving your work.** Click **Save calibration…** to write a JSON file (default folder `radioroc_runs/calibration/`). It holds the channels, trigger channels, **Operating threshold**, **Trigger gain (paT)**, **Hold delay (ns)**, **Bias (V)**, **Note**, and the trims from the last verified autocalibration run. **Load calibration…** puts all of these back. If the board is connected it can offer to write the trims into the chip again. That re-apply path is **untested on hardware**: after using it, always run a threshold scan to check the result. **What the file does not hold.** It does not save the whole chip. The other registers (gains, masks, input DACs, probe settings) and the threshold the chip is using right now are not in it. After a power cycle the chip is back at its defaults, so to get ready again: (1) run the first Threshold scan with **Initialize FPGA (persists)** and **Apply defaults (persists)** ticked; (2) click **Load calibration…** and let it re-apply the trims (untested on hardware); (3) run a quick threshold scan to check the channels look aligned. If only the app crashed and the board stayed powered, the chip is probably still calibrated: reconnect and check with a threshold scan. Save at three points:
 
 1. Right after autocalibration (Step 2).
-2. Again after you choose the operating threshold (Step 5).
+2. Again after you choose the operating threshold (Step 3).
 3. Before any long run.
 
 If you save without a verified autocalibration in this session, the file holds settings only, and a status line appears under the buttons and says so.
@@ -204,9 +327,9 @@ If you save without a verified autocalibration in this session, the file holds s
 
 Every scan, the threshold and the hold delay depend on the chip's gain and shaping time. Before calibrating, look at a real pulse on the oscilloscope and judge whether they suit the muon pulses. The chip has an **Analog probe** output on the **Analog_Probe** SMA that shows one channel's amplifier outputs.
 
-**Gain and shaping settings (per channel, on the Main tab).** The defaults below are what the chip starts with, and the bench has used them so far:
+**Gain and shaping settings (per channel).** They are on the **ASIC config.** page (left sidebar), **Main** tab. **Check the channel number (**N° channel**) before you read or change any gain: every value on that tab belongs to the channel shown.** The defaults below are what the chip starts with, and the bench has used them so far:
 
-| Setting (**Main** tab) | Default | Range |
+| Setting (**ASIC config.** > **Main** tab) | Default | Range |
 | --- | --- | --- |
 | **Gain** under **Trigger preamplifier (paT)** | 8 | 1 (highest gain) to 63 (lowest) |
 | **Gain (paHG)** under **High gain** | 8 | 1 to 15 (about 0.5 to 8) |
@@ -217,10 +340,11 @@ Every scan, the threshold and the hold delay depend on the chip's gain and shapi
 
 High gain is for small pulses and low gain is for large ones. A muon pulse from a plastic scintillator is many photoelectrons tall, much bigger than the single-photoelectron dark pulses.
 
-**What you need.** Oscilloscope, one SMA or BNC cable from **Analog_Probe** to a scope channel, SiPM bias on, dark box closed. Use only the cable shield for the scope's ground (section 3).
+**What you need.** Oscilloscope, one SMA or BNC cable from **Analog_Probe** to a scope channel, SiPM bias on, dark box closed. Do not clip the scope's ground lead or earth terminal to the board: the cable's own shield is the only ground connection (section 3, Grounds).
 
+0. **After a power cycle, apply the defaults first.** A freshly powered chip is at its power-on registers, and probe and channel settings written to it did not take effect on the bench (2026-10-23: the probe gave no output until defaults were applied). Go to **ASIC config.** > **Main** and click **Initialize FPGA**, then **Apply defaults** (confirm the warning). Do this once per power-on, before the probe check. Applying defaults resets every setting on the Main and Probes/Masks tabs and wipes autocalibration trims, so make your gain and probe changes after it, not before. (The same two options also exist as tick boxes on the first Threshold scan, Step 1; either route does the same thing. The buttons are new and have been tested offline only, not yet on the bench.)
 1. Click **ASIC config.** in the sidebar, then the **Probes/Masks** tab.
-2. In the **Analog probe** box set **N° channel** to N. Choose **Shaper output, high gain**. Click **Apply probe**. The probe output is shared: routing one channel switches the others off.
+2. In the **Analog probe** box set **N° channel** to N. Choose **Shaper output, high gain**. Click **Apply probe**. The probe output is shared: routing one channel switches the others off. If the scope shows nothing, the chip is probably still at power-on values: do step 0 above first.
 3. On the scope trigger on the pulses just above the baseline noise (normal trigger mode). Dark pulses come many times a second, so you will see them straight away. Muon pulses come about A per minute for a plint of A cm², so wait for a few. The muon pulses are the tall ones.
 4. Judge what you see:
 
@@ -244,7 +368,7 @@ If you change **Gain (paT)** (the trigger preamplifier), type the new code into 
 
 Dark box closed, bias on, generator outputs off.
 
-1. Click the **Threshold scan** tab.
+1. Click **Calibration** in the sidebar, then the **Threshold scan** tab.
 2. Set **Device / mode** to **Hardware connection**.
 3. Set the values in the table below.
 4. Click **Run hardware threshold**. The plot shows **Trigger rate (Hz)** against **Threshold DAC code**, live. Tick **Log Y** to see the whole range. Wait for the status to say completed. If it says failed or reports mismatches, power-cycle and start again.
@@ -257,7 +381,7 @@ Dark box closed, bias on, generator outputs off.
 | **Device / mode** | Hardware connection | **Change.** The tab opens on Hardware connection, but check: Simulation shows a fake curve. |
 | **First DAC** | 0 | **Change** (default is 0). Start at the bottom so the noise peak is visible. |
 | **Last DAC** | 1023 | **Change** (default is 1000). Covers the full range. |
-| **DAC step** | 10 | **Change** (default is 25). Finer steps show the shoulder. Use 5 for the plateau scan in Step 5. |
+| **DAC step** | 10 | **Change** (default is 25). Finer steps show the shoulder. Use 5 for the plateau scan in Step 3. |
 | **Counter window (ms)** | 100 | **Change** (default is 50). Longer window, less scatter in the rate. |
 | **Averages** | 1 | Leave at default. |
 | **Discriminator** | T1 | Leave at default. |
@@ -281,9 +405,11 @@ On the 2026-10-21 bench data, channels 6 and 32 with SiPMs fitted showed:
 - then a dark-count shoulder;
 - then a floor near 10² Hz by DAC about 400 to 480.
 
+This is only an example. **Your floor will not always be at 10² Hz or at that DAC.** Read where each of your own curves flattens and note both the DAC and the rate. **Every selected channel must reach its floor**; a channel that has not flattened by the end of the scan is not ready (see the table). Take the highest of the floors as the common floor in Step 3.
+
 | Curve looks like | Meaning | Action |
 | --- | --- | --- |
-| Pedestal peak, shoulder, floor near 10² Hz by DAC 400 to 480 | Healthy SiPM channel | Use its floor in Step 5 |
+| Pedestal peak, shoulder, floor near 10² Hz by DAC 400 to 480 | Healthy SiPM channel | Use its floor in Step 3 |
 | No shoulder; the rate drops to zero by DAC about 210 | Probably no bias or no SiPM connected on that channel | Check the bias supply, the HV cable, the edge connector and the SiPM |
 | Flat, near zero at every DAC | Dead channel | Check the edge connector, SiPM and bias before blaming the chip |
 | A shoulder near 10⁶ Hz that reaches DAC 500 or more | Light leak, interference or a loose connector | Check the dark box, the grounds (section 3) and the connectors |
@@ -295,12 +421,14 @@ Check the bias is really on: a biased SiPM shows a rate 2 to 5 times higher than
 
 ### Step 2: Align thresholds (Autocalibration tab)
 
-1. Switch on generator CH1 through the 20 dB attenuator into **IN_TEST1**. The target at the board is about 50 mV and 100 ns (`AMPL 1.0`, `ZLOAD OPEN`). Set it by hand on the front panel: pulse waveform, 100 ns width, burst mode with one cycle per trigger, trigger source external. The board's **IO1** output must go to the generator's external trigger input, so each pulse is fired by the board and lands inside an acquisition window. If the generator free-runs instead, pulses arrive at random times and the results are unreliable. Confirm on the scope that one pulse appears per board trigger.
-2. Click the **Autocalibration** tab. This tab has no **Device / mode** box; it uses the connected board. It needs at least two selected channels.
-3. Tick **Enable Ctest**. Leave everything else as in the table.
-4. Click **Run autocalibration**. Wait for it to finish. It scans each channel, trims each threshold so the crossings line up, and does a final verification scan.
-5. Switch the generator output off. The trims are written into the chip and stay there while the board stays powered. They are not saved to the board's memory, so a power cycle erases them: redo this step after one.
-6. Click **Save calibration…** now, so the trims are kept in a file.
+1. Switch on generator CH1 through the 20 dB attenuator into **IN_TEST1**. The target at the board is about 50 mV and 100 ns (`AMPL 1.0`, `ZLOAD OPEN`). Set it by hand on the front panel (details in section 3, "The pulse generator"): pulse waveform, 100 ns width, **continuous (free-running, internal trigger)**, with the **low level at 0 V** (the pulse goes from 0 V up to its amplitude, not symmetric about 0). Do **not** use burst mode or an external trigger source for this step: autocalibration counts discriminator crossings over a time window and never sends a trigger to the generator (the board's IO1 synchro pulse is only sent by the ADC-batch scans, Step 4a). A generator waiting for an external trigger stays silent, the chip sees no test pulse, and the calibration is meaningless. Confirm on the scope that pulses appear continuously **before** you click **Run autocalibration**. The IO1 cable can stay connected; it does nothing here. (This is the code's behaviour and the bench observation that burst mode fired nothing; free-running autocalibration has not yet been run on the bench.)
+2. To get about 50 mV at the board and to check it on the scope, follow "The pulse generator" in section 3 (1.0 V high level, 0 V low level, open-circuit load setting, 20 dB attenuator).
+3. Click the **Autocalibration** tab. This tab has no **Device / mode** box; it uses the connected board. It needs at least two selected channels.
+4. Tick **Enable Ctest**. Leave everything else as in the table.
+5. Click **Run autocalibration**. Wait for it to finish. It scans each channel, trims each threshold so the crossings line up, and does a final verification scan.
+6. Switch the generator output off. The trims are written into the chip and stay there while the board stays powered. They are not saved to the board's memory, so a power cycle erases them: redo this step after one.
+7. Click **Save calibration…** now, so the trims are kept in a file.
+8. **What just happened.** Every channel's discriminator has a slightly different offset, so at one threshold DAC code the channels would not fire at the same pulse height. Autocalibration sends the same test charge into each channel and finds the DAC code at which each one starts to fire (its crossing). It then adds a small per-channel correction (a trim) so the crossings line up. Afterwards one threshold value means the same pulse height on every channel, which is why one **Operating threshold** can serve both plints. The final verification scan repeats the measurement with the trims applied: the crossings should now sit together.
 
 **Autocalibration tab settings**
 
@@ -319,13 +447,27 @@ Check the bias is really on: a biased SiPM shows a rate 2 to 5 times higher than
 | **Apply defaults (persists)** | Unticked | Leave unticked. Ticking it wipes the trims. Apply defaults only on the first Threshold scan after power-up, before autocalibration. |
 | **ASIC CSV (optional)**, **New run directory** | As proposed | Leave alone. |
 
-### Step 3: Hold timing (Hold scan tab; optional but recommended)
+### Step 3: Choose the operating threshold, then check it with a plateau scan
 
-This scan finds the **hold delay**: the time after the trigger at which the chip's shaped pulse is at its peak. The ADC must sample at that moment. A hold scan steps the hold delay from the first to the last value, records the pulse height in ADC counts at each step, and plots counts against hold delay. The curve rises, peaks and falls. **The hold delay at the top of the peak is the right value for pulser (Ctest) data fired by the synchro trigger.** Note it in the log. It is not the value for the muon run (section 6).
+Pick a DAC just above the common noise floor from Step 1, with a margin of about 40 to 70 codes. For the 2026-10-21 data this gives about 520 to 550. This is **not** a universal value: write down the number and which noise floor you took the margin from. Type it into **Operating threshold** on the Save/Load bar.
+
+Then check it. Generator outputs off. On the **Threshold scan** tab repeat Step 1 with **Initialize FPGA (persists)** and **Apply defaults (persists)** unticked, and set **First DAC** and **Last DAC** to about 100 codes either side of your choice, and **DAC step** 5. For example, if you chose 540, set **First DAC** 440 and **Last DAC** 640. The rate should show a **plateau**: a range of thresholds where the rate changes slowly. Choose the operating threshold in the middle of the plateau and update **Operating threshold** if it moved. A rate that keeps falling steeply means you are cutting into real pulses or are still in noise.
+
+Now click **Save calibration…** again.
+
+### Step 4: Hold timing (Hold scan tab)
+
+There are two versions of this scan. **3a** uses the pulser (Ctest) and gives the pulser timing only. **3b** uses real muons (or any self-triggered pulses) and gives the hold delay for the muon run.
+
+#### Step 4a: Pulser (Ctest) timing check (optional, NOT the muon hold delay)
+
+**This step does not give the hold delay for the muon run.** With Ctest and the synchro pulse ticked, the scan is fired by the external pulse, not by the channel's own discriminator. Get the muon hold delay from Step 4b below (required), or the manual sweep in section 6. Do this step only to check the pulser timing path.
+
+This scan finds the **hold delay**: the time after the trigger at which the chip's shaped pulse is at its peak. The ADC must sample at that moment. A hold scan steps the hold delay from the first to the last value, records the pulse height in ADC counts at each step, and plots counts against hold delay. The curve rises, peaks and falls. **The hold delay at the top of the peak is the right value for pulser (Ctest) data fired by the synchro trigger.** Note it in the log as the Ctest peak. It is not the value for the muon run (section 6).
 
 Setup first:
 
-1. Generator CH1 through the 20 dB attenuator into **IN_TEST1**, output on, with the same pulse and external-trigger settings as in Step 2, and the board's **IO1** output on the generator's external trigger input.
+1. Generator CH1 through the 20 dB attenuator into **IN_TEST1**, output on, with the same pulse as in Step 2 but changed to **triggered burst** (1 cycle, external trigger from IO1; see section 3, "The pulse generator"), and the board's **IO1** output on the generator's external trigger input.
 2. In the shared selection pick the channels you want to record (bench test: channels 6 and 32). **Trigger channel (T1)** must be one of the selected channels, otherwise Preview and Run fail. The hold scan uses T1 as its trigger channel (bench test: 6). It is the channel whose Ctest pulse crosses the discriminator and starts the acquisition; the hold delay is measured from that moment. The other selected channels are read out at the same time.
 3. Click the **Hold scan** tab. Set **Device / mode** to **Hardware connection**.
 
@@ -346,7 +488,7 @@ Then set the values below, click **Preview** to check them, and click **Run hard
 | **Set threshold DAC before scan** | Ticked, with **Threshold DAC** 450 | **Change.** Optional, but if used the value must be below the Ctest pulse height. 450 worked. The operating threshold (about 540) is too high for the Ctest pulse. |
 | **Mask other channels** | Ticked | Leave at default. |
 | **Enable Ctest** | Ticked | **Change.** Without it there is no pulse. It is enabled on the trigger channel only. |
-| **Pulse FPGA synchro trigger per ADC batch** | Ticked | **Change.** This makes the board send its trigger out on IO1 so the generator fires. If unticked the generator never fires and the scan fails with "ADC acquisition timed out waiting for FPGA word 4 bit 5". |
+| **Pulse FPGA synchro trigger per ADC batch** | Ticked | **Change.** This makes the board send its trigger out on IO1 so the generator fires. If unticked the generator never fires and the scan fails with "ADC acquisition timed out waiting for FPGA word 4 bit 5". Ctest only lets the chip inject a charge; something still has to fire the generator. The synchro pulse is that signal: the board sends it on IO1 and the generator answers with one pulse, which lands inside the ADC window. It is needed whenever the generator drives Ctest through IN_TEST1, as in this scan. Autocalibration has no such tick box because it is a different kind of measurement: it counts discriminator crossings against threshold (the S-curve counter), and does not read ADC batches, so the ADC-batch synchro pulse is not part of it. Only the ADC-batch scans (hold scan, Acquisition) have the option. |
 | **Initialize FPGA (persists)** | Unticked | Leave unticked. |
 | **Apply defaults (persists)** | Unticked | Leave unticked. Ticking it would wipe the autocalibration trims. |
 | **Sync IO** | io1 | Leave at default. |
@@ -368,23 +510,60 @@ Switch the generator outputs **off** afterwards.
 
 **Hold delay (ns) on the bar.** After you choose the hold delay for the muon run (section 6), type it into **Hold delay (ns)** on the Save/Load bar. It is saved in the calibration file and restored by **Load calibration…**, and the **Acquisition** page's **Hold delay (ns)** takes the same value (changing either one changes the other). The app starts at 30 ns, which suits muon runs; confirm it with your own sweep (section 6).
 
-### Step 4: S-curve (optional)
+#### Step 4b: Muon hold scan (required for the muon hold delay; not yet run on the bench)
 
-The **S-curve** tab measures the transition of each channel against test-pulse amplitude. It is not needed for the muon run. Skip it unless the operator asks for it. If you run it, use the same generator and IN_TEST1 setup as in Step 2 and leave its settings at their defaults.
+This is the hold scan fired by real muons. It steps the hold delay and takes N accepted events at each step, using the same two-channel coincidence trigger as the muon run (Individual trigger on both channels), so every event is a real two-SiPM signal. It uses no Ctest, no synchro pulse and no generator. A coincidence is better than one channel or an LED: a single channel mostly fires on noise and dark counts (roughly 10^2 Hz at threshold 540), and an LED pulse has a different, uncontrolled height from a muon.
 
-### Step 5: Choose the operating threshold, then check it with a plateau scan
+**Cost.** The coincidence rate is about 18 events/min. The preset runs 8 points (0 to 140 ns in 20 ns steps) with 10 events each, so about 80 events and roughly 5 minutes, the same as the 2026-10-21 manual sweep. Scatter is about 10 to 15% per point, enough to see where the plateau is. For a finer curve afterwards, set **Hold step (ns)** to 10 over the region around the peak and raise **Acquisitions per point** to 40 (about 2 min per point).
 
-Pick a DAC just above the common noise floor from Step 1, with a margin of about 40 to 70 codes. For the 2026-10-21 data this gives about 520 to 550. This is **not** a universal value: write down the number and which noise floor you took the margin from. Type it into **Operating threshold** on the Save/Load bar.
+Before you start: calibration done (Steps 1, 2 and 3), generator outputs off, dark box closed, **Trigger gain (paT)** on the bar at 1, **Operating threshold** on the bar set (about 540).
 
-Then check it. Generator outputs off. On the **Threshold scan** tab repeat Step 1 with **Initialize FPGA (persists)** and **Apply defaults (persists)** unticked, and set **First DAC** and **Last DAC** to about 100 codes either side of your choice, and **DAC step** 5. For example, if you chose 540, set **First DAC** 440 and **Last DAC** 640. The rate should show a **plateau**: a range of thresholds where the rate changes slowly. Choose the operating threshold in the middle of the plateau and update **Operating threshold** if it moved. A rate that keeps falling steeply means you are cutting into real pulses or are still in noise.
+1. On the **Calibration** page select channels 6 and 32 and set T1 = 6, T2 = 32 (the shared selection; the Hold scan tab has no channel grid of its own).
+2. Click the **Hold scan** tab. Set **Device / mode** to **Hardware connection**.
+3. Click **Muon coincidence preset** (in **External hold mode ADC timing**). It sets everything in the table below. Check the values, then change anything you want, for example **Hold step (ns)** and **Acquisitions per point**.
+4. Click **Preview**, then **Run hardware hold scan**. The plot fills point by point.
 
-Now click **Save calibration…** again.
+What the preset sets (all other settings stay as in the Step 4a table):
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| **Hold mode** | External (FPGA delay, ns) | |
+| **First / Last hold delay (ns)**, **Hold step (ns)** | 0, 150, 20 | Muon pulses peak early (20 to 55 ns on 2026-10-21). |
+| **Acquisitions per point** | 10 | Fast first pass. More events means less scatter (about 1/sqrt(N)). |
+| **Per-batch timeout (s)** | 300 | A point needs about 2 min; this leaves room for a slow stretch. |
+| **Discriminator** | T1 | |
+| **Set threshold DAC before scan** | Ticked, **Threshold DAC** = the bar's **Operating threshold** | The same threshold as the muon run. Check it, then change it only if the bar changed. The operating threshold is chosen in **Step 3**, before this step. |
+| **Mask other channels** | Ticked | The app unmasks exactly the two named channels. |
+| **Enable Ctest** | Unticked | No test pulse. |
+| **Pulse FPGA synchro trigger per ADC batch** | Unticked | Nothing fires the generator. |
+| **Set sync IO mux index before scan** | Unticked | Not used. |
+| **Trigger type** | 1 | 2 channels coincidence. |
+| **Trigger source** and **Trigger source (T2 slot)** | 3 and 3 | Individual trigger in both slots. |
+| **Trigger channel** and **Trigger channel (T2 slot)** | 6 and 32 | From the shared selection (T1 and T2). They must be two different channels. |
+| **ADC window (ns)** | 50 | The coincidence window, as on the Acquisition page. |
+| **Reset-n manual**, **Use external ASIC acquisition trigger**, **Use vendor peak-sensing path** | Unticked | |
+| **Initialize FPGA** and **Apply defaults** | Unticked | Never after calibration: it wipes the trims. |
+
+**Reading the result.** Look at the high-gain curve of **both** channels (they are both recorded). Subtract the pedestal (about 90 to 100; the scan's own events all contain a muon, so take the pedestal from a pedestal run or the earlier value).
+
+**What the pedestal is.** The ADC never reads zero. With no pulse present each channel reads a fixed offset, about 90 to 100 counts here: that is the pedestal. A pulse height is the reading minus the pedestal, so a reading of 260 means a pulse of about 160 counts. Every event in a muon scan holds a real pulse, so the pedestal cannot be read from the scan itself. Take it from a pedestal run (the Muon page has a **Pedestal run folder** option) or use 90 to 100. A curve that sits at the pedestal has captured no pulses.
+ Choose the delay in the middle of the plateau where the pulses are tallest, then type it into **Hold delay (ns)** on the bar and in the log. Scatter at 10 events per point is about 15%, so two neighbouring points are not distinguishable; look at the shape. If both curves sit flat at the pedestal for every delay, nothing real was captured: check the threshold, gain, channels and that Ctest and the synchro pulse are unticked. If a point times out, the muon rate was too low for that point: raise the timeout or lower the events per point.
+
+**Check against the manual sweep.** The 2026-10-21 manual sweep (section 6) put the tallest pulses at 20 to 55 ns. The scan should agree to within about 10 to 20 ns. If not, say so in the log and repeat.
+
+### Step 5: S-curve (optional)
+
+The **S-curve** tab measures the transition of each channel against test-pulse amplitude. It is not needed for the muon run. Skip it unless the operator asks for it. If you run it, use the same continuous generator setup and IN_TEST1 wiring as in Step 2 (the S-curve counts crossings like autocalibration, so it does not need the synchro trigger) and leave its settings at their defaults.
 
 ### Step 6: Save the calibration record
 
 Write in the log: noise floor DAC per channel, trims (the saved calibration file name), hold delay, chosen threshold and why, gain setting, bias voltage and current, date, who ran it. Keep the path of each run folder.
 
 **Calibration is done when** every used channel has a reviewed noise curve, the threshold is chosen with a written reason, the calibration file is saved, and the record is in the log. Switch the generator outputs off before the muon run.
+
+[↑ Back to contents](#contents)
+
+---
 
 ## 6. Data acquisition
 
@@ -415,20 +594,15 @@ Use exactly these values on the **Acquisition** page. The rest stay at their def
 | **Trigger preamp gain code** | 1 (follows the bar) | The same gain as the scans (see below). |
 | **Use external ASIC acquisition trigger (IO_FPGA6)** | Unticked | Muon runs use the self-trigger. |
 
-The coincidence needs both channels to cross threshold inside the window, so the rate is much lower than a single channel's. **Check that it works:** after a short run click **Open saved run…** and look at the spectra and the events: in every event both channels should be above their pedestal. If many events show only one channel above pedestal, something is wrong: stop, check the trigger table above, and apply the coincidence offline from the saved data.
+The coincidence needs both channels to cross threshold inside the window, so the rate is much lower than a single channel's. **Check that it works:** after a short run (**Acquisitions per batch** 5, **Batches** 2) click **Open saved run…**, choose the run folder, and look at the spectra. To see individual events open the same folder on the **Muon** page with **Open saved run…** and step through them with the replay controls. In every event both channels should be above their pedestal. The pedestal is the ADC reading with no pulse (about 90 to 100 counts, see Step 4b); an event is above it when its high-gain value is higher by at least the Muon page's **Detection threshold** (default 40 counts). If many events show only one channel above pedestal, something is wrong: stop, check the trigger table above, and apply the coincidence offline from the saved data.
 
 **Trigger gain must match.** **Trigger gain (paT)** on the Calibration bar is used by every scan and by the Acquisition page, so they cannot disagree. Keep it at 1. If you ever use an older version of the app, or the scripts, make sure each place uses the same code: on 2026-10-21 the scans ran at gain 1 while an acquisition left on **Keep current** ran at the chip's own value (8). The threshold DAC means a different pulse height at each gain, so a threshold chosen at gain 1 is far too high at gain 8: no pulse crosses it and no batch ever fills (the app got zero batches in 105 s). Trims also depend on gain, so redo autocalibration if the gain you use changes.
 
-**Choose the hold delay for the muon run**
+**Choose the hold delay for the muon run** (required)
 
-The hold delay is when the chip freezes the shaped pulse to be measured. A muon run is fired by the channel's own discriminator, so the delay is counted from that moment. The Hold scan in section 5 is fired by the external synchro pulse and gives a different number (about 525 ns), which is **wrong** for muons: with 525 ns the chip freezes the signal long after the pulse is gone, and every event reads the pedestal.
+The hold delay is when the chip freezes the shaped pulse to be measured. A muon run is fired by the channel's own discriminator, so the delay is counted from that moment. The Ctest hold scan (Step 4a) is fired by the external synchro pulse and gives a different number (about 525 ns), which is **wrong** for muons: at 525 ns the chip freezes the signal long after the pulse is gone, and every event reads the pedestal.
 
-Find it with the muons themselves, using the trigger settings above (coincidence, Threshold DAC at your operating threshold):
-
-1. On the **Acquisition** page set **Acquisitions per batch** to 10, **Batches** to 1 and **Timeout (s)** to 150.
-2. Run once for each **Hold delay (ns)** of 10, 20, 30, 40, 55, 70, 100 and 130. Each run takes about 30 to 60 s.
-3. After each run click **Open saved run…** and note where the high-gain spectrum of each channel sits (the mean of the **hg** values is easiest).
-4. Choose the delay in the middle of the plateau where the pulses are tallest.
+Get the value from **Step 4b** (the muon hold scan on the Hold scan tab), which runs the sweep for you. Do not repeat it here. If you cannot use that tab, the manual alternative is the same sweep on the **Acquisition** page: **Acquisitions per batch** 10, **Batches** 1, **Timeout (s)** 150, one run for each **Hold delay (ns)** of 10, 20, 30, 40, 55, 70, 100 and 130 (30 to 60 s each), then **Open saved run…** and note the mean **hg** value of each channel. Choose the delay in the middle of the plateau where the pulses are tallest.
 
 Bench result, 2026-10-21 (channels 6 and 32 in coincidence, threshold 540, 10 events per point, so about ±15% scatter):
 
@@ -447,7 +621,9 @@ The pedestal is about 90 to 100. The pulses are tallest around 20 to 55 ns and f
 4. Set the trigger as in the table above. **Threshold DAC** and **Trigger preamp gain code** follow the bar: check they read your operating threshold and 1.
     - **Hold delay (ns)** and **Conversion delay (ns)** are on this page too. Set **Hold delay (ns)** to the value you chose above (the app starts at 30 ns). Leave **Conversion delay (ns)** at 400.
 5. Set **Acquisitions per batch** and **Batches**. Events requested = acquisitions per batch × batches. Aim for at least **400 accepted events** (see the table below).
-6. Set **Timeout (s)** longer than the time one batch needs to fill. The default 5 s is far too short for muons and the run will fail with a timeout. At about 1 muon per cm² per minute a plint of A cm² gives about A events per minute in single mode, and fewer in coincidence (only muons through both plints), so a batch of 10 events can take 10 / A minutes or more. Use at least three times your estimate, and keep **Acquisitions per batch** small (about 10) so a timeout loses little. Worked example for a 5 × 5 cm plint (about 25 per minute alone; assume 10 to 20 per minute in coincidence with the other plint stacked on top of it): a batch of 10 events takes about 30 to 60 s, so use **Acquisitions per batch** 10, **Timeout (s)** 300 and **Batches** 40 for 400 events (about 16 to 40 minutes). If the plints are side by side instead of stacked, almost no muon crosses both, and every batch will time out. If a batch times out at 300 s, do not just raise the timeout: first run a short single-channel acquisition to check each plint sees about 25 per minute alone.
+6. Set **Timeout (s)**. It is **per batch**, not for the whole run: the run fails if any one batch takes longer. **Rule of thumb: timeout (s) = 3 × 60 × (Acquisitions per batch) ÷ (events per minute you expect)**. On the bench the coincidence rate was about 18 events per minute, so a batch of 10 needs about 35 s on average and the rule gives about 100 s; use 150 to 300 s. If you do not know your rate yet, start at 300 s and read the real rate from the first run. Details:
+   
+   Set the timeout longer than the time one batch needs to fill. The default 5 s is far too short for muons and the run will fail with a timeout. At about 1 muon per cm² per minute a plint of A cm² gives about A events per minute in single mode, and fewer in coincidence (only muons through both plints), so a batch of 10 events can take 10 / A minutes or more. Use at least three times your estimate, and keep **Acquisitions per batch** small (about 10) so a timeout loses little. Worked example for a 5 × 5 cm plint (about 25 per minute alone; assume 10 to 20 per minute in coincidence with the other plint stacked on top of it): a batch of 10 events takes about 30 to 60 s, so use **Acquisitions per batch** 10, **Timeout (s)** 300 and **Batches** 40 for 400 events (about 16 to 40 minutes). If the plints are side by side instead of stacked, almost no muon crosses both, and every batch will time out. If a batch times out at 300 s, do not just raise the timeout: first run a short single-channel acquisition to check each plint sees about 25 per minute alone.
 7. Check **New run directory** and note its name in the log. Name it `plintID_chN-chM_thrDAC_biasV_signal_YYYYMMDD` if you can edit it.
 8. **Write down the wall-clock start time**, click **Run hardware acquisition**, and write down the stop time when the status says completed. The rate is counts divided by elapsed time, so these times matter more than anything else.
 9. Do not touch the board, cables or dark box during the run. If the app shows a fault, stop; do not retry automatically (section 4).
@@ -477,6 +653,10 @@ For small areas split the run into blocks of 5 to 10 minutes. The blocks show wh
 **Hardware speed limits**
 
 Self-triggered acquisition is fast (100,000 events in a few minutes). External-trigger acquisition through IO6 delivers only about 20 events per second in tests, so do not use it for muon counting. If you must, keep batches to 100 events or fewer and set the timeout to 60 s or more.
+
+[↑ Back to contents](#contents)
+
+---
 
 ## 7. From counts to a rate per minute
 
@@ -516,6 +696,10 @@ A 100 cm² detector gives N_s = 480 in T_s = 5.0 min, and N_b = 20 in T_b = 5.0 
 
 **Save the analysis.** Put the numbers in the lab log and keep the raw run folders. Do not edit the raw data.
 
+[↑ Back to contents](#contents)
+
+---
+
 ## 8. Judging the board
 
 The board is good if its rate for the known detector agrees with the detector's reference rate within the combined uncertainty, and stays steady from block to block. Compute the ratio of board rate to reference rate and look it up in the table. The cut-offs are proposals; the operator should confirm or change them before the first real verdict.
@@ -542,6 +726,10 @@ Where the reference rate comes from, in order of preference:
 
 **Also report** the number of board hangs during the measurement, whether the app reported any faults, the noise floor per channel, and the block-to-block scatter. These decide whether the board is trustworthy, not only whether the rate matches.
 
+[↑ Back to contents](#contents)
+
+---
+
 ## 9. Troubleshooting
 
 | Symptom | Likely cause | What to do |
@@ -562,6 +750,10 @@ Where the reference rate comes from, in order of preference:
 | External-trigger run times out | Board delivers about 20 events per second on that path | Use self-trigger, or batches of 100 events at 60 s timeout |
 
 When anything looks wrong, change one thing at a time and write down what you changed.
+
+[↑ Back to contents](#contents)
+
+---
 
 ## 10. Lab log template
 
@@ -593,7 +785,8 @@ Noise-floor DAC per channel:
 Autocalibration run folder:
 Operating threshold (DAC) and why:
 Plateau scan folder:
-Hold delay at peak (ns):
+Hold delay used for the muon run (ns), from the section 6 muon sweep:
+Ctest hold-scan peak (ns, optional, pulser only):
 Gain and shaping codes used (paT, paHG, paLG, shaping HG/LG):
 Calibration file saved (name):
 
@@ -622,3 +815,7 @@ Hangs, faults, power cycles, interference seen:
 ```
 
 **Before you leave:** bias to 0 V and off, generator output off, run folders left in place (never delete them), log saved.
+
+[↑ Back to contents](#contents)
+
+---

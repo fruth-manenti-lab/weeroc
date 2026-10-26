@@ -73,6 +73,15 @@ def _integer(low, high, value):
     return select_all_on_focus(field)
 
 
+def _section_header(text):
+    """Bold heading with a rule under it, to split the long controls form into findable sections."""
+    label = QLabel(text)
+    label.setStyleSheet("font-weight: 700; font-size: 13px; margin-top: 10px; padding-bottom: 2px;"
+                        " border-bottom: 1px solid palette(mid)")
+    label.setAccessibleName(f"Section: {text}")
+    return label
+
+
 def _decimal(low, high, value):
     field = QDoubleSpinBox()
     field.setDecimals(3)
@@ -358,6 +367,7 @@ class AcquisitionWindow(QMainWindow):
         self.mode.setMinimumContentsLength(12)
         self.mode.addItems(["Simulation", "Hardware connection"])
         self.mode.setCurrentIndex(1)
+        form.addRow(_section_header("Device and connection"))
         form.addRow("Device / mode", self.mode)
 
         if connection_worker is None:
@@ -437,25 +447,31 @@ class AcquisitionWindow(QMainWindow):
         self.adc_window_ns = _integer(0, 10000, 50)
         self.adc_window_ns.setSingleStep(5)
         self.adc_nb_trig = _integer(0, 63, 1)
+        def add_section(title, rows):
+            form.addRow(_section_header(title))
+            for label, field in rows:
+                form.addRow(label, field)
+
+        form.addRow(_section_header("Channels"))
         form.addRow(self.channel_select)
-        for label, field in [("Trigger type", self.trigger_type),
-                             ("Trigger channel (T1 slot)", self.trigger_channel),
-                             ("Trigger source (T1 slot)", self.trigger_source),
-                             ("Trigger channel (T2 slot)", self.trigger_channel_2),
-                             ("Trigger source (T2 slot)", self.trigger_source_2),
-                             ("Coincidence/time window (ns)", self.adc_window_ns),
-                             ("Time-window trigger count", self.adc_nb_trig),
-                             ("Threshold DAC", self.threshold_dac),
-                             ("Hold delay (ns)", self.hold_delay_ns),
-                             ("Conversion delay (ns)", self.conversion_delay_ns),
-                             ("Acquisitions per batch", self.acquisitions_per_batch),
-                             ("Batches", self.batches),
-                             ("Timeout (s)", self.timeout_s),
-                             ("Trigger preamp gain code", self.trigger_preamp_gain),
-                             ("High-gain shaper code", self.high_gain_code),
-                             ("Low-gain shaper code", self.low_gain_code),
-                             ("Discriminator", self.discriminator)]:
-            form.addRow(label, field)
+        add_section("Trigger", [("Trigger type", self.trigger_type),
+                                ("Trigger channel (T1 slot)", self.trigger_channel),
+                                ("Trigger source (T1 slot)", self.trigger_source),
+                                ("Trigger channel (T2 slot)", self.trigger_channel_2),
+                                ("Trigger source (T2 slot)", self.trigger_source_2),
+                                ("Coincidence/time window (ns)", self.adc_window_ns),
+                                ("Time-window trigger count", self.adc_nb_trig),
+                                ("Discriminator", self.discriminator)])
+        add_section("Threshold and timing", [("Threshold DAC", self.threshold_dac),
+                                             ("Hold delay (ns)", self.hold_delay_ns),
+                                             ("Conversion delay (ns)", self.conversion_delay_ns)])
+        add_section("Batches and timeout", [("Acquisitions per batch", self.acquisitions_per_batch),
+                                            ("Batches", self.batches),
+                                            ("Timeout (s)", self.timeout_s)])
+        add_section("Gain overrides", [("Trigger preamp gain code", self.trigger_preamp_gain),
+                                       ("High-gain shaper code", self.high_gain_code),
+                                       ("Low-gain shaper code", self.low_gain_code)])
+        form.addRow(_section_header("Options and sync"))
         self.mask = QCheckBox("Mask other channels")
         self.mask.setChecked(True)
         form.addRow(self.mask)
@@ -475,6 +491,7 @@ class AcquisitionWindow(QMainWindow):
         sync_io_mux_row.addWidget(self.set_sync_io_mux)
         sync_io_mux_row.addWidget(self.sync_io_mux_index)
         form.addRow("Sync IO mux index", sync_io_mux_row)
+        form.addRow(_section_header("Output"))
         self.output = QLineEdit(_new_directory("hardware" if self.mode.currentIndex() == 1 else "simulation"))
         self.output.setMinimumWidth(220)
         form.addRow("New run directory", self.output)
@@ -1309,8 +1326,10 @@ class AcquisitionWindow(QMainWindow):
             self.output.setText(str(Path(directory) / Path(_new_directory()).name))
 
     def choose_saved(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Open acquisition run", "",
-                                             "Acquisition runs (metadata.json events.csv);;CSV (*.csv)")
+        # A run is a folder (metadata.json + events.csv); a file-only dialog cannot select it.
+        start = Path.cwd() / "radioroc_runs"
+        path = QFileDialog.getExistingDirectory(self, "Open acquisition run folder",
+                                                str(start if start.is_dir() else Path.cwd()))
         if path:
             self.open_saved(Path(path))
 

@@ -12,10 +12,11 @@ readback path for these registers.
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
-    QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from radioroc.application.channel_config import ChannelConfigOperation
+from radioroc.application.chip_init import ChipInitOperation
 
 # Packaged default config's channel-0 values (configs/radio_default_i2c.csv,
 # subadd 1: "00001000" -> compensation=0, gain=8; subadd 2: "10001000" ->
@@ -114,9 +115,23 @@ class MainPanel(QWidget):
         self.apply_button = QPushButton("Apply")
         self.apply_button.clicked.connect(self.apply)
         outer.addWidget(self.apply_button)
+        init_row = QHBoxLayout()
+        self.initialize_fpga_button = QPushButton("Initialize FPGA")
+        self.initialize_fpga_button.setToolTip(
+            "Re-initialize the FPGA control words (persists).")
+        self.initialize_fpga_button.clicked.connect(lambda _checked=False: self.initialize_fpga())
+        init_row.addWidget(self.initialize_fpga_button)
+        self.apply_defaults_button = QPushButton("Apply defaults")
+        self.apply_defaults_button.setToolTip(
+            "Write packaged default registers; wipes autocalibration trims (persists).")
+        self.apply_defaults_button.clicked.connect(lambda _checked=False: self.apply_defaults())
+        init_row.addWidget(self.apply_defaults_button)
+        init_row.addStretch(1)
+        outer.addLayout(init_row)
         self.status_label = QLabel("—")
         self.status_label.setWordWrap(True)
         outer.addWidget(self.status_label)
+        self._init_pending = None
 
         self._load_channel(0)
         self.channel_spin.valueChanged.connect(self._on_channel_changed)
@@ -126,6 +141,7 @@ class MainPanel(QWidget):
         # submitted reliably shows a stale or empty result, not the one just
         # requested. Poll until the worker leaves its busy state instead.
         self._applying = False
+        self.update_controls()
         self.timer = QTimer(self)
         self.timer.setInterval(100)
         self.timer.timeout.connect(self._poll)
@@ -265,6 +281,7 @@ class MainPanel(QWidget):
             return None
         self._applying = True
         self.status_label.setText("Applying…")
+        self.update_controls()
         self.timer.start()
         return operation
 
@@ -272,12 +289,70 @@ class MainPanel(QWidget):
         if self.connection_worker is None:
             self.timer.stop()
             self._applying = False
+            self._init_pending = None
+            self.update_controls()
             return
-        if self.connection_worker.snapshot().state == "configuring":
+        snapshot = self.connection_worker.snapshot()
+        if snapshot.state == "configuring":
             return  # still in flight
         self.timer.stop()
         self._applying = False
-        self.show_snapshot()
+        if self._init_pending is not None:
+            label, self._init_pending = self._init_pending, None
+            error = getattr(snapshot, "error", None) or getattr(snapshot, "fault", None)
+            if snapshot.state == "connected" and not error:
+                self.status_label.setText(f"{label}: done")
+            else:
+                self.status_label.setText(f"{label} FAILED · {error or snapshot.state}")
+        else:
+            self.show_snapshot()
+        self.update_controls()
+
+    def update_controls(self):
+        """Enable the chip-init buttons only when connected and idle."""
+        worker = self.connection_worker
+        ready = (worker is not None and not self._applying
+                 and worker.snapshot().state == "connected")
+        self.initialize_fpga_button.setEnabled(ready)
+        self.apply_defaults_button.setEnabled(ready)
+
+    def initialize_fpga(self):
+        return self._run_chip_init(
+            ChipInitOperation(initialize_fpga=True), "Initialize FPGA", None)
+
+    def apply_defaults(self):
+        return self._run_chip_init(
+            ChipInitOperation(apply_defaults=True), "Apply defaults",
+            "Apply defaults resets every setting on the chip to the packaged "
+            "defaults and wipes autocalibration trims. Continue?")
+
+    def _confirm(self, text):
+        return QMessageBox.question(
+            self, "Apply defaults", text,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
+
+    def _run_chip_init(self, operation, label, confirm_text):
+        worker = self.connection_worker
+        if worker is None or self._applying:
+            return None
+        if worker.snapshot().state != "connected":
+            self.status_label.setText(f"{label}: not connected")
+            return None
+        if confirm_text is not None and not self._confirm(confirm_text):
+            self.status_label.setText(f"{label}: cancelled")
+            return None
+        try:
+            worker.chip_init(operation)
+        except Exception as exc:
+            self.status_label.setText(f"{label} error · {type(exc).__name__}: {exc}")
+            return None
+        self._applying = True
+        self._init_pending = label
+        self.status_label.setText(f"{label}…")
+        self.update_controls()
+        self.timer.start()
+        return operation
 
     def show_snapshot(self):
         worker = self.connection_worker
@@ -331,3 +406,10 @@ class MainPanel(QWidget):
         hint_bar.attach(self.apply_button,
                         "Apply the front-end and common-threshold settings above to "
                         "the connected hardware.")
+        hint_bar.attach(self.initialize_fpga_button,
+                        "Re-initialize the FPGA control words (same as the scan option "
+                        "'Initialize FPGA'). Persists on the board.")
+        hint_bar.attach(self.apply_defaults_button,
+                        "Write the packaged default registers to the chip (same as the scan "
+                        "option 'Apply defaults'). Resets every setting and wipes "
+                        "autocalibration trims.")

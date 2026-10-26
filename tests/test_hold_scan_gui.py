@@ -77,6 +77,30 @@ class HoldScanGuiTests(unittest.TestCase):
         operation = self.window.operation()
         self.assertEqual(operation.scan.channels, [2, 5, 9])
 
+    def test_muon_preset_builds_selftriggered_coincidence(self):
+        self.window.channel_select.set_channels([6, 32])
+        self.window.trigger_channel.setValue(6)
+        self.window.trigger_channel_2.setValue(32)
+        self.window.ctest.setChecked(True)
+        self.window.synchro_trigger.setChecked(True)
+        self.window.apply_muon_preset()
+        scan = self.window.operation().scan
+        self.assertEqual((scan.trigger_type, scan.trigger_source, scan.trigger_source_2), (1, 3, 3))
+        self.assertEqual((scan.trigger_channel, scan.trigger_channel_2), (6, 32))
+        self.assertFalse(scan.use_ctest)
+        self.assertFalse(scan.synchro_trigger)
+        self.assertEqual((scan.hold_min, scan.hold_max, scan.hold_step, scan.acquisitions), (0, 150, 20, 10))
+        self.assertIsNotNone(scan.threshold_dac)
+
+    def test_shared_selection_drives_second_trigger_channel(self):
+        from radioroc.gui.calibration_selection import CalibrationSelection
+        from radioroc.gui.hold_scan_window import HoldScanWindow
+        selection = CalibrationSelection(channels=(6, 32))
+        selection.set_trigger_channels(6, 32)
+        window = HoldScanWindow(selection=selection)
+        self.addCleanup(window.close)
+        self.assertEqual(window.operation().scan.trigger_channel_2, 32)
+
     def test_configure_finish_plot_reopen(self):
         self.window.discriminator.setCurrentIndex(1)
         self.window.ctest.setChecked(True)
