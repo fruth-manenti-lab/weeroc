@@ -516,6 +516,24 @@ class ConnectionWorkerTests(unittest.TestCase):
         self.assertIsNotNone(idle.fault)
         worker.review_fault()
 
+    def test_chip_init_runs_on_worker_thread_and_reports_result(self):
+        from radioroc.application.chip_init import ChipInitOperation
+        transport = OwnedThresholdTransport()
+        session = ThresholdSession(transport)
+        worker = self.started(session_factory=lambda config: session)
+        worker.connect(RadiorocConnectionConfig(port="fake-control"))
+        self.wait_for(worker, "connected")
+        worker.chip_init(ChipInitOperation(initialize_fpga=True, apply_defaults=True))
+        self.assertEqual(worker.snapshot().state, "configuring")
+        with self.assertRaises(JobBusyError):
+            worker.read_status()
+        self.wait_for(worker, "connected", timeout=5)
+        result = worker.chip_init_snapshot()
+        self.assertTrue(result.initialize_fpga and result.apply_defaults)
+        self.assertGreater(result.rows_written, 0)
+        self.assertEqual(set(transport.thread_ids + session.thread_ids),
+                         {worker._thread.ident})
+
     def test_read_all_registers_reflects_hardware_and_stays_on_worker_thread(self):
         transport = OwnedThresholdTransport()
         session = ThresholdSession(transport)

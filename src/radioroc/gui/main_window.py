@@ -45,6 +45,15 @@ _STATUS_OK_BG = "#1b6e63"
 _STATUS_FAULT_BG = "#8a3b1b"
 _POWER_RED = "#c0392b"
 
+# Group-box titles used to be small plain text that blended into the form
+# (the Analog probe box was easy to miss). Show each as a teal chip, matching
+# the title bar, so sections stand out in light and dark themes.
+_GROUP_BOX_STYLE = f"""
+    QGroupBox {{ margin-top: 16px; }}
+    QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; left: 6px;
+        padding: 1px 6px; background: {_TITLE_BG}; color: white; font-weight: 600; border-radius: 3px; }}
+"""
+
 
 def _scrollable(widget):
     """Wrap an ASIC-config panel in a vertically scrolling area.
@@ -69,6 +78,7 @@ class MainWindow(QMainWindow):
     def __init__(self, *, connection_worker_factory=None):
         super().__init__()
         self.setWindowTitle("RADIOROC")
+        self.setStyleSheet(_GROUP_BOX_STYLE)
         # A fixed 1280x900 used to be requested unconditionally, which is
         # exactly as tall as a 1600x900 screen with no margin for the window
         # manager's own decorations (title bar, panels) -- guaranteeing the
@@ -264,6 +274,7 @@ class MainWindow(QMainWindow):
         status_row.setMinimumHeight(28)
         outer.addWidget(status_row)
         self.connection_panel.status_changed.connect(self._refresh_status_strip)
+        self.connection_panel.status_changed.connect(self.main_panel.update_controls)
         self._refresh_status_strip()
 
         self._closing = False
