@@ -1,12 +1,36 @@
-# RADIOROC 47 — Bench day: calibrate at gain 1, app coincidence run, muon rate per minute
+# RADIOROC 48 — Pulse-referred autocalibration on the bench, then the muon rate run
 
-Read `AGENTS.md`, `NEXT_SESSION.md` (this file), the RADIOROC 44 to 46 entries at the top of `IMPLEMENTATION_STATUS.md`, and
-`docs/muon_rate_measurement_guide.md` (the step-by-step bench guide; section 5 has per-tab settings tables). Only the operator
-(Tengiz) accesses the board; agents use offline tests, fake transports or saved data unless the operator asks for a hardware check.
-`gh` is logged in as F7East (CI logs are readable). Before any push that may become a PR: `python tools/check_ci_parity.py`.
-Merge long-lived branches with "Create a merge commit" (squash makes the next PR conflict; see DEVELOPMENT.md).
-PR #6 (`feat/offline-hardening`) holds the 30 ns hold-delay default, same-channel coincidence refusal, CLI effective-settings
-blocks, parity table and doc reconciliation; check whether it is merged and start new work from `main`.
+Read `AGENTS.md`, this file, the RADIOROC 47 entries at the top of `IMPLEMENTATION_STATUS.md`, and
+`docs/muon_rate_measurement_guide.md` (section 3 has the pulse generator section, section 5 Step 2a/2b the calibration).
+Only the operator (Tengiz) accesses the board; agents use offline tests, fake transports or saved data unless the operator
+hands over control. Before any push that may become a PR: `python tools/check_ci_parity.py` (also with python3.11 and the 3.13
+interpreter). Start new work from `main`.
+
+## What was established on 2026-10-27 (so you do not redo it)
+- Autocalibration with Ctest OFF aligns the channels at the noise (pedestal) edge (crossing near DAC 145 at clock index 3, near
+  210 at index 1); it does not depend on the generator. Pulse-referred crossings of ch6/ch32 after a noise-edge calibration were
+  404/412 (8 codes apart) at paT gain 1, generator 100 mV displayed, clock index 1.
+- Vendor method for Ctest ("use in_test"): the S-curve clock must trigger the pulser. FPGA IO mux index 4 = S-curves clock on
+  IO0 (scope: 0 to 1.4 V terminated, 1.2 us period at clock index 3 = about 833 kHz; vendor GUI offers 1/10/100 kHz = indices 0/1/2).
+  Mux 5 = synchro trigger (IO1, hold scan). The app option "Output S-curve clock on IO0" (S-curve and Autocalibration tabs,
+  `--clock-io0`) sets IO0 = 4 for the run and restores it. Generator: triggered burst, 1 cycle, external, positive slope, TRIG IN from IO0.
+- Pulse size: at gain 1 use about 100 mV displayed (High-z); 500 mV or 2 V puts the turn-on above DAC 1020.
+- Pulsed S-curves with edge counting show a dip near the noise edge; "Count trigger level instead of rising edge" removes it.
+  The autocalibration also takes the last falling 50% crossing when the IO0 option is ticked (`last_falling`).
+- Scope reads: bench harness `radioroc_runs/bench_harnesses_RADIOROC42/dso.py`; fetch the full trace with sparse sampling (a plain
+  fetch returns only the first 1 us).
+
+## Next
+00. Hold delay: gamma-source scans (Co-60) put the plateau at 20 to 50 ns on both plints (guide Step 4d); confirm with a short muon sweep (Step 4b) if time
+   allows, then use 30 ns. Board left with IO0 mux 0, trims from the last autocalibration; SiPM bias and generator output should be off, source stored.
+0. Run the new Calibration > Pedestals tab in the app (after the hold delay is chosen), then a coincidence run; check the Acquisition page
+   pedestals line, `pedestals.json` in the run folder and the Muon page Rate box (rate per minute, background, flux).
+1. Rerun autocalibration (Ctest, IO0 clock option, trigger level, clock index 1) on ch6+ch32 and verify with single-channel
+   S-curves that the pulse crossings agree within a few codes; save the calibration. Then the muon plan below.
+2. Not yet done: Threshold scan has no IO0 option; Step 4b muon hold scan, app coincidence run and the full muon rate run are
+   still untested on hardware (see the earlier bench plan below).
+
+## Earlier bench plan (RADIOROC 47)
 
 ## What was established (so you do not redo it)
 - Zero batches in the app on 2026-10-21 = trigger gain mismatch (scans at gain 1, autocalibration and acquisition at the chip's 8).

@@ -14,13 +14,13 @@ from pathlib import Path
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
-    QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout,
+    QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout,
     QGraphicsItem, QGraphicsLineItem, QGraphicsRectItem, QGraphicsScene, QGraphicsSimpleTextItem,
     QGraphicsView, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QPushButton, QRadioButton,
     QScrollArea, QSlider, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from radioroc.data import muon_analysis, muon_simulator
+from radioroc.data import muon_analysis, muon_rate, muon_simulator
 from radioroc.data.muon_types import (
     N_CHANNELS, DetectorLayout, LayoutError, MuonEvent, PlintSpec, SiPMPlacement, format_channel_list,
     parse_channel_list,
@@ -286,6 +286,13 @@ class MuonView(QWidget):
         self._manual_pedestals: dict[int, float] = {}
         self._pedestals_from_simulator = False
         self._pedestal_warning = ""
+        self._run_pedestal_set = None  # PedestalSet saved with the loaded run (pedestals.json), if in use
+        self._no_run_pedestals = False  # a real run was loaded without saved pedestals
+        self._timing = None             # RunTiming of a loaded real run (None: simulated / nothing loaded)
+        self._run_rate = None
+        self._background = None         # (path, RunRate) of the background run
+        self._rate_net = None
+        self._area_user_set = False
         self._plint_items: list[PlintItem] = []
         self._plint_table_busy = False
         self._sipm_table_busy = False
@@ -581,6 +588,45 @@ class MuonView(QWidget):
         qv.addWidget(self.pedestal_label)
         qv.addWidget(self.pedestal_warning_label)
         sv.addWidget(qbox)
+
+        rbox = QGroupBox("Rate")
+        rv = QVBoxLayout(rbox)
+        self.rate_label = QLabel("Rate needs a saved run.")
+        self.rate_label.setWordWrap(True)
+        self.rate_label.setAccessibleName("Muon rate")
+        self.rate_label.setMinimumWidth(100)
+        rv.addWidget(self.rate_label)
+        self.background_button = self._button("Background run…", "Background run",
+                                              "Choose a run recorded without muon signal; it is analysed with the "
+                                              "same layout, threshold and pedestals and subtracted",
+                                              self._background_clicked)
+        rv.addWidget(self.background_button)
+        self.background_label = QLabel("")
+        self.background_label.setWordWrap(True)
+        self.background_label.setAccessibleName("Background rate")
+        self.background_label.setMinimumWidth(100)
+        rv.addWidget(self.background_label)
+        self.area_spin = self._spin(0, 1_000_000, 0, "Coincidence area",
+                                    "Area in cm2 for the flux per cm2 (0 = none); default from the plints", 2, 10)
+        self.area_spin.valueChanged.connect(self._area_changed)
+        arow = QFormLayout()
+        arow.addRow("Area (cm2)", self.area_spin)
+        rv.addLayout(arow)
+        self.flux_label = QLabel("")
+        self.flux_label.setWordWrap(True)
+        self.flux_label.setAccessibleName("Flux")
+        self.flux_label.setMinimumWidth(100)
+        rv.addWidget(self.flux_label)
+        self.copy_summary_button = self._button("Copy summary", "Copy rate summary",
+                                                "Copy the rate summary to the clipboard", self.copy_summary)
+        self.save_summary_button = self._button("Save summary…", "Save rate summary",
+                                                "Save the rate summary as a text file (not in a run folder)",
+                                                self._save_summary_clicked)
+        brow = QHBoxLayout()
+        brow.addWidget(self.copy_summary_button)
+        brow.addWidget(self.save_summary_button)
+        rv.addLayout(brow)
+        sv.addWidget(rbox)
         sv.addStretch(1)
 
         scroll = QScrollArea()
@@ -594,8 +640,9 @@ class MuonView(QWidget):
         for w in (self.rebuild_button, self.edit_check, self.add_button, self.remove_button, self.save_button,
                   self.load_button, self.generate_button, self.open_button, self.add_plint_button, self.remove_plint_button,
                   self.autofit_button, self.ped_file_button, self.ped_run_button, self.ped_save_button,
+                  self.background_button, self.copy_summary_button, self.save_summary_button,
                   self.play_button, self.coinc_check,
-                  self.threshold_spin, self.full_scale_spin, self.glow_spin, self.speed_spin):
+                  self.threshold_spin, self.full_scale_spin, self.glow_spin, self.speed_spin, self.area_spin):
             tip = w.toolTip()
             if tip:
                 hint.attach(w, tip)
@@ -620,6 +667,8 @@ class MuonView(QWidget):
         layout.validate()
         self._layout = layout
         self._sync_layout_controls()
+        if hasattr(self, "area_spin") and not self._area_user_set:
+            self._set_default_area()
         self._after_layout_change(structural=True)
         self._recompute_pedestals()
 
@@ -1254,11 +1303,58 @@ class MuonView(QWidget):
             self._set_status(f"Could not open run: {exc}")
             return False
         self._install_events(events, None)
+        self._adopt_run_pedestals(Path(path))
+        try:
+            self._timing = muon_rate.read_run_timing(Path(path))
+        except Exception as exc:  # noqa: BLE001 - the page still works without a rate
+            self._timing = None
+            self._set_status(f"Could not read run timing: {exc}")
+        self._area_user_set = False
+        self._set_default_area()
+        self._update_rate()
         data = {c for e in events for c in e.hg}
         extra = sorted(data - set(self._layout.channels()))
         note = f" Ignored channels not in the layout: {extra}." if extra else ""
         self._set_status(f"Loaded {len(events)} events from {path}.{note}")
         return True
+
+    def _adopt_run_pedestals(self, path):
+        """Use pedestals.json saved with the run (from the Calibration page's Pedestals step) if it covers the data."""
+        had_run_set = self._run_pedestal_set is not None
+        self._run_pedestal_set = None
+        self._no_run_pedestals = True
+        found = None
+        try:
+            from radioroc.data.pedestals import find_pedestals_for_run
+            found = find_pedestals_for_run(path)
+        except Exception as exc:  # noqa: BLE001 - a bad file must not block loading the run
+            self._set_status(f"Could not read saved pedestals: {exc}")
+        wanted = [c for c in self._layout.channels() if c in self._data_channels]
+        if found is not None:
+            hg = found.hg()
+            if hg and all(c in hg for c in wanted):
+                self._file_pedestals = dict(hg)
+                self._run_pedestal_set = found
+                self._no_run_pedestals = False
+                self._pedestals_from_simulator = False
+                self._pedestal_mode = "file"
+                self._recompute_pedestals()
+                return
+        if had_run_set and self._pedestal_mode == "file":
+            self._pedestal_mode = "auto"
+        self._recompute_pedestals()
+
+    def pedestal_source_text(self) -> str:
+        """Which pedestals the analysis uses (for the Rate box and the lab-log summary)."""
+        from radioroc.data import pedestal_flow
+        mode = self._pedestal_mode
+        if mode == "file" and self._run_pedestal_set is not None:
+            return f"from pedestal run {pedestal_flow.pedestal_time(self._run_pedestal_set)}".rstrip()
+        if mode == "file":
+            return "file"
+        if mode == "manual":
+            return "simulator truth" if self._pedestals_from_simulator else "manual"
+        return pedestal_flow.MEDIAN_TEXT
 
     def append_events(self, events):
         """Hook for a future live feed: add events to the replay list."""
@@ -1271,6 +1367,8 @@ class MuonView(QWidget):
         """Install a new event list. ``simulator_pedestals`` (true values) switches to manual mode with
         those values; real data keeps a chosen file/manual source, else uses the median estimate."""
         self.pause()
+        self._timing = None
+        self._background = None
         self.events = events
         self._data_channels = {c for e in events for c in e.hg}
         if simulator_pedestals is not None:
@@ -1331,6 +1429,9 @@ class MuonView(QWidget):
             text = f"Pedestals (HG, {len(vals)} ch): median {vals[len(vals) // 2]:.0f}, range {vals[0]:.0f}..{vals[-1]:.0f}"
         source = {"auto": "estimate", "file": "file/run", "manual": "simulator" if self._pedestals_from_simulator
                   else "manual"}[self._pedestal_mode]
+        if self._pedestal_mode == "file" and self._run_pedestal_set is not None:
+            from radioroc.data import pedestal_flow
+            source = f"from pedestal run ({pedestal_flow.pedestal_time(self._run_pedestal_set)})"
         self.pedestal_label.setText(f"{text} ({source})")
         warning = ""
         wanted = [c for c in self._layout.channels() if c in self._data_channels]
@@ -1341,7 +1442,10 @@ class MuonView(QWidget):
             biased = [c for c in muon_analysis.pedestals_look_biased(
                 self.events, peds, float(self.threshold_spin.value())) if c in wanted]
             if biased:
-                warning = "Estimate may include muon signal: load a pedestal run or enter values"
+                warning = ("Estimate may include muon signal: load a pedestal run or enter values")
+                if self._no_run_pedestals:
+                    from radioroc.data import pedestal_flow
+                    warning = pedestal_flow.NOT_SAVED_WARNING + ". " + warning
         self._pedestal_warning = warning
         self.pedestal_warning_label.setText(warning)
         self.pedestal_warning_label.setVisible(bool(warning))
@@ -1371,6 +1475,7 @@ class MuonView(QWidget):
             self._set_status("Invalid pedestals: values must be finite numbers.")
             return False
         self._manual_pedestals = clean
+        self._run_pedestal_set = None
         self._pedestals_from_simulator = False
         self._pedestal_mode = "manual"
         self._recompute_pedestals()
@@ -1383,6 +1488,7 @@ class MuonView(QWidget):
             self._set_status(f"Could not load pedestals: {exc}")
             return False
         self._file_pedestals = dict(peds)
+        self._run_pedestal_set = None
         self._pedestals_from_simulator = False
         self._pedestal_mode = "file"
         self._recompute_pedestals()
@@ -1447,6 +1553,7 @@ class MuonView(QWidget):
             except Exception as exc:  # noqa: BLE001
                 self._set_status(f"Analysis failed: {exc}")
         self._update_stats()
+        self._update_rate()
         if refresh:
             self._update_info()
             self._refresh_items()
@@ -1464,6 +1571,150 @@ class MuonView(QWidget):
         angle = "-" if s["mean_angle_deg"] is None else f"{s['mean_angle_deg']:.1f} deg"
         self.stats_label.setText(f"Events {s['events']}  |  coincidences {s['coincidences']} "
                                  f"({s['fraction'] * 100:.0f}%)  |  mean angle {angle}")
+
+    # ------------------------------------------------------------- rate ----
+    def _set_default_area(self):
+        area = muon_rate.coincidence_area_cm2(self._layout)
+        self.area_spin.blockSignals(True)
+        self.area_spin.setValue(round(area, 2) if area else 0.0)
+        self.area_spin.blockSignals(False)
+
+    def _area_changed(self, _value):
+        self._area_user_set = True
+        self._update_rate()
+
+    def _settings_key(self):
+        return (float(self.threshold_spin.value()), tuple(sorted(self._pedestals.items())),
+                repr(self._layout.to_dict()))
+
+    def _update_rate(self):
+        if not hasattr(self, "rate_label"):
+            return
+        self._run_rate = None
+        self._rate_net = None
+        net = None
+        if self._timing is None or not self.events or len(self.analyses) != len(self.events):
+            text = "Rate needs a saved run." if self._timing is None else "No analysed events."
+            self.rate_label.setText(text)
+            self.background_label.setText("")
+            self.flux_label.setText("")
+            self.background_button.setEnabled(self._timing is not None)
+            self.copy_summary_button.setEnabled(False)
+            self.save_summary_button.setEnabled(False)
+            return
+        self._run_rate = muon_rate.evaluate_run(self._timing, self.events, self.analyses)
+        result = self._run_rate.result
+        self.background_button.setEnabled(True)
+        self.copy_summary_button.setEnabled(True)
+        self.save_summary_button.setEnabled(True)
+        duration = result.batch_seconds if result.batch_seconds is not None else result.wall_seconds
+        dur = "unknown" if duration is None else f"{duration:.0f} s"
+        lines = [f"Pedestals: {self.pedestal_source_text()}",
+                 f"Duration: {dur} ({result.basis} basis)",
+                 f"Events {result.trigger_events}, accepted {result.accepted} ({result.accepted_fraction * 100:.0f}%)",
+                 f"Rate: {muon_rate._fmt(result.rate_per_min, result.sigma_per_min)}"]
+        if result.basis == "batch" and result.wall_rate_per_min is not None:
+            lines.append(f"Wall clock: {muon_rate._fmt(result.wall_rate_per_min, result.wall_sigma_per_min)}")
+        if self._run_rate.blocks.drift:
+            lines.append("Drift between blocks: check bias, temperature, interference.")
+        lines += [f"Warning: {w}" for w in result.warnings]
+        self.rate_label.setText("\n".join(lines))
+        bg = self._background_rate()
+        if bg is not None and bg.result.rate_per_min is not None and result.rate_per_min is not None:
+            net = muon_rate.subtract_background(result, bg.result)
+            self.background_label.setText(
+                f"Background: {muon_rate._fmt(bg.result.rate_per_min, bg.result.sigma_per_min)}\n"
+                f"Net rate: {muon_rate._fmt(net.rate_per_min, net.sigma_per_min)}")
+        else:
+            self.background_label.setText("" if self._background is None else "Background rate unavailable.")
+        rate, sigma = (net.rate_per_min, net.sigma_per_min) if net else (result.rate_per_min, result.sigma_per_min)
+        flux = muon_rate.flux_per_cm2(rate, sigma, self.area_spin.value() or None)
+        self.flux_label.setText("" if flux is None else
+                                f"Flux{' (net)' if net else ''}: {flux[0]:.4f} ± {flux[1]:.4f} /cm2/min")
+        self._rate_net = net
+
+    def _background_rate(self):
+        """RunRate of the background run under the current settings (cached per settings)."""
+        if self._background is None:
+            return None
+        path, cached_key, run_rate = self._background
+        key = self._settings_key()
+        if cached_key != key:
+            try:
+                run_rate = muon_rate.analyse_run(path, self._layout, self.threshold_spin.value(),
+                                                 self._pedestals or None)
+            except Exception as exc:  # noqa: BLE001
+                self._set_status(f"Background analysis failed: {exc}")
+                run_rate = None
+            self._background = (path, key, run_rate)
+        return run_rate
+
+    def load_background(self, path):
+        """Choose a background run; it is analysed with the current layout, threshold and pedestals."""
+        if self._timing is None:
+            self._set_status("Load a saved run before choosing a background run.")
+            return False
+        try:
+            run_rate = muon_rate.analyse_run(Path(path), self._layout, self.threshold_spin.value(),
+                                             self._pedestals or None)
+        except Exception as exc:  # noqa: BLE001
+            self._set_status(f"Could not use background run: {exc}")
+            return False
+        self._background = (Path(path), self._settings_key(), run_rate)
+        self._update_rate()
+        self._set_status(f"Background run {path} loaded.")
+        return True
+
+    def _background_clicked(self):
+        folder = QFileDialog.getExistingDirectory(self, "Open background run folder", str(Path.cwd() / "radioroc_runs"))
+        if folder:
+            self.load_background(folder)
+
+    def rate_summary_text(self) -> str:
+        """Plain-text lab-log summary of the loaded run, or '' without a real run."""
+        if self._run_rate is None:
+            return ""
+        bg = self._background_rate()
+        net = getattr(self, "_rate_net", None)
+        return muon_rate.format_summary(
+            self._timing, self._run_rate.result, blocks=self._run_rate.blocks,
+            background=bg.result if bg else None, background_timing=bg.timing if bg else None,
+            net=net, area_cm2=self.area_spin.value() or None,
+            settings=[f"Layout: {self._layout.name}", f"Detection threshold: {self.threshold_spin.value():g} counts",
+                      f"Pedestals: {self.pedestal_source_text()}"])
+
+    def copy_summary(self):
+        text = self.rate_summary_text()
+        if not text:
+            self._set_status("Rate summary needs a saved run.")
+            return False
+        QApplication.clipboard().setText(text)
+        self._set_status("Rate summary copied to the clipboard.")
+        return True
+
+    def save_summary_to(self, path):
+        text = self.rate_summary_text()
+        if not text:
+            self._set_status("Rate summary needs a saved run.")
+            return False
+        run_dirs = [self._timing.directory] + ([self._background[0]] if self._background else [])
+        if any(muon_rate.is_inside(path, d) for d in run_dirs):
+            self._set_status("Not saved: summaries are never written into a run folder.")
+            return False
+        try:
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).write_text(text, encoding="utf-8")
+        except OSError as exc:
+            self._set_status(f"Could not save summary: {exc}")
+            return False
+        self._set_status(f"Rate summary saved to {path}")
+        return True
+
+    def _save_summary_clicked(self):
+        default = Path.cwd() / "radioroc_runs" / "muon_rate_summary.txt"
+        path, _ = QFileDialog.getSaveFileName(self, "Save rate summary", str(default), "Text (*.txt)")
+        if path:
+            self.save_summary_to(path)
 
     # ----------------------------------------------------------- replay ---
     def show_event(self, index):

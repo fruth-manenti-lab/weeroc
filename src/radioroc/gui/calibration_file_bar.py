@@ -105,7 +105,7 @@ class CalibrationFileBar(QWidget):
         row.addStretch(1)
         outer.addWidget(self.status_label)
         tip = ("A calibration file keeps the channels, trigger channels, operating threshold, bias, "
-               "hold delay, note and the autocalibration trims. It does NOT keep the whole chip: after a power "
+               "hold delay, note, the measured pedestals and the autocalibration trims. It does NOT keep the whole chip: after a power "
                "cycle, apply defaults first, then load the file to re-apply the trims.")
         self.save_button.setToolTip(tip)
         self.load_button.setToolTip(tip)
@@ -181,7 +181,8 @@ class CalibrationFileBar(QWidget):
                 bias_voltage_text=self.bias_text.text(), note=self.note_edit.text(),
                 autocalibration=autocal,
                 hold_scan={"hold_delay_ns": self.hold_delay.value()},
-                trigger_gain_code=self.trigger_gain.value())
+                trigger_gain_code=self.trigger_gain.value(),
+                pedestals=self.selection.pedestals)
             written = cf.save_document(path, doc)
         except Exception as exc:
             self.status_label.setText(f"Could not save the calibration file: {exc}")
@@ -216,6 +217,9 @@ class CalibrationFileBar(QWidget):
             self.selection.set_hold_delay_ns(hold["hold_delay_ns"])
         self.bias_text.setText(data["bias_voltage_text"])
         self.note_edit.setText(data["note"])
+        pedestals = data.get("pedestals")
+        if pedestals is not None:
+            self.selection.set_pedestals(pedestals)
         autocal = data["autocalibration"]
         message = f"Loaded {Path(path).name}. Settings restored; the chip was not changed."
         if not autocal:

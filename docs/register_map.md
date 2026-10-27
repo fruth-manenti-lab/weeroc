@@ -113,7 +113,7 @@ default `00011111` (probe enables already on; the per-channel `(ch,66)` nibble c
 | 77, 78 | IO mux, 3 bits per IO: io0 = `w77[2:0]`, io1 = `w77[5:3]`, io2 = `{w78[0], w77[7:6]}`, io3 = `w78[3:1]`, io4 = `w78[6:4]` |
 | 100 | firmware status (reads `00000101`) |
 
-IO mux values: 0 default; **5 on io1 = synchro-trigger pulse** (sync a pulse generator). Board SMAs:
+IO mux values, recovered from the vendor GUI's FPGA config combo boxes (`radioroc2UI.pyc`, `retranslateUi`): 0 = Single trigger channel (the default), 1 = NORT1, 2 = NORT2, 3 = NORTQ, **4 = S-curves clock**, **5 = Synchro trigger** (sync a pulse generator; confirmed on the scope on io1 and io0), 6 = Digital probe, 7 = not recovered. The vendor guide (section 3.4) says IO0 is by default the S-curve sync clock and IO1 the synchro trigger for the external hold scan; the GUI labels IO1 as 3V3 and IO5 as 2V5. So IO0 at mux 0 outputs a channel trigger, not the clock: index 4 outputs the S-curves clock: confirmed on the scope 2026-10-27 as a square wave, 0 to about 1.4 V into a 1 MOhm scope with a 50 Ohm termination, silent (0 V) until a scan starts; at S-curve clock index 3 the period is 1.2 us (about 833 kHz, 50% duty). The vendor GUI offers clock indices 0, 1, 2 = 1 kHz, 10 kHz, 100 kHz. With IO0 = 4, clock index 1, Ctest on and a generator in external triggered burst (1 cycle) on TRIG IN, the S-curve turn-on appears at the pulse height (ch6 404, ch32 412 at paT gain 1, generator 100 mV displayed into the 20 dB attenuator). Board SMAs:
 `IO6` (= `IO_FPGA6`) = External Synchro input, `IO7` = External Hold input, both 2.5 V TTL.
 Internal-hold/external-hold control words are constants in `radioroc_client.py`.
 

@@ -217,6 +217,9 @@ class HoldScanWindow(QMainWindow):
         self.muon_preset_button = QPushButton("Muon coincidence preset")
         external_form.addRow(self.muon_preset_button)
         self.muon_preset_button.clicked.connect(self.apply_muon_preset)
+        self.source_preset_button = QPushButton("Gamma source preset (single channel)")
+        external_form.addRow(self.source_preset_button)
+        self.source_preset_button.clicked.connect(self.apply_source_preset)
         form.addRow(self.external_group)
 
         self.gain_group = QGroupBox("Optional gain overrides")
@@ -388,6 +391,11 @@ class HoldScanWindow(QMainWindow):
         self.hint.attach(self.muon_preset_button, "Fill in the muon scan: self-triggered "
                           "two-channel coincidence, no Ctest, no synchro pulse, operating "
                           "threshold, 0 to 150 ns in 20 ns steps, 10 events per point (about 5 min).")
+        self.hint.attach(self.source_preset_button, "Fill in the source scan (for example Co-60 on the "
+                          "plints, SiPMs biased): the trigger channel fires on its own pulses, no coincidence, "
+                          "no Ctest, no synchro pulse, threshold 480 (lower than the muon threshold: the source "
+                          "pulses are smaller), 0 to 150 ns in 10 ns steps, 100 events per point (a few minutes). "
+                          "Run it once per plint by changing Trigger channel (T1) on the Calibration page.")
         self.hint.attach(self.adc_window_ns, "Length of the ADC's acquisition window, in "
                           "nanoseconds, in external hold mode.")
         self.hint.attach(self.adc_nb_trig, "Number of ADC triggers to accept per acquisition "
@@ -687,6 +695,27 @@ class HoldScanWindow(QMainWindow):
         self.set_threshold_dac.setChecked(True)
         if self.shared_selection is not None:
             self.threshold_dac.setValue(self.shared_selection.operating_threshold)
+
+    def apply_source_preset(self):
+        """Self-triggered single-channel hold scan with a gamma source (no coincidence, no pulser)."""
+        self.hold_mode.setCurrentIndex(1)
+        self.hold_min.setValue(0)
+        self.hold_max.setValue(150)
+        self.hold_step.setValue(10)
+        self.acquisitions.setValue(100)
+        self.timeout_s_scan.setValue(60.0)
+        self.discriminator.setCurrentIndex(0)
+        self.mask.setChecked(True)
+        self.ctest.setChecked(False)
+        self.synchro_trigger.setChecked(False)
+        self.set_sync_io_mux.setChecked(False)
+        self.external_trigger.setChecked(False)
+        self.peak_sensing.setChecked(False)
+        self.trigger_type.setValue(0)
+        self.trigger_source.setValue(3)
+        self.trigger_source_2.setValue(0)
+        self.set_threshold_dac.setChecked(True)
+        self.threshold_dac.setValue(480)
 
     def operation(self):
         channels = self.channel_select.selected_channels()

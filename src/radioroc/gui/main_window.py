@@ -28,6 +28,7 @@ from .channel_config_panel import ChannelConfigPanel
 from .connection_panel import ConnectionPanel
 from .hint_bar import HintBar
 from .hold_scan_window import HoldScanWindow
+from .pedestal_window import PedestalWindow
 from .input_dac_grid_panel import InputDacGridPanel
 from .main_panel import MainPanel
 from .probes_masks_panel import ProbesMasksPanel
@@ -295,9 +296,11 @@ class MainWindow(QMainWindow):
         self.threshold_window = ThresholdWindow(selection=sel, connection_worker=worker)
         self.autocalibration_window = AutocalibrationWindow(selection=sel, connection_worker=worker)
         self.hold_scan_window = HoldScanWindow(selection=sel, connection_worker=worker)
+        self.pedestal_window = PedestalWindow(selection=sel, connection_worker=worker)
         self.scurve_window = ScurveWindow(selection=sel, connection_worker=worker)
         self.calibration_tabs.addTab(self.threshold_window, "Threshold scan")
         self.calibration_tabs.addTab(self.autocalibration_window, "Autocalibration")
+        self.calibration_tabs.addTab(self.pedestal_window, "Pedestals")
         self.calibration_tabs.addTab(self.hold_scan_window, "Hold scan")
         self.calibration_tabs.addTab(self.scurve_window, "S-curve")
         self.calibration_file_bar = CalibrationFileBar(
@@ -329,7 +332,7 @@ class MainWindow(QMainWindow):
 
     def _scan_windows(self):
         return (self.threshold_window, self.hold_scan_window, self.scurve_window,
-                self.autocalibration_window, self.acquisition_window)
+                self.autocalibration_window, self.pedestal_window, self.acquisition_window)
 
     def _busy(self):
         scanning = any(window.worker is not None for window in self._scan_windows())

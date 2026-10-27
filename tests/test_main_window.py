@@ -98,10 +98,10 @@ class MainWindowTests(unittest.TestCase):
     def test_calibration_tab_order(self):
         window = self._make_window()
         tabs = window.calibration_tabs
-        self.assertEqual([tabs.tabText(i) for i in range(4)],
-                         ["Threshold scan", "Autocalibration", "Hold scan", "S-curve"])
+        self.assertEqual([tabs.tabText(i) for i in range(5)],
+                         ["Threshold scan", "Autocalibration", "Pedestals", "Hold scan", "S-curve"])
         for i, attr in enumerate(("threshold_window", "autocalibration_window",
-                                  "hold_scan_window", "scurve_window")):
+                                  "pedestal_window", "hold_scan_window", "scurve_window")):
             self.assertIs(tabs.widget(i), getattr(window, attr))
 
     def test_acquisition_is_its_own_sidebar_page_left_of_calibration(self):
@@ -478,7 +478,8 @@ class MainWindowTests(unittest.TestCase):
         from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
         window = self._make_window()
         window.show()
-        pages = [(2, None), (1, 0), (1, 1), (1, 2), (1, 3)]
+        # tab 2 is Pedestals: a table, no plot
+        pages = [(2, None), (1, 0), (1, 1), (1, 3), (1, 4)]
         for row, tab in pages:
             window.sidebar.setCurrentRow(row)
             if tab is not None:

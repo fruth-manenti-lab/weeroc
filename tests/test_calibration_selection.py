@@ -141,6 +141,20 @@ class WindowsUseSharedSelectionTests(_QtCase):
         self.sel.set_trigger_gain(8)
         self.assertEqual(acq.trigger_preamp_gain.value(), 8)
 
+    def test_pedestals_attribute_and_signal(self):
+        from radioroc.data.pedestals import compute_pedestals
+        from radioroc.gui.calibration_selection import CalibrationSelection
+        sel = CalibrationSelection((4, 5))
+        self.assertIsNone(sel.pedestals)
+        seen = []
+        sel.pedestals_changed.connect(seen.append)
+        ps = compute_pedestals([{"channel": 4, "hg": 90 + i, "lg": 80} for i in range(6)])
+        sel.pedestals = ps
+        sel.pedestals = ps
+        self.assertIs(sel.pedestals, ps)
+        sel.pedestals = None
+        self.assertEqual(seen, [ps, None])
+
     def test_model_validates_gain_and_threshold(self):
         with self.assertRaises(ValueError):
             self.sel.set_trigger_gain(0)

@@ -38,6 +38,13 @@ from radioroc.transport.scurve_simulator import ScurveSimulationConfig
 from radioroc.gui.output_paths import guard_output, refresh_auto_output
 
 
+_CLOCK_IO0_HINT = ("Route the S-curve window clock to the IO0 pin (FPGA IO mux index 4) for this "
+                   "scan, then restore the original IO0 setting. Use with Enable Ctest and a pulse "
+                   "generator in triggered burst mode (1 cycle, external trigger from IO0) so the "
+                   "test pulse is synchronized with every acquisition window. Use clock index 1 "
+                   "(10 kHz) or 2 (100 kHz); the vendor GUI offers only 1, 10 and 100 kHz.")
+
+
 def _integer(low, high, value):
     field = QSpinBox()
     field.setRange(low, high)
@@ -162,9 +169,10 @@ class ScurveWindow(QMainWindow):
         self.mask = QCheckBox("Mask other channels")
         self.mask.setChecked(True)
         self.ctest = QCheckBox("Enable Ctest")
+        self.clock_io0 = QCheckBox("Output S-curve clock on IO0 (triggers an external pulser)")
         self.initialize = QCheckBox("Initialize FPGA (persists)")
         self.defaults = QCheckBox("Apply defaults (persists)")
-        for field in (self.trigger_level, self.mask, self.ctest, self.initialize, self.defaults):
+        for field in (self.trigger_level, self.mask, self.ctest, self.clock_io0, self.initialize, self.defaults):
             form.addRow(field)
 
         self.gain_group = QGroupBox("Optional gain override")
@@ -281,6 +289,7 @@ class ScurveWindow(QMainWindow):
         self.hint.attach(self.ctest, "Enable Ctest: routes the ASIC's internal test-charge "
                           "injector into the selected channel(s), producing the repeated "
                           "calibration pulse the S-curve needs without an external generator.")
+        self.hint.attach(self.clock_io0, _CLOCK_IO0_HINT)
         self.hint.attach(self.initialize, "Re-initialize the FPGA before running. This is a "
                           "persistent board change, not just a scan setting -- leave it off "
                           "unless you specifically need to reset FPGA state.")
@@ -541,6 +550,7 @@ class ScurveWindow(QMainWindow):
             clock_index=self.clock_index.value(), trigger_level=self.trigger_level.isChecked(),
             trigger_preamp_gain=self.trigger_preamp_gain.value() or None,
             out_dir=Path(output).expanduser(),
+            scurve_clock_io0=self.clock_io0.isChecked(),
         )
         config = self.config_path.text().strip()
         return ScurveJobConfig(scan, Path(config).expanduser() if config else None,

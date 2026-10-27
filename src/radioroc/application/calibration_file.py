@@ -85,7 +85,7 @@ def find_autocalibration_trims(directory=None, runs_root=None):
 
 def build_document(*, channels, trigger_channel, trigger_channel_2, auto_triggers,
                    operating_threshold_dac, bias_voltage_text="", note="",
-                   autocalibration=None, hold_scan=None, trigger_gain_code=None, now=None) -> dict:
+                   autocalibration=None, hold_scan=None, trigger_gain_code=None, pedestals=None, now=None) -> dict:
     doc = {
         "schema_version": SCHEMA_VERSION,
         "created": (now or datetime.now()).astimezone().isoformat(timespec="seconds"),
@@ -103,6 +103,8 @@ def build_document(*, channels, trigger_channel, trigger_channel_2, auto_trigger
         doc["hold_scan"] = hold_scan
     if trigger_gain_code is not None:
         doc["trigger_gain_code"] = int(trigger_gain_code)
+    if pedestals is not None:
+        doc["pedestals"] = pedestals if isinstance(pedestals, dict) else pedestals.to_dict()
     return doc
 
 
@@ -177,10 +179,18 @@ def validate_document(data) -> dict:
     gain = data.get("trigger_gain_code")
     if gain is not None and (not _is_int(gain) or not 1 <= gain <= 63):
         raise CalibrationFileError(f"'trigger_gain_code' must be a whole number 1..63, got {gain!r}")
+    pedestals = data.get("pedestals")
+    if pedestals is not None:
+        from radioroc.data.pedestals import PedestalSet
+        try:
+            pedestals = PedestalSet.from_dict(pedestals)
+        except ValueError as exc:
+            raise CalibrationFileError(f"'pedestals' is invalid: {exc}") from exc
     return {"channels": channels, "trigger_channel": t1, "trigger_channel_2": t2,
             "auto_triggers": auto, "operating_threshold_dac": dac,
             "bias_voltage_text": data.get("bias_voltage_text", ""), "note": data.get("note", ""),
             "autocalibration": autocal, "hold_scan": hold, "trigger_gain_code": gain,
+            "pedestals": pedestals,
             "created": data.get("created"), "app_version": data.get("app_version")}
 
 

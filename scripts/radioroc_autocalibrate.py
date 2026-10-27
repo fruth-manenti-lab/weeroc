@@ -57,6 +57,8 @@ def build_parser(preset: dict[str, object] | None = None, preset_path: Path | No
     parser.add_argument("--t2", action="store_true", help="Calibrate T2 instead of T1")
     parser.add_argument("--no-mask", action="store_true", help="Do not isolate the measured channel with masks")
     parser.add_argument("--use-ctest", action="store_true", help="Enable Ctest on the measured channel")
+    parser.add_argument("--clock-io0", action="store_true",
+                        help="Output the S-curve clock on IO0 (FPGA IO mux 4) to trigger an external pulser; restored afterwards")
     parser.add_argument("--clock-index", type=int, help="S-curve clock index 0..3")
     parser.add_argument("--trigger-level", action="store_true", help="Count trigger level instead of rising edge")
     parser.add_argument("--pat-gain", type=int, help="Optional trigger preamp paT gain code, 1=max, 63=min")
@@ -105,7 +107,7 @@ def main() -> int:
             "channels": args.channels,
             "trigger preamp gain code (paT)": args.pat_gain,
             "threshold": "T2" if args.t2 else "T1", "mask": "off" if args.no_mask else "on",
-            "ctest": args.use_ctest,
+            "ctest": args.use_ctest, "S-curve clock on IO0": args.clock_io0,
             "apply defaults": args.apply_defaults, "skip fpga init": args.skip_fpga_init,
         },
         {"channels": None} if channels_defaulted else None,
@@ -116,6 +118,7 @@ def main() -> int:
         use_mask=not args.no_mask,
         use_ctest=args.use_ctest,
         trigger_preamp_gain=args.pat_gain,
+        scurve_clock_io0=args.clock_io0,
         out_dir=out_dir,
         config_path=Path(args.config) if args.config is not None else DEFAULT_CONFIG,
         initialize_fpga=not args.skip_fpga_init,

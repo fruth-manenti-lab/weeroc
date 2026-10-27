@@ -176,6 +176,10 @@ class ScurveConfig:
     - `trigger_level` (`bool`): Count trigger level instead of rising edge.
     - `trigger_preamp_gain` (`int | None`): Optional paT gain code `1..63`.
     - `out_dir` (`Path`): Run output directory.
+    - `scurve_clock_io0` (`bool`): Opt-in. Route the S-curve window clock to
+      the IO0 pin (FPGA IO mux index 4) for the scan so an external pulser can
+      be triggered in sync with every acquisition window; the original IO0 mux
+      is restored afterwards.
     """
 
     channels: list[int]
@@ -189,6 +193,7 @@ class ScurveConfig:
     trigger_level: bool = False
     trigger_preamp_gain: int | None = None
     out_dir: Path = DEFAULT_RUNS_DIR
+    scurve_clock_io0: bool = False
 
     def validate(self) -> None:
         """Validate this S-curve configuration before hardware writes.
@@ -208,6 +213,8 @@ class ScurveConfig:
             raise ValueError("clock_index must be in range 0..3")
         if self.trigger_preamp_gain is not None and not 1 <= self.trigger_preamp_gain <= 63:
             raise ValueError("trigger_preamp_gain must be in range 1..63")
+        if not isinstance(self.scurve_clock_io0, bool):
+            raise ValueError("scurve_clock_io0 must be boolean")
 
 
 @dataclass

@@ -334,6 +334,7 @@ class AcquisitionWindow(QMainWindow):
         self._closing = False
         self._last_rows = ()
         self._active_directory = None
+        self._run_channels = ()
         self._hardware_running = False
         self._live_csv_path = None
         self._live_refresh_tick = 0
@@ -651,6 +652,19 @@ class AcquisitionWindow(QMainWindow):
             selection.channels_changed.connect(_update_selection_label)
             selection.triggers_changed.connect(_update_selection_label)
             _update_selection_label()
+
+            self.pedestal_status_label = QLabel()
+            self.pedestal_status_label.setWordWrap(True)
+            self.pedestal_status_label.setAccessibleName("Pedestal status")
+            form.insertRow(1, self.pedestal_status_label)
+            self.hint.attach(self.pedestal_status_label,
+                             "Pedestals from the Calibration page's Pedestals step. When a hardware run "
+                             "completes they are saved as pedestals.json in the new run folder, so the Muon "
+                             "page analyses that run with them.")
+            if hasattr(selection, "pedestals_changed"):
+                selection.pedestals_changed.connect(lambda *_: self._update_pedestal_status())
+            selection.channels_changed.connect(lambda *_: self._update_pedestal_status())
+            self._update_pedestal_status()
 
             # The hold delay is shared with the Calibration page's file bar.
             self.hold_delay_ns.setValue(selection.hold_delay_ns)
@@ -1048,6 +1062,7 @@ class AcquisitionWindow(QMainWindow):
                 self._show_run_banner("HARDWARE", self._active_directory)
                 self.batch_summary.clear()
                 self._start_live_spectra(operation.acquisition.channels, "HARDWARE")
+                self._run_channels = tuple(operation.acquisition.channels)
                 self._hardware_running = True
                 self._set_running(True)
                 self.status.setText("Hardware · preparing · mandatory restoration verification")
@@ -1104,6 +1119,34 @@ class AcquisitionWindow(QMainWindow):
             suffix = ("cleanup, restoration verification and disconnect…" if self._closing
                       else "scan cleanup and restoration verification…")
             self.status.setText(f"Cancelling · waiting for {suffix}")
+
+    def _current_pedestals(self):
+        return getattr(self.shared_selection, "pedestals", None)
+
+    def _update_pedestal_status(self):
+        label = getattr(self, "pedestal_status_label", None)
+        if label is None:
+            return
+        from radioroc.data.pedestal_flow import pedestal_status_text
+        try:
+            channels = self.channel_select.selected_channels()
+        except Exception:
+            channels = ()
+        text, warn = pedestal_status_text(self._current_pedestals(), channels)
+        label.setText(text)
+        label.setStyleSheet("color: #e6a23c; font-weight: bold;" if warn else "")
+
+    def _save_run_pedestals(self, run_dir, channels):
+        """After a completed hardware run: store the current pedestals in the new run folder."""
+        from radioroc.data.pedestal_flow import write_run_pedestals
+        pedestals = self._current_pedestals()
+        if pedestals is None:
+            return None
+        written, message = write_run_pedestals(run_dir, pedestals, channels)
+        if not written and "do not cover" in message:
+            self.pedestal_status_label.setText(f"Warning: {message}; pedestals were not saved with this run.")
+            self.pedestal_status_label.setStyleSheet("color: #e6a23c; font-weight: bold;")
+        return written, message
 
     def poll_worker(self):
         if self.worker is not None:
@@ -1165,6 +1208,10 @@ class AcquisitionWindow(QMainWindow):
                        "problems": problems, "warnings": result.warnings,
                        "display_events_coalesced": snapshot.coalesced_events,
                        "saved_data": "All completed batches and events are saved independently of display updates."}
+            if mode == "HARDWARE" and terminal == "completed" and self._active_directory is not None:
+                saved = self._save_run_pedestals(self._active_directory, self._run_channels)
+                if saved:
+                    summary["pedestals"] = saved[1]
             self.details.setPlainText(json.dumps(summary, indent=2))
         else:
             self.status.setText(f"{mode.title()} did not acquire data: " + "; ".join(problems))

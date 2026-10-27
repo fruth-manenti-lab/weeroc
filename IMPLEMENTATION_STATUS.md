@@ -1,5 +1,46 @@
 # Implementation status
 
+## RADIOROC 47 — hold scan with a Co-60 gamma source
+
+Bench (2026-10-27, Co-60 on the plints, SiPMs biased; without bias the threshold-scan rate drops to zero by DAC 360 and every trigger is noise): self-triggered single-channel hold
+scans (trigger type 0, individual trigger on the channel, hold 0 to 150 ns in 10 ns steps, 50 to 100 events/point, paT gain 1). ch6 at thresholds 400/480/560 and ch32 at 480:
+tallest 20 to 50 ns, half height near 85 to 95 ns, zero near 140 ns (undershoot beyond); peak position did not change with threshold (no visible time walk); consistent with the
+2026-10-21 muon sweep (20 to 55 ns); supports the 30 ns default. Plot: `radioroc_runs/gamma_hold_plot_20261027.png` (local). Forced-trigger pedestals and self-trigger rates at
+the time: ch6 about 15 to 18 events/s at threshold 400 to 560 with pulse heights 30 to 60 counts above pedestal. One transient `i2c FIFO transaction timed out` on a ch32 self-trigger
+acquisition (board answered afterwards, cleanup restored). New: "Gamma source preset (single channel)" button on the Hold scan tab; guide Step 4d. Not done: confirm with a real muon
+hold sweep (Step 4b); source mode has no per-amplitude analysis (hold scan stores only per-point means).
+
+## RADIOROC 47 — pedestal step, muon rate per minute
+
+Bench (2026-10-27): a forced-trigger ADC acquisition (FPGA synchro pulse per batch, trigger type 0, no input stimulus) with the SiPMs
+attached reads clean pedestals: ch6 HG 95.0 (robust sd about 1.1), ch32 HG 107.5, LG 89 and 120; 100 events/channel in 6 s; one
+real muon in 100 events inflated the plain sd (hence robust sd). New: Calibration page "Pedestals" tab (`PedestalJob` wrapping the
+acquisition job, `radioroc.data.pedestals`, `pedestals.json`, saved/restored in the calibration file, `scripts/radioroc_pedestals.py`);
+Acquisition page shows the pedestals and writes `pedestals.json` into each completed run folder; Muon page and
+`scripts/radioroc_muon_rate.py` use it (summary states the source); Muon page "Rate" box (`radioroc.data.muon_rate`: batch-completion
+and wall-clock time bases, background subtraction, flux, block drift check). Offline check on the saved 2026-10-26 run: automatic
+pedestals accepted 9/50 (5.7 +- 1.9 /min), measured pedestals 42/50 (23.4 +- 3.9 /min). Not done on hardware: the Pedestals tab
+through the app, a real muon run with `pedestals.json` saved by the Acquisition page.
+
+## RADIOROC 47 — pulse-referred autocalibration: S-curve clock on IO0, defaults buttons, section titles, guide rewrite
+
+Bench (2026-10-27, operator present): FPGA IO mux index 4 = "S-curves clock" (recovered from the vendor GUI's IO combo items in
+`radioroc2UI.pyc`; 0 single trigger channel, 1-3 NORT1/NORT2/NORTQ, 5 synchro trigger, 6 digital probe). Scope on IO0 at mux 4:
+silent until a scan runs, then a square wave 0 to ~1.4 V (1 MOhm scope with 50 Ohm termination), period 1.2 us (~833 kHz) at
+S-curve clock index 3; the vendor GUI offers clock indices 0-2 = 1/10/100 kHz. With IO0 = 4, clock index 1, Ctest on and the
+TGF4162 in external triggered burst (1 cycle, TRIG IN from IO0, 100 mV displayed High-z through the 20 dB attenuator) the S-curve
+turn-on appears at the pulse height: ch6 404, ch32 412 (paT gain 1); at 500 mV or 2 V it is 100% to DAC 1020; at 500 mV it moves
+with paT gain (code 8 ~310, 24 ~190, 63 ~130). Noise-edge autocalibration (Ctest off) is independent of the generator; its
+crossings (~145-148) do not line up the pulse crossings (8 codes apart). Pulsed edge-counting S-curves show a dip at the noise edge
+that made the first-falling-crossing estimator pick DAC ~60 instead of ~410; "Count trigger level" removes it (operator confirmed).
+Changes: opt-in `scurve_clock_io0` (ScurveConfig/AutocalibrationJobConfig, S-curve and Autocalibration tabs, `--clock-io0`),
+mux 77/78 snapshotted and restored (verified on hardware: restore passed), `estimate_scurve_crossings(last_falling=True)` used by
+autocalibration when the option is set; ASIC config > Main "Initialize FPGA" / "Apply defaults" buttons (new `chip_init` job,
+offline-tested only); teal group-title tabs app-wide; Acquisition "Open saved run" picks the folder; guide rewritten (generator
+section from the TGF4000 manual, Step 2a/2b, order of calibration steps, contents tables, timeout rule). Checks: check_development
+OK; targeted tests OK. Not done: Threshold scan has no IO0 option; autocalibration with trigger level on the board, Step 4b muon
+hold scan, app coincidence run and muon rate run still untested on hardware.
+
 ## RADIOROC 46 — offline hardening: hold default, coincidence validation, reopen carries channels
 
 Offline only. Hold delay default 530 -> 30 ns (Calibration selection and standalone Acquisition; hints explain 30 ns
