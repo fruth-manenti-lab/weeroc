@@ -414,6 +414,7 @@ def poisson_rate_errors(rates: list[float], *, window_ms: float, averages: int) 
 
 def estimate_scurve_crossings(
     rows: list[dict], channels: list[int], *, target_percent: float = 50.0,
+    last_falling: bool = False,
 ) -> dict[int, float | None]:
     """Find each channel's DAC crossing of `target_percent` by linear interpolation.
 
@@ -423,6 +424,12 @@ def estimate_scurve_crossings(
     whose series never crosses `target_percent` (no adjacent pair straddles
     it), gets `None`. The first crossing found (in row order) is returned;
     S-curves are expected to be monotonic, so this is normally the only one.
+
+    With `last_falling=True` the LAST downward crossing (efficiency going from
+    above to at-or-below `target_percent` with rising DAC) is returned instead.
+    This is for pulse-referred S-curves (Ctest with a synchronized pulser):
+    those can show a spurious efficiency dip at low DAC near the pedestal, and
+    the real pulse edge is the highest-DAC falling crossing.
 
     Extracted from `scripts/radioroc_standard_scurves.py`'s
     `autocalibrate_scurve`/`_estimate_crossings` (see
@@ -438,6 +445,12 @@ def estimate_scurve_crossings(
         column = f"ch{channel}"
         pairs = [(row["DAC"], row[column]) for row in rows if column in row]
         crossing = None
+        if last_falling:
+            for (x0, y0), (x1, y1) in zip(pairs, pairs[1:]):
+                if y0 > target_percent >= y1:
+                    crossing = x0 + (target_percent - y0) * (x1 - x0) / (y1 - y0)
+            crossings[channel] = crossing
+            continue
         for (x0, y0), (x1, y1) in zip(pairs, pairs[1:]):
             if y0 == target_percent:
                 crossing = float(x0)

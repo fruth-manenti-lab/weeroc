@@ -1,5 +1,24 @@
 # Implementation status
 
+## RADIOROC 47 — pulse-referred autocalibration: S-curve clock on IO0, defaults buttons, section titles, guide rewrite
+
+Bench (2026-10-27, operator present): FPGA IO mux index 4 = "S-curves clock" (recovered from the vendor GUI's IO combo items in
+`radioroc2UI.pyc`; 0 single trigger channel, 1-3 NORT1/NORT2/NORTQ, 5 synchro trigger, 6 digital probe). Scope on IO0 at mux 4:
+silent until a scan runs, then a square wave 0 to ~1.4 V (1 MOhm scope with 50 Ohm termination), period 1.2 us (~833 kHz) at
+S-curve clock index 3; the vendor GUI offers clock indices 0-2 = 1/10/100 kHz. With IO0 = 4, clock index 1, Ctest on and the
+TGF4162 in external triggered burst (1 cycle, TRIG IN from IO0, 100 mV displayed High-z through the 20 dB attenuator) the S-curve
+turn-on appears at the pulse height: ch6 404, ch32 412 (paT gain 1); at 500 mV or 2 V it is 100% to DAC 1020; at 500 mV it moves
+with paT gain (code 8 ~310, 24 ~190, 63 ~130). Noise-edge autocalibration (Ctest off) is independent of the generator; its
+crossings (~145-148) do not line up the pulse crossings (8 codes apart). Pulsed edge-counting S-curves show a dip at the noise edge
+that made the first-falling-crossing estimator pick DAC ~60 instead of ~410; "Count trigger level" removes it (operator confirmed).
+Changes: opt-in `scurve_clock_io0` (ScurveConfig/AutocalibrationJobConfig, S-curve and Autocalibration tabs, `--clock-io0`),
+mux 77/78 snapshotted and restored (verified on hardware: restore passed), `estimate_scurve_crossings(last_falling=True)` used by
+autocalibration when the option is set; ASIC config > Main "Initialize FPGA" / "Apply defaults" buttons (new `chip_init` job,
+offline-tested only); teal group-title tabs app-wide; Acquisition "Open saved run" picks the folder; guide rewritten (generator
+section from the TGF4000 manual, Step 2a/2b, order of calibration steps, contents tables, timeout rule). Checks: check_development
+OK; targeted tests OK. Not done: Threshold scan has no IO0 option; autocalibration with trigger level on the board, Step 4b muon
+hold scan, app coincidence run and muon rate run still untested on hardware.
+
 ## RADIOROC 46 — offline hardening: hold default, coincidence validation, reopen carries channels
 
 Offline only. Hold delay default 530 -> 30 ns (Calibration selection and standalone Acquisition; hints explain 30 ns

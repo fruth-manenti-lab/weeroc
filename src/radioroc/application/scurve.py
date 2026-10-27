@@ -28,6 +28,16 @@ from .verification import verify_restoration as run_restoration_check
 # the clock-index bits (set during preparation) and the per-point gate-control
 # bits; word 3 carries the trigger-level bit; word 6 carries channel select.
 _FPGA_SCURVE_ADDRESSES = (1, 3, 6)
+# Words 77/78 hold the FPGA IO mux; added only when the S-curve clock is routed
+# to IO0 (ScurveConfig.scurve_clock_io0).
+_FPGA_SCURVE_IO_MUX_ADDRESSES = (77, 78)
+_SCURVE_CLOCK_MUX_INDEX = 4
+
+
+def _scurve_fpga_addresses(scan):
+    if scan.scurve_clock_io0:
+        return _FPGA_SCURVE_ADDRESSES + _FPGA_SCURVE_IO_MUX_ADDRESSES
+    return _FPGA_SCURVE_ADDRESSES
 
 
 def _now():
@@ -230,7 +240,7 @@ class ScurveJob:
             manifest["preparation"]["status"] = "completed"
             # Capture control state (including the clock/trigger-level bits just
             # set above) before snapshot reads themselves use I2C.
-            for address in _FPGA_SCURVE_ADDRESSES:
+            for address in _scurve_fpga_addresses(scan):
                 fpga[address] = device.read_word(address)
             result.cleanup_status = "pending"
             manifest["device_state"] = "unknown_until_cleanup"
@@ -250,6 +260,8 @@ class ScurveJob:
             if scan.trigger_preamp_gain is not None:
                 device.set_trigger_preamp_gain(scan.trigger_preamp_gain, channels=scan.channels)
             device.prepare_trigger_masks(t1=scan.t1, use_mask=scan.use_mask, use_ctest=scan.use_ctest)
+            if scan.scurve_clock_io0:
+                device.write_fpga_io_mux(io0=_SCURVE_CLOCK_MUX_INDEX)
             saved_w1 = fpga[1]
             result.status = "running"
             persist()
@@ -315,7 +327,7 @@ class ScurveJob:
                 if verify_restoration:
                     result.verification = run_restoration_check(
                         device, snapshot, config.registers(), execution_mode=mode,
-                        fpga_addresses=_FPGA_SCURVE_ADDRESSES)
+                        fpga_addresses=_scurve_fpga_addresses(scan))
                     manifest["verification"] = deepcopy(result.verification)
             except BaseException as exc:
                 result.verification = {

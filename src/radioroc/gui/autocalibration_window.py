@@ -37,6 +37,13 @@ from radioroc.gui.hint_bar import HintBar
 _STEP_ORDER = ("step1_zero", "step1_full", "step2", "final")
 
 
+_CLOCK_IO0_HINT = ("Route the S-curve window clock to the IO0 pin (FPGA IO mux index 4) for this "
+                   "scan, then restore the original IO0 setting. Use with Enable Ctest and a pulse "
+                   "generator in triggered burst mode (1 cycle, external trigger from IO0) so the "
+                   "test pulse is synchronized with every acquisition window. Use clock index 1 "
+                   "(10 kHz) or 2 (100 kHz); the vendor GUI offers only 1, 10 and 100 kHz.")
+
+
 def _integer(low, high, value):
     field = QSpinBox()
     field.setRange(low, high)
@@ -108,10 +115,12 @@ class AutocalibrationWindow(QMainWindow):
         self.use_mask.setChecked(True)
         self.use_ctest = QCheckBox("Enable Ctest")
         self.clock_index = _integer(0, 3, 3)
+        self.clock_io0 = QCheckBox("Output S-curve clock on IO0 (triggers an external pulser)")
         self.trigger_level = QCheckBox("Count trigger level instead of rising edge")
         for field in (self.use_mask, self.use_ctest):
             form.addRow(field)
         form.addRow("S-curve clock index (0..3)", self.clock_index)
+        form.addRow(self.clock_io0)
         form.addRow(self.trigger_level)
 
         self.gain_group = QGroupBox("Optional gain override")
@@ -263,6 +272,7 @@ class AutocalibrationWindow(QMainWindow):
         self.hint.attach(self.final_window_after, "How far above the step-2 mean crossing the "
                           "final verification scan ends.")
         self.hint.attach(self.final_dac_step, "DAC step for the final verification scan.")
+        self.hint.attach(self.clock_io0, _CLOCK_IO0_HINT)
         self.hint.attach(self.initialize_fpga, "Re-initialize the FPGA before running. This is "
                           "a persistent board change, not just a scan setting -- leave it off "
                           "unless you specifically need to reset FPGA state.")
@@ -344,6 +354,7 @@ class AutocalibrationWindow(QMainWindow):
             use_mask=self.use_mask.isChecked(), use_ctest=self.use_ctest.isChecked(),
             clock_index=self.clock_index.value(), trigger_level=self.trigger_level.isChecked(),
             trigger_preamp_gain=self.trigger_preamp_gain.value() or None,
+            scurve_clock_io0=self.clock_io0.isChecked(),
             out_dir=Path(output).expanduser(),
             config_path=Path(config).expanduser() if config else None,
             initialize_fpga=self.initialize_fpga.isChecked(),
@@ -543,6 +554,7 @@ class AutocalibrationWindow(QMainWindow):
         put("use_mask", self.use_mask.setChecked, bool)
         put("use_ctest", self.use_ctest.setChecked, bool)
         put("trigger_level", self.trigger_level.setChecked, bool)
+        put("scurve_clock_io0", self.clock_io0.setChecked, bool)
         saved_gain = int(operation.get("trigger_preamp_gain") or 0)
         if saved_gain or self.shared_selection is None:
             self.trigger_preamp_gain.setValue(saved_gain)

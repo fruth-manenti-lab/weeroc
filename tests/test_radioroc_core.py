@@ -402,6 +402,26 @@ class RadiorocAnalysisTests(unittest.TestCase):
             self.assertAlmostEqual(stdevs["ch4"][0], 14.1421356237)
             self.assertEqual(stdevs["ch4"][1], 0.0)
 
+    def test_estimate_scurve_crossings_last_falling_skips_low_dac_dip(self) -> None:
+        # Shape seen on the bench (2026-10-27, Ctest + synchronized pulser): a spurious
+        # dip near the pedestal at low DAC, then the real pulse edge near DAC 410.
+        dacs = [0, 30, 60, 90, 120, 330, 360, 390, 420, 450, 480]
+        ch6 = [100.0, 100.0, 100.0, 28.5, 100.0, 100.0, 100.0, 99.0, 12.5, 0.0, 0.0]
+        ch32 = [100.0, 100.0, 31.0, 100.0, 100.0, 100.0, 100.0, 98.5, 8.5, 0.0, 0.0]
+        rows = [{"DAC": d, "ch6": a, "ch32": b} for d, a, b in zip(dacs, ch6, ch32)]
+        first = estimate_scurve_crossings(rows, [6, 32])
+        self.assertLess(first[6], 100.0)
+        self.assertLess(first[32], 100.0)
+        last = estimate_scurve_crossings(rows, [6, 32], last_falling=True)
+        self.assertGreater(last[6], 390.0)
+        self.assertLess(last[6], 420.0)
+        self.assertGreater(last[32], 390.0)
+        self.assertLess(last[32], 420.0)
+        monotonic = [{"DAC": 0, "ch4": 100.0}, {"DAC": 10, "ch4": 0.0}]
+        self.assertEqual(estimate_scurve_crossings(monotonic, [4], last_falling=True)[4], 5.0)
+        flat = [{"DAC": 0, "ch4": 100.0}, {"DAC": 10, "ch4": 100.0}]
+        self.assertIsNone(estimate_scurve_crossings(flat, [4], last_falling=True)[4])
+
     def test_estimate_scurve_crossings(self) -> None:
         # Same algorithm as scripts/radioroc_standard_scurves.py's legacy
         # autocalibrate_scurve/_estimate_crossings (see IMPLEMENTATION_STATUS.md's

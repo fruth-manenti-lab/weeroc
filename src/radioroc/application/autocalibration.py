@@ -90,6 +90,11 @@ class AutocalibrationJobConfig:
     - `final_window_before`/`final_window_after` (`int`): How far below/above
       the step-2 mean crossing the final verification scan covers.
     - `final_dac_step` (`int`): DAC step for the final verification scan.
+    - `scurve_clock_io0` (`bool`): Opt-in. Output the S-curve clock on IO0
+      during every sub-scan (see `ScurveConfig.scurve_clock_io0`). Also
+      selects the LAST falling crossing for every crossing estimate, because
+      pulse-referred curves can show a spurious low-DAC dip near the pedestal
+      and the real pulse edge is the highest-DAC falling crossing.
     - `target_percent` (`float`): Trigger-rate percentage defining a
       "crossing" (see `radioroc_analysis.estimate_scurve_crossings`).
     """
@@ -116,6 +121,7 @@ class AutocalibrationJobConfig:
     final_window_after: int = 120
     final_dac_step: int = 2
     target_percent: float = 50.0
+    scurve_clock_io0: bool = False
 
     def validate(self) -> None:
         # Reuses ScurveConfig's own channel/clock-index/gain validation for
@@ -124,7 +130,8 @@ class AutocalibrationJobConfig:
                      dac_max=self.probe_dac_max, dac_step=self.probe_dac_step,
                      t1=self.t1, use_mask=self.use_mask, use_ctest=self.use_ctest,
                      clock_index=self.clock_index, trigger_level=self.trigger_level,
-                     trigger_preamp_gain=self.trigger_preamp_gain, out_dir=self.out_dir).validate()
+                     trigger_preamp_gain=self.trigger_preamp_gain, out_dir=self.out_dir,
+                     scurve_clock_io0=self.scurve_clock_io0).validate()
         validate_scan_range(0, self.transition_dac_cap, self.transition_dac_step,
                             name="transition_dac")
         if self.transition_margin < 0:
@@ -289,7 +296,8 @@ class AutocalibrationJob:
                             dac_step=dac_step, t1=config.t1, use_mask=config.use_mask,
                             use_ctest=config.use_ctest, clock_index=config.clock_index,
                             trigger_level=config.trigger_level,
-                            trigger_preamp_gain=config.trigger_preamp_gain, out_dir=out_dir)
+                            trigger_preamp_gain=config.trigger_preamp_gain, out_dir=out_dir,
+                            scurve_clock_io0=config.scurve_clock_io0)
         sub_config = ScurveJobConfig(scan)
         sub_config.validate()
         rows = sub_config.load_rows(device.i2c_rows)
@@ -371,7 +379,8 @@ class AutocalibrationJob:
                     return self._finish(result, zero_result.status, zero_result.error, persist)
                 zero_estimate = estimate_scurve_crossings(
                     _read_run_rows(zero_out), [reference_channel],
-                    target_percent=config.target_percent)[reference_channel]
+                    target_percent=config.target_percent,
+                    last_falling=config.scurve_clock_io0)[reference_channel]
 
                 device.set_calibration_dac_for_channel(reference_channel, t1=config.t1, value=63)
                 full_out = started_dir / "step1_full"
@@ -385,7 +394,8 @@ class AutocalibrationJob:
                     return self._finish(result, full_result.status, full_result.error, persist)
                 full_estimate = estimate_scurve_crossings(
                     _read_run_rows(full_out), [reference_channel],
-                    target_percent=config.target_percent)[reference_channel]
+                    target_percent=config.target_percent,
+                    last_falling=config.scurve_clock_io0)[reference_channel]
             finally:
                 # A failed restore must never mask whatever the try block was
                 # already returning/raising (mirrors ScurveJob's cleanup_call
@@ -438,7 +448,8 @@ class AutocalibrationJob:
             if transition_result.status != "completed":
                 return self._finish(result, transition_result.status, transition_result.error, persist)
             positions = estimate_scurve_crossings(
-                _read_run_rows(transition_out), config.channels, target_percent=config.target_percent)
+                _read_run_rows(transition_out), config.channels, target_percent=config.target_percent,
+                last_falling=config.scurve_clock_io0)
             result.crossings = positions
             valid_positions = [p for p in positions.values() if p is not None]
             mean_position = statistics.mean(valid_positions) if valid_positions else 500.0

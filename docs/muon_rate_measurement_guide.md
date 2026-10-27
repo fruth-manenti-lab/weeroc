@@ -26,7 +26,7 @@ Items marked **FILL IN** are facts about the detector that this guide cannot kno
 - [Step 0: Choose the channels](#step-0-choose-the-channels)
 - [Step 0b: Check the analog signal on the scope (optional)](#step-0b-check-the-analog-signal-gain-and-shaping-time-optional-but-recommended)
 - [Step 1: Noise floor](#step-1-noise-floor-threshold-scan-tab-no-test-signal)
-- [Step 2: Align thresholds (autocalibration)](#step-2-align-thresholds-autocalibration-tab)
+- [Step 2: Align thresholds (autocalibration)](#step-2-align-thresholds-autocalibration-tab): 2a noise edge, no generator; 2b pulse-referred, generator triggered from IO0
 - [Step 3: Choose the operating threshold](#step-3-choose-the-operating-threshold-then-check-it-with-a-plateau-scan)
 - [Step 4: Hold timing](#step-4-hold-timing-hold-scan-tab)
 - [Step 4a: Pulser (Ctest) timing, optional](#step-4a-pulser-ctest-timing-check-optional-not-the-muon-hold-delay)
@@ -132,7 +132,8 @@ Gather everything before you start. Tick each item.
 | **HV** | Bias supply output | Always; bias stays off until section 4 passes |
 | SiPM input connector | Custom edge connector board, with the two SiPMs | Always |
 | **IN_TEST1** (SMA) | Generator CH1 **through the 20 dB attenuator** | Calibration: Ctest, S-curves, autocalibration, threshold scans with a test signal, hold scans |
-| **IO1** (SMA output) | Generator **external trigger input** (TRIG IN) | Ctest hold scans only (Step 4a); autocalibration and S-curves use a free-running generator and do not need it. The board sends its synchro trigger on IO1 (FPGA mux index 5), so each generator pulse lands inside an acquisition window. Not used for the muon run |
+| **IO1** (SMA output) | Generator **external trigger input** (TRIG IN) | Ctest hold scans only (Step 4a). The board sends its synchro trigger on IO1 (FPGA mux index 5), so each generator pulse lands inside an acquisition window. Not used for the muon run, and not used for autocalibration (use IO0 there) |
+| **IO0** (SMA output) | Generator **external trigger input** (TRIG IN) | Pulse-referred autocalibration or S-curve only (Step 2b). With the app's **Output S-curve clock on IO0** ticked the board sends the S-curve clock (FPGA mux index 4) on IO0. Use IO0 **or** IO1 on the generator's TRIG IN, never both. Not used for the muon run |
 | **IO6** (SMA, IO_FPGA6, External Synchro) | Generator CH2 (2.5 V TTL maximum) | Hold scans and any acquisition that uses the external trigger, including LED acquisitions. Not used for the muon run |
 | IO7 (SMA, IO_FPGA7, External Hold) | Nothing | Not used |
 | Analog_Probe (SMA) | Oscilloscope | Optional, for looking at the shaper output |
@@ -150,7 +151,7 @@ Check the labels against the printing on your board before connecting. The names
 
   Pulse generator (set by hand on its front panel):
     CH1 --> 20 dB attenuator --> board IN_TEST1     (Ctest, hold scan)
-    board IO1 (output) --> generator external trigger input   (fires CH1 in step with the board)
+    board IO0 (output, S-curve clock) or IO1 (output, synchro pulse) --> generator external trigger input   (fires CH1 in step with the board; one at a time)
     CH1 --> LED inside dark box                      (LED light, move the cable here when needed)
     CH2 --> board IO6                                (external trigger: hold scans and LED acquisitions)
 ```
@@ -167,7 +168,7 @@ Everything is **off** while you connect.
 4. Connect the bias supply to the board's **HV** connector. Set the supply to 0 V with the output off and the current limit at the datasheet maximum.
 5. Connect the 5 V / 1 A supply to the board's power input. Leave it switched off.
 6. Connect the board's USB cable to the computer, in a port that has nothing else on it.
-7. Connect the pulse generator by hand with SMA cables. CH1 goes through the 20 dB attenuator to **IN_TEST1**. The board's **IO1** output goes to the generator's external trigger input. CH2 goes to **IO6** if you will use the external trigger. Keep CH2 at 2.5 V TTL or below. Leave both outputs off.
+7. Connect the pulse generator by hand with SMA cables. CH1 goes through the 20 dB attenuator to **IN_TEST1**. The board's **IO0** output (pulse-referred calibration, Step 2b) or **IO1** output (Ctest hold scan, Step 4a) goes to the generator's external trigger input; connect only the one you need. CH2 goes to **IO6** if you will use the external trigger. Keep CH2 at 2.5 V TTL or below. Leave both outputs off.
 8. The generator stays connected for the muon run too, with its outputs off, so nothing changes between calibration and measurement.
 9. **Close the dark box.** Check that no light gets in.
 10. Power up in this order: close the dark box first, then switch on the 5 V supply, then start the app (section 4), and only after the board answers switch on the bias.
@@ -195,45 +196,56 @@ The generator makes the fake pulses used for calibration. **Everything on it is 
 | --- | --- |
 | **Continuous** (free-running) | The generator makes pulses by itself, one every period (for example 1 ms for 1 kHz), whether or not the board is ready. |
 | **Triggered burst** | The generator stays silent until it receives a trigger, then sends a fixed number of cycles (one pulse for "1 cycle") and waits again. |
-| **Trigger source: external** | The trigger comes from the TRIG IN socket, here from the board's **IO1**. The board only sends it during ADC-batch scans with the synchro tick box on. |
+| **Trigger source: external** | The trigger comes from the TRIG IN socket. It comes from the board's **IO0** (the S-curve clock, for Step 2) or from the board's **IO1** (the synchro pulse, for the Ctest hold scan, Step 4a). |
 | **High level, low level** | The pulse goes from the low level to the high level. The idle line sits at the low level. Set the low level to **0 V** or the idle line is not at zero. |
 
 **Which setup for which job**
 
 | Job | Mode | Trigger source | Wiring |
 | --- | --- | --- | --- |
-| Autocalibration, S-curve, threshold scan with Ctest (Steps 1 and 2) | Continuous | Internal | CH1 through the 20 dB attenuator to **IN_TEST1**. The IO1 cable does nothing here. |
-| Ctest hold scan (Step 4a) | Triggered burst, 1 cycle | External (TRIG IN) | As above, plus board **IO1** to the generator's TRIG IN. Tick **Pulse FPGA synchro trigger per ADC batch** and set the sync mux index to 5 in the app. |
+| Autocalibration or S-curve, pulse-referred (Step 2b) | Triggered burst, 1 cycle | External (TRIG IN), positive slope | CH1 through the 20 dB attenuator to **IN_TEST1**, plus board **IO0** to the generator's TRIG IN. Tick **Output S-curve clock on IO0** in the app, use clock index 1 and about 100 mV at gain 1 (see "How big"). |
+| Autocalibration, noise edge (Step 2a) | None | None | Output **off**. No wiring is needed. |
+| Ctest hold scan (Step 4a) | Triggered burst, 1 cycle | External (TRIG IN), positive slope | CH1 through the 20 dB attenuator to **IN_TEST1**, plus board **IO1** (not IO0) to the generator's TRIG IN. Tick **Pulse FPGA synchro trigger per ADC batch** and set the sync mux index to 5 in the app. |
 | LED light check | Continuous (or burst with CH2 into **IO6**, see section 3) | Internal | CH1 to the LED in the dark box instead of the attenuator. Tick the external trigger on the Acquisition page only when CH2 drives IO6. |
 | Muon run | None | None | Output **off**. Leave the cables in place. |
 
-**Setting up the Ctest pulse (continuous), step by step**
+**Setting up the Ctest pulse, step by step** (the same pulse is used in every mode; only the trigger differs)
 
 1. Press **CH 1** (orange). If the **OUTPUT** key is lit, press it to switch the output **off**, and keep it off until the cabling is done.
 2. Press **WAVES**, then the **Pulse** soft-key.
-3. Set the pulse **Width** to **100 ns** and the frequency (or **Period**) to **1 kHz** (1 ms), the rate used on the bench. Edges can stay at their defaults.
-4. Levels: press the **Ampl** soft-key, then press **Ampl** or **Offset** again while it is highlighted to switch to **high and low levels** (the screen then shows High Level and Low Level). Set **low level 0 V** and **high level 1.0 V**. (Without high/low mode: amplitude 1.0 V and offset 0.5 V gives the same pulse.)
-5. Press the **Load** soft-key (in the output menu) until the screen shows **High-z**. The displayed amplitude is then the open-circuit value. The generator's own output impedance is always 50 Ω; the load setting only changes what the display assumes.
-6. Make sure **BURST** and **MOD** are not lit (otherwise the generator is not running continuously). Press **Done** to leave the menu.
+3. Set the pulse width and frequency with the soft-keys **PlsFrq** (frequency or period: **1 kHz**, the rate used on the bench) and **Width** (**100 ns**). Rise and fall can stay at their defaults (10 ns).
+4. Levels: the soft-keys **HiLvl** and **LoLvl** appear once the generator is in high/low-level mode (if you see **Ampl** and **Offset** instead, press **Ampl** or **Offset** again while it is highlighted to switch). Set **LoLvl** to **0 V** and **HiLvl** to the value from "How big" below (**100 mV** for pulse-referred S-curves and autocalibration at paT gain 1; **500 mV** for the Ctest hold scan). On a correct panel the screen reads Frequency 1.00000 kHz, High Level, Low Level +0.0000 V, Width 100.0ns, Delay 0 s, Output Normal ("Normal" is the polarity, not the on/off state; the lit **OUTPUT 1** key is).
+5. Press the **Output** soft-key, then **Load**, until the screen shows **High-z**. The Load setting is not shown on the main screen, so you have to open this menu to check it. The displayed level is then the open-circuit value. The generator's own output impedance is always 50 Ω; the load setting only changes what the display assumes.
+6. For a continuous (free-running) pulse make sure **BURST** and **MOD** are not lit. For the triggered burst, see below. Press **Done** to leave the menu.
 7. Press **OUTPUT** to switch it on. A pulse should now be on the scope (see "Checking it" below).
 
-**Why 1.0 V.** The pulse must be small by the time it reaches the chip. The 20 dB attenuator divides the voltage by 10. With the display on High-z, 1.0 V is the open-circuit value, so into a 50 Ω end the pulse is 0.5 V before the attenuator and about **50 mV** after it (the bench runbook value, `AMPL 1.0` with an open-circuit load). Into a high-impedance end it would be about 100 mV. Confirm what you actually have on the scope the first time (below). If it is larger or smaller than about 50 mV, scale the generator amplitude, not the attenuator.
+**How big?** The 20 dB attenuator divides the voltage by 10. With the display on High-z the level shown is the open-circuit value, so 500 mV becomes about **50 mV** at the board (about 25 mV if the board end is terminated in 50 Ω, which we have not confirmed). What matters is where the turn-on lands on the threshold DAC, and that depends on the trigger gain (paT). Measured on 2026-10-27 on ch6 (pulse triggered from IO0, clock index 1, Ctest on):
 
-**Changing to the triggered burst (Step 4a only).** Keep the same pulse, levels, width and load. Then:
+| Generator level (High-z) | paT gain code | S-curve turn-on (50%) |
+| --- | --- | --- |
+| 2 V or 500 mV | 1 | none: 100% up to DAC 1020 (pulse too big) |
+| 500 mV | 8 | about DAC 310 |
+| 500 mV | 24 | about DAC 190 |
+| 500 mV | 63 | about DAC 130 |
+| **100 mV** | **1** | **about DAC 404 (ch6), 412 (ch32)** |
+
+So at the guide's gain of 1, use about **100 mV**. Aim for a turn-on somewhere between DAC 300 and 700: if the curve is 100% everywhere, the pulse is too big (lower the level); if it is 0% everywhere, too small. Note it in the log. These numbers are one set of measurements, not a specification.
+
+**Changing to the triggered burst (Step 2b and Step 4a).** Keep the same pulse, levels, width and load. Then:
 
 1. Press **BURST**, then the **On/Off** soft-key (the BURST key lights).
 2. Press **Type** until it shows **Triggered** (not Gated).
 3. Press **Count** and enter **1** (one pulse per trigger).
-4. Press **SetTrg**, then **Source**, and choose **External Trigger**. The slope soft-key then lets you pick the positive or negative edge; use **positive**. The trigger input is the **TRIG / COUNT (DC) IN** connector: connect board **IO1** to it. Its threshold is about 1.2 V (input at least 100 mV peak to peak); never apply more than +5 V or less than -1 V.
+4. Press **SetTrg**, then **Source**, and choose **External Trigger**. The slope soft-key then lets you pick the positive or negative edge; use **positive**. The trigger input is the **TRIG / COUNT (DC) IN** connector: connect board **IO0** to it for Step 2b (S-curve clock) or board **IO1** for Step 4a (synchro pulse). Never both at once. Its threshold is about 1.2 V (input at least 100 mV peak to peak); never apply more than +5 V or less than -1 V.
 5. Switch the output on.
 
-The generator now sends one pulse only each time the board asks. If it is silent, that is the cause of the "timed out waiting for FPGA word 4 bit 5" error, so tick the synchro box in the app. To go back to continuous (Step 2), press **BURST** and the **On/Off** soft-key so the BURST key goes dark. (Source **Internal** with a **Period** would also fire repeated bursts by itself, but it is not what the hold scan needs.)
+The generator now sends one pulse only each time the board asks. For Step 4a, if it is silent that is the cause of the "timed out waiting for FPGA word 4 bit 5" error, so tick the synchro box in the app. For Step 2b, if it is silent, the S-curve clock is not reaching the generator: check the IO0 cable and that the app's **Output S-curve clock on IO0** box is ticked. To go back to continuous, press **BURST** and the **On/Off** soft-key so the BURST key goes dark. (Source **Internal** with a **Period** would also fire repeated bursts by itself, but it is not what the hold scan needs.)
 
 **Checking it.** Put a scope on the generator end (after the attenuator, with a T) before connecting to the board, or use the same cable on a scope input. For continuous mode you should see a steady train of 100 ns pulses starting at 0 V. For burst mode you should see one pulse each time the board is asked for a batch and nothing between. A scope on **Analog_Probe** (section 5, Step 0b) shows the same pulse after the chip's shaper.
 
 **Common mistakes**
 
-- Left in **burst or external trigger** after a hold scan: autocalibration then gets no test pulse. Always set continuous before Step 2.
+- **Wrong trigger line:** for Step 2b the generator's TRIG IN must come from **IO0**, for Step 4a from **IO1**. If the burst is left on IO1 while you run an S-curve, the generator never fires and the curve shows no test pulse.
 - **Low level not 0 V**: the idle line sits above zero. With an LED connected it glows all the time, which gives a false "dark" run. Set the low level explicitly (0 V, with a tiny high level or the output off for a dark LED) rather than only reducing the amplitude.
 - **Settings shown in green** (channel 2): you are about to change the wrong channel. Press **CH 1**.
 - **Output left on** during the muon run: the pulses reach the chip and add false events. Switch it off before the muon run.
@@ -247,7 +259,7 @@ The generator now sends one pulse only each time the board asks. If it is silent
 - [ ] Bias supply on the board's HV connector, output off, at 0 V
 - [ ] 5 V supply on the board, switched off
 - [ ] Board on a USB port of its own, nothing else on it
-- [ ] Generator CH1 through the 20 dB attenuator on IN_TEST1; board IO1 to the generator's external trigger input; CH2 on IO6 if needed; outputs off
+- [ ] Generator CH1 through the 20 dB attenuator on IN_TEST1; board IO0 (Step 2b) or IO1 (Step 4a) to the generator's external trigger input, only one at a time; CH2 on IO6 if needed; outputs off
 - [ ] No extra ground leads from generator, oscilloscope or bias supply to the board
 - [ ] Dark box closed before any power or bias
 
@@ -421,14 +433,37 @@ Check the bias is really on: a biased SiPM shows a rate 2 to 5 times higher than
 
 ### Step 2: Align thresholds (Autocalibration tab)
 
-1. Switch on generator CH1 through the 20 dB attenuator into **IN_TEST1**. The target at the board is about 50 mV and 100 ns (`AMPL 1.0`, `ZLOAD OPEN`). Set it by hand on the front panel (details in section 3, "The pulse generator"): pulse waveform, 100 ns width, **continuous (free-running, internal trigger)**, with the **low level at 0 V** (the pulse goes from 0 V up to its amplitude, not symmetric about 0). Do **not** use burst mode or an external trigger source for this step: autocalibration counts discriminator crossings over a time window and never sends a trigger to the generator (the board's IO1 synchro pulse is only sent by the ADC-batch scans, Step 4a). A generator waiting for an external trigger stays silent, the chip sees no test pulse, and the calibration is meaningless. Confirm on the scope that pulses appear continuously **before** you click **Run autocalibration**. The IO1 cable can stay connected; it does nothing here. (This is the code's behaviour and the bench observation that burst mode fired nothing; free-running autocalibration has not yet been run on the bench.)
-2. To get about 50 mV at the board and to check it on the scope, follow "The pulse generator" in section 3 (1.0 V high level, 0 V low level, open-circuit load setting, 20 dB attenuator).
-3. Click the **Autocalibration** tab. This tab has no **Device / mode** box; it uses the connected board. It needs at least two selected channels.
-4. Tick **Enable Ctest**. Leave everything else as in the table.
-5. Click **Run autocalibration**. Wait for it to finish. It scans each channel, trims each threshold so the crossings line up, and does a final verification scan.
+Every channel's discriminator has a slightly different offset, so one threshold DAC code would not mean the same pulse height on every channel. Autocalibration finds, for each channel, the threshold at which it starts to fire (its **crossing**), and writes a small per-channel correction (a **trim**, 6 bits) so that the crossings line up. Afterwards one **Operating threshold** can serve both plints. A final verification scan repeats the measurement with the trims applied.
+
+What the crossing is measured on depends on the **Enable Ctest** box (the vendor calls this "use in_test"):
+
+- **Ctest off (Step 2a):** the scan counts triggers on the pedestal noise. The crossing is the noise edge, near DAC 145 at clock index 3. No generator is needed.
+- **Ctest on (Step 2b):** the scan counts triggers on an injected test pulse. The vendor's tooltip says: "To ensure correct behavior the S-curve clock must be used to trigger an external pulser." So a pulse must land in every acquisition window, and the pulse generator must be triggered from the board's S-curve clock.
+
+On the bench (2026-10-27) the two methods did not give the same answer: after a noise-edge calibration the crossings agreed within 1 to 2 codes (ch6 148, ch32 146), but measured with the synchronized pulse they were about 8 codes apart (ch6 404, ch32 412). So use Step 2b if you care about pulse height; 2a is quick and needs no equipment.
+
+#### Step 2a: Noise-edge calibration (no generator)
+
+1. Generator output **off**. **Enable Ctest** unticked. Leave everything else as in the table below.
+2. Click the **Autocalibration** tab (**Calibration** page). It has no **Device / mode** box; it uses the connected board and needs at least two selected channels.
+3. Click **Run autocalibration** and wait for it to finish.
+4. Check the final plot (see "Checking the result" below), then click **Save calibration…**.
+
+#### Step 2b: Pulse-referred calibration (vendor method)
+
+1. **Generator:** set CH1 as in section 3, "The pulse generator": pulse, 100 ns, low level 0 V, **high level 100 mV at paT gain 1** (see "How big?"), Load High-z, **triggered burst**, count 1, source **external**, positive slope. CH1 goes through the 20 dB attenuator to **IN_TEST1**.
+2. **Cable** board **IO0** to the generator's **TRIG / COUNT IN**. (This is IO0, not the IO1 used for the Ctest hold scan.)
+3. In the app on the **Autocalibration** tab tick **Enable Ctest**, **Output S-curve clock on IO0 (triggers an external pulser)** and **Count trigger level instead of rising edge**, and set **S-curve clock index** to **1** (10 kHz; 2 is 100 kHz). The vendor GUI offers only 1 kHz, 10 kHz and 100 kHz (indices 0 to 2). Index 3, the app's default, is about 833 kHz (measured), is not offered by the vendor and is too fast for a pulser.
+4. Before running, check on a scope at the generator (see "Checking it") that the generator fires one 100 ns pulse per clock edge only while a scan runs. Optionally run a single-channel **S-curve** first (S-curve tab, same box and clock index): you should see one sharp turn-on from 100% to 0% somewhere between DAC 300 and 700 (about 405 at 100 mV, gain 1). If the curve is 100% or 0% everywhere, change the generator level (see "How big?") and repeat.
+5. Click **Run autocalibration** and wait for it to finish. The app sets IO0 to the clock only for the run and restores it afterwards.
 6. Switch the generator output off. The trims are written into the chip and stay there while the board stays powered. They are not saved to the board's memory, so a power cycle erases them: redo this step after one.
-7. Click **Save calibration…** now, so the trims are kept in a file.
-8. **What just happened.** Every channel's discriminator has a slightly different offset, so at one threshold DAC code the channels would not fire at the same pulse height. Autocalibration sends the same test charge into each channel and finds the DAC code at which each one starts to fire (its crossing). It then adds a small per-channel correction (a trim) so the crossings line up. Afterwards one threshold value means the same pulse height on every channel, which is why one **Operating threshold** can serve both plints. The final verification scan repeats the measurement with the trims applied: the crossings should now sit together.
+7. Click **Save calibration…** so the trims are kept in a file.
+
+**Checking the result.** Open the final verification plot on the **Autocalibration** tab (or **Open saved result…**). It shows one curve per selected channel, **Turn-on (%)** against **Threshold DAC code**. The channels are lined up when the curves lie almost on top of each other, that is, they cross 50% at nearly the same DAC code. In Step 2b run a single-channel **S-curve** on each channel afterwards (same settings) and read the 50% points: they should agree within a few codes. A curve that is flat at 100% or 0% means the chip did not see a usable pulse (or no pulse in Step 2b): fix the generator and repeat. The status line should say completed with no errors.
+
+**The dip (why Step 2b ticks "Count trigger level").** With a synchronized pulse and the default rising-edge counting, the S-curve can show a **dip** in efficiency at low DAC, exactly where the noise-only curve (Ctest off) falls, and then return to 100% above it. Near the noise edge, noise keeps the discriminator high or toggling, so the pulse's own rising edge is not always counted as a new edge. The vendor guide describes the same edge versus level difference around the pedestal (section 3.2.1). Counting the **trigger level** instead removes the dip: on the bench (2026-10-27) it gave a single clean turn-on. If you leave edge counting on, the app takes the highest-DAC falling 50% crossing in this mode, so the dip does not fool it, but the verification plot then shows the dip too.
+
+**When it goes wrong.** If **Run autocalibration** fails or stalls in Step 2b, the usual cause is that the S-curve clock is not reaching the generator (IO0 cable, the tick box, or the generator not in external triggered burst), or that the clock index is 3.
 
 **Autocalibration tab settings**
 
@@ -436,9 +471,10 @@ Check the bias is really on: a biased SiPM shows a rate 2 to 5 times higher than
 | --- | --- | --- |
 | **Discriminator** | T1 | Leave at default. |
 | **Mask other channels** | Ticked | Leave at default. |
-| **Enable Ctest** | Ticked | **Change.** Autocalibration needs the internal test charge to find each channel's crossing. |
-| **S-curve clock index (0..3)** | 3 | Leave at default. |
-| **Count trigger level instead of rising edge** | Unticked | Leave at default. |
+| **Enable Ctest** | Unticked (Step 2a); **ticked** (Step 2b) | Ticked makes the scan measure on the injected pulse (needs Step 2b's generator wiring). Unticked measures the noise edge. |
+| **S-curve clock index (0..3)** | 3 (Step 2a); **1** (Step 2b) | Index 1 = 10 kHz, 2 = 100 kHz, 3 = about 833 kHz. Use 1 with a pulser. The clock speed changes the result: at index 1 the noise edge was near DAC 210, at index 3 near 147. |
+| **Output S-curve clock on IO0 (triggers an external pulser)** | Unticked (Step 2a); **ticked** (Step 2b) | Routes the S-curve clock to IO0 for the run and restores IO0 afterwards. Needs the IO0 cable to the generator. |
+| **Count trigger level instead of rising edge** | Unticked (Step 2a); **ticked** (Step 2b) | With a synchronized pulse and edge counting, the curve shows a dip near the noise edge (see "The dip" below). Counting the trigger level removes it. |
 | **Trigger preamp gain code** (in **Optional gain override**) | 1 (follows the bar) | Leave alone: it follows **Trigger gain (paT)** on the bar. Trims depend on the gain, so redo autocalibration if you change it. |
 | **Step 1: reference-channel LSB-ratio probe**: **First DAC code**, **Last DAC code**, **DAC step** | 0, 1000, 50 | Leave at default. |
 | **Step 2: transition scan across selected channels**: **DAC step**, **Upper-bound margin**, **Upper-bound floor**, **Upper-bound cap** | 10, 150, 300, 1023 | Leave at default. |

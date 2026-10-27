@@ -62,6 +62,8 @@ def build_parser(preset: dict[str, object] | None = None, preset_path: Path | No
     parser.add_argument("--t2", action="store_true", help="Use T2 instead of T1")
     parser.add_argument("--no-mask", action="store_true", help="Do not isolate the measured channel with masks")
     parser.add_argument("--use-ctest", action="store_true", help="Enable Ctest on the measured channel")
+    parser.add_argument("--clock-io0", action="store_true",
+                        help="Output the S-curve clock on IO0 (FPGA IO mux 4) to trigger an external pulser; restored afterwards")
     parser.add_argument("--verify-restoration", action="store_true",
                         help="Independently read back captured FPGA/ASIC state after scan cleanup")
     parser.add_argument("--out-dir", type=Path, help="Output directory; default is under radioroc_runs/")
@@ -101,7 +103,7 @@ def main() -> int:
             "clock index": args.clock_index, "trigger level": args.trigger_level,
             "trigger preamp gain code (paT)": args.pat_gain,
             "threshold": "T2" if args.t2 else "T1", "mask": "off" if args.no_mask else "on",
-            "ctest": args.use_ctest,
+            "ctest": args.use_ctest, "S-curve clock on IO0": args.clock_io0,
             "apply defaults": args.apply_defaults, "skip fpga init": args.skip_fpga_init,
         },
         {label: None for label, arg in (
@@ -120,6 +122,7 @@ def main() -> int:
         trigger_level=args.trigger_level,
         trigger_preamp_gain=args.pat_gain,
         out_dir=out_dir,
+        scurve_clock_io0=args.clock_io0,
     )
     try:
         connection.validate()
