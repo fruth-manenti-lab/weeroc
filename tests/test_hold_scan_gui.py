@@ -92,6 +92,20 @@ class HoldScanGuiTests(unittest.TestCase):
         self.assertEqual((scan.hold_min, scan.hold_max, scan.hold_step, scan.acquisitions), (0, 150, 20, 10))
         self.assertIsNotNone(scan.threshold_dac)
 
+    def test_source_preset_builds_single_channel_selftrigger(self):
+        self.window.channel_select.set_channels([6, 32])
+        self.window.trigger_channel.setValue(6)
+        self.window.ctest.setChecked(True)
+        self.window.synchro_trigger.setChecked(True)
+        self.window.apply_source_preset()
+        scan = self.window.operation().scan
+        self.assertEqual((scan.trigger_type, scan.trigger_source), (0, 3))
+        self.assertEqual(scan.trigger_channel, 6)
+        self.assertFalse(scan.use_ctest)
+        self.assertFalse(scan.synchro_trigger)
+        self.assertEqual((scan.hold_min, scan.hold_max, scan.hold_step, scan.acquisitions), (0, 150, 10, 100))
+        self.assertEqual(scan.threshold_dac, 480)
+
     def test_shared_selection_drives_second_trigger_channel(self):
         from radioroc.gui.calibration_selection import CalibrationSelection
         from radioroc.gui.hold_scan_window import HoldScanWindow

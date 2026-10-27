@@ -30,8 +30,9 @@ Items marked **FILL IN** are facts about the detector that this guide cannot kno
 - [Step 3: Choose the operating threshold](#step-3-choose-the-operating-threshold-then-check-it-with-a-plateau-scan)
 - [Step 4: Hold timing](#step-4-hold-timing-hold-scan-tab)
 - [Step 4a: Pulser (Ctest) timing, optional](#step-4a-pulser-ctest-timing-check-optional-not-the-muon-hold-delay)
-- [Step 4b: Muon hold scan, required](#step-4b-muon-hold-scan-required-for-the-muon-hold-delay-not-yet-run-on-the-bench)
+- [Step 4b: Muon hold scan, required](#step-4b-muon-hold-scan-required-for-the-muon-hold-delay-unless-step-4d-is-used-not-yet-run-on-the-bench)
 - [Step 4c: Pedestals, required before the muon run](#step-4c-pedestals-required-before-the-muon-run)
+- [Step 4d: Hold scan with a gamma source, fast alternative to 4b](#step-4d-hold-scan-with-a-gamma-source-fast-alternative-to-4b)
 - [Step 5: S-curve, optional](#step-5-s-curve-optional)
 - [Step 6: Save the calibration record](#step-6-save-the-calibration-record)
 
@@ -45,7 +46,7 @@ Items marked **FILL IN** are facts about the detector that this guide cannot kno
 | find the noise floor | [Step 1: Noise floor (Threshold scan tab, no test signal)](#step-1-noise-floor-threshold-scan-tab-no-test-signal) |
 | align the channels (autocalibration) | [Step 2: Align thresholds (Autocalibration tab)](#step-2-align-thresholds-autocalibration-tab) |
 | choose the operating threshold | [Step 3: Choose the operating threshold, then check it with a plateau scan](#step-3-choose-the-operating-threshold-then-check-it-with-a-plateau-scan) |
-| find the hold delay for muons | [Step 4b: Muon hold scan (required for the muon hold delay; not yet run on the bench)](#step-4b-muon-hold-scan-required-for-the-muon-hold-delay-not-yet-run-on-the-bench) |
+| find the hold delay for muons | [Step 4b: Muon hold scan (required for the muon hold delay; not yet run on the bench)](#step-4b-muon-hold-scan-required-for-the-muon-hold-delay-unless-step-4d-is-used-not-yet-run-on-the-bench) |
 | run the muon measurement | [6. Data acquisition](#6-data-acquisition) |
 | turn counts into a rate | [7. From counts to a rate per minute](#7-from-counts-to-a-rate-per-minute) |
 | something went wrong | [9. Troubleshooting](#9-troubleshooting) |
@@ -547,7 +548,7 @@ Switch the generator outputs **off** afterwards.
 
 **Hold delay (ns) on the bar.** After you choose the hold delay for the muon run (section 6), type it into **Hold delay (ns)** on the Save/Load bar. It is saved in the calibration file and restored by **Load calibration…**, and the **Acquisition** page's **Hold delay (ns)** takes the same value (changing either one changes the other). The app starts at 30 ns, which suits muon runs; confirm it with your own sweep (section 6).
 
-#### Step 4b: Muon hold scan (required for the muon hold delay; not yet run on the bench)
+#### Step 4b: Muon hold scan (required for the muon hold delay unless Step 4d is used; not yet run on the bench)
 
 This is the hold scan fired by real muons. It steps the hold delay and takes N accepted events at each step, using the same two-channel coincidence trigger as the muon run (Individual trigger on both channels), so every event is a real two-SiPM signal. It uses no Ctest, no synchro pulse and no generator. A coincidence is better than one channel or an LED: a single channel mostly fires on noise and dark counts (roughly 10^2 Hz at threshold 540), and an LED pulse has a different, uncontrolled height from a muon.
 
@@ -604,6 +605,31 @@ Do this after the hold delay is chosen (Step 4b), because the pedestal depends o
 6. Write the pedestals in the lab log (section 10).
 
 From here the pedestals follow the data automatically. The **Acquisition** page shows "Pedestals: ch6 …, ch32 …" above the run controls (a warning if there are none). When a run completes, a copy is saved in its run folder as `pedestals.json`. The **Muon** page reads that file when you open the run, so the Rate box uses the right pedestals without any typing.
+
+#### Step 4d: Hold scan with a gamma source (fast alternative to 4b)
+
+A sealed gamma source (Co-60 on the bench) placed on the plints gives self-triggered pulses at tens of events per second, against about 18 muon coincidences per minute. A whole hold scan then takes a few minutes and the curve is smooth. Follow your lab's rules for handling and storing sealed sources; the app and the guide say nothing about radiation safety.
+
+**What it is and is not.** The pulses are real scintillation pulses from the plint, triggered by the channel's own discriminator, so the hold delay is counted from the same moment as in the muon run. They are smaller than muon pulses (a gamma deposits well under 1 MeV in the plastic; a muon about 2 MeV per cm), and a small pulse crosses a fixed threshold slightly later, so the best delay for gammas could in principle sit a little earlier than for muons. On the bench the peak did not move with the threshold (see below), but treat the number as a very good estimate and confirm it with a short muon run (Step 4b) when you can.
+
+**Before you start:** SiPM **bias on** (without bias there is nothing to see: the threshold scan rate drops to zero by DAC 360), dark box closed, source in place on the plint, calibration done (Steps 1 to 3), **Trigger gain (paT)** 1.
+
+1. On the **Calibration** page select channels N and M and set **Trigger channel (T1)** to the plint you want to scan first. The scan triggers only on this channel (no coincidence), so scan each plint on its own: set T1 to N, scan, then set T1 to M and scan again.
+2. Click the **Hold scan** tab, **Device / mode** **Hardware connection**, then **Gamma source preset (single channel)**. It sets: external hold mode, 0 to 150 ns in 10 ns steps, 100 events per point, timeout 60 s per batch, trigger type 0 (simple trigger) with Individual trigger on T1, Ctest and the synchro pulse off, and **Threshold DAC** 480.
+3. Check the **Threshold DAC**. It must be low enough that the source triggers the channel (a few events per second), and high enough to stay above the dark counts. Use the **Threshold scan** tab with the source in place to see where the rate is: dark counts form a floor of about 100 to 150 Hz above DAC 420, and the source pulses add to it. If a batch times out, lower the threshold; if the curve looks noisy, raise it.
+4. Click **Preview**, then **Run hardware hold scan**. It takes a few minutes.
+5. Read the high-gain curve of the **trigger channel** (the other channel is not triggered, so its curve is mostly pedestal and noisy: ignore it). Subtract the pedestal (Step 4c). Choose the delay in the middle of the plateau where the pulses are tallest, type it into **Hold delay (ns)** on the bar, and write it in the log. Repeat for the second plint and compare.
+
+**Bench result, 2026-10-27** (Co-60 on the plints, ch6 and ch32, SiPMs biased, paT gain 1, trigger on the channel itself; pulse height above pedestal in high-gain ADC counts):
+
+| Trigger | Threshold DAC | Tallest at (ns) | Falls to half height at (ns) | Reaches zero at (ns) |
+| --- | --- | --- | --- | --- |
+| ch6 | 400 | 20 to 40 | about 85 | about 140 |
+| ch6 | 480 | 20 to 50 | about 90 | about 140 |
+| ch6 | 560 | 20 to 40 | about 90 | about 130 |
+| ch32 | 480 | 20 to 40 | about 95 | about 140 |
+
+The plateau is broad (about 20 to 50 ns) and falls steadily to zero near 140 ns, with an undershoot below the pedestal beyond that. The peak position did not change between thresholds 400 and 560, which argues against a large time-walk effect. The channels agree, and so does the earlier muon sweep (tallest at 20 to 55 ns). All of this supports the **30 ns** default, but is one session's data.
 
 ### Step 5: S-curve (optional)
 

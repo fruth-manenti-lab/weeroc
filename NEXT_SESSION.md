@@ -21,6 +21,8 @@ interpreter). Start new work from `main`.
   fetch returns only the first 1 us).
 
 ## Next
+00. Hold delay: gamma-source scans (Co-60) put the plateau at 20 to 50 ns on both plints (guide Step 4d); confirm with a short muon sweep (Step 4b) if time
+   allows, then use 30 ns. Board left with IO0 mux 0, trims from the last autocalibration; SiPM bias and generator output should be off, source stored.
 0. Run the new Calibration > Pedestals tab in the app (after the hold delay is chosen), then a coincidence run; check the Acquisition page
    pedestals line, `pedestals.json` in the run folder and the Muon page Rate box (rate per minute, background, flux).
 1. Rerun autocalibration (Ctest, IO0 clock option, trigger level, clock index 1) on ch6+ch32 and verify with single-channel

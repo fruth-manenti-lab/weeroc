@@ -1,5 +1,15 @@
 # Implementation status
 
+## RADIOROC 47 — hold scan with a Co-60 gamma source
+
+Bench (2026-10-27, Co-60 on the plints, SiPMs biased; without bias the threshold-scan rate drops to zero by DAC 360 and every trigger is noise): self-triggered single-channel hold
+scans (trigger type 0, individual trigger on the channel, hold 0 to 150 ns in 10 ns steps, 50 to 100 events/point, paT gain 1). ch6 at thresholds 400/480/560 and ch32 at 480:
+tallest 20 to 50 ns, half height near 85 to 95 ns, zero near 140 ns (undershoot beyond); peak position did not change with threshold (no visible time walk); consistent with the
+2026-10-21 muon sweep (20 to 55 ns); supports the 30 ns default. Plot: `radioroc_runs/gamma_hold_plot_20261027.png` (local). Forced-trigger pedestals and self-trigger rates at
+the time: ch6 about 15 to 18 events/s at threshold 400 to 560 with pulse heights 30 to 60 counts above pedestal. One transient `i2c FIFO transaction timed out` on a ch32 self-trigger
+acquisition (board answered afterwards, cleanup restored). New: "Gamma source preset (single channel)" button on the Hold scan tab; guide Step 4d. Not done: confirm with a real muon
+hold sweep (Step 4b); source mode has no per-amplitude analysis (hold scan stores only per-point means).
+
 ## RADIOROC 47 — pedestal step, muon rate per minute
 
 Bench (2026-10-27): a forced-trigger ADC acquisition (FPGA synchro pulse per batch, trigger type 0, no input stimulus) with the SiPMs
