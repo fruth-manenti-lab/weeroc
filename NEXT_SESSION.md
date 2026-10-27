@@ -21,6 +21,8 @@ interpreter). Start new work from `main`.
   fetch returns only the first 1 us).
 
 ## Next
+0. Run the new Calibration > Pedestals tab in the app (after the hold delay is chosen), then a coincidence run; check the Acquisition page
+   pedestals line, `pedestals.json` in the run folder and the Muon page Rate box (rate per minute, background, flux).
 1. Rerun autocalibration (Ctest, IO0 clock option, trigger level, clock index 1) on ch6+ch32 and verify with single-channel
    S-curves that the pulse crossings agree within a few codes; save the calibration. Then the muon plan below.
 2. Not yet done: Threshold scan has no IO0 option; Step 4b muon hold scan, app coincidence run and the full muon rate run are

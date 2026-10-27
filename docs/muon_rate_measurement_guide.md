@@ -31,6 +31,7 @@ Items marked **FILL IN** are facts about the detector that this guide cannot kno
 - [Step 4: Hold timing](#step-4-hold-timing-hold-scan-tab)
 - [Step 4a: Pulser (Ctest) timing, optional](#step-4a-pulser-ctest-timing-check-optional-not-the-muon-hold-delay)
 - [Step 4b: Muon hold scan, required](#step-4b-muon-hold-scan-required-for-the-muon-hold-delay-not-yet-run-on-the-bench)
+- [Step 4c: Pedestals, required before the muon run](#step-4c-pedestals-required-before-the-muon-run)
 - [Step 5: S-curve, optional](#step-5-s-curve-optional)
 - [Step 6: Save the calibration record](#step-6-save-the-calibration-record)
 
@@ -587,6 +588,23 @@ What the preset sets (all other settings stay as in the Step 4a table):
 
 **Check against the manual sweep.** The 2026-10-21 manual sweep (section 6) put the tallest pulses at 20 to 55 ns. The scan should agree to within about 10 to 20 ns. If not, say so in the log and repeat.
 
+#### Step 4c: Pedestals (required before the muon run)
+
+The **pedestal** is the ADC reading of each channel when no pulse is present (a few tens of counts above zero). A pulse height is the reading minus the pedestal, so every muon count and every cut depends on it. It differs from channel to channel and from day to day with gain, hold delay and temperature, so measure it in the same session.
+
+You cannot read it from the muon run itself. Every event in a coincidence run holds a pulse, so the median reading is a pulse height, and the automatic pedestal on the Muon page comes out about 100 counts too high (on a test run this rejected most real events: 9 of 50 accepted with the automatic pedestal and 42 of 50 with a measured one). Measure it with a short run that triggers **on purpose**, with no input signal needed. The board's FPGA can send a "forced trigger" to the ADC, which the app calls the synchro trigger. On 2026-10-27 this gave clean values on the real SiPMs: 100 events per channel in 6 s, ch6 high gain 95.0 ± 1.6 and ch32 107.5 ± 1.2 counts (low gain 89 and 120), not the 92 and 100 we used to type in.
+
+Do this after the hold delay is chosen (Step 4b), because the pedestal depends on the gains and hold delay, and again whenever you change a gain, the hold delay or the channels, or after a power cycle.
+
+1. Dark box closed, bias on, generator output off. Calibration done as far as Step 4b.
+2. On the **Calibration** page the channels are the ones selected above the tabs. Check **Trigger gain (paT)** (1) and **Hold delay (ns)** on the bar. The pedestal run uses the same gains and hold delay as the muon run.
+3. Click the **Pedestals** tab, check **Events** (default 200) and click **Run**. It takes well under a minute. The tab uses the connected board.
+4. Read the table: one row per channel with the high-gain and low-gain median, the spread (sd) and the number of events. The **median** is the pedestal. The spread is a robust one (one stray event does not inflate it); healthy is a few counts or less (about 1 on the bench). Now and then a real muon hits during the run (on 2026-10-27 one event in 100 had pulses of 258 and 562 counts); the median ignores it, so this is normal. If the app warns that a spread is large (above about 5 counts), many events had pulses or a channel is noisy (light leak with bias on, interference): find the cause and repeat.
+5. The pedestals are kept with the calibration: click **Save calibration…** and they are saved in the file, and **Load calibration…** restores them. After a power cycle redo this step, as for the trims.
+6. Write the pedestals in the lab log (section 10).
+
+From here the pedestals follow the data automatically. The **Acquisition** page shows "Pedestals: ch6 …, ch32 …" above the run controls (a warning if there are none). When a run completes, a copy is saved in its run folder as `pedestals.json`. The **Muon** page reads that file when you open the run, so the Rate box uses the right pedestals without any typing.
+
 ### Step 5: S-curve (optional)
 
 The **S-curve** tab measures the transition of each channel against test-pulse amplitude. It is not needed for the muon run. Skip it unless the operator asks for it. If you run it, use the same continuous generator setup and IN_TEST1 wiring as in Step 2 (the S-curve counts crossings like autocalibration, so it does not need the synchro trigger) and leave its settings at their defaults.
@@ -702,7 +720,7 @@ The rate is accepted events divided by elapsed minutes, after removing the backg
 
 1. Click **Muon** in the sidebar. Set the detector layout (channels N and M on layers 1 and 2, plint sizes) and the detection threshold.
 2. Click **Open saved run…** and choose the signal run folder.
-3. Set the **pedestals** from a pedestal run or manual values. The automatic (median) pedestals are wrong for a muon run, because every event holds a muon, and they make the accepted count too low (on the 2026-10-26 test run the automatic pedestals accepted only 18% of events).
+3. Check the **pedestals**. If the run folder holds a `pedestals.json` (saved by the Acquisition page from the Step 4c pedestal run), the Muon page uses it and says so in the pedestal label. If there is none, run Step 4c on the next session; for this run you can type pedestal values or choose a pedestal run folder by hand. The automatic (median) pedestals are wrong for a muon run, because every event holds a muon, and they make the accepted count too low (on the 2026-10-26 test run the automatic pedestals accepted only 18% of events).
 4. In the **Rate** box read the duration, the number of events, the accepted events and the rate per minute with its uncertainty. **Accepted** means both layers have a hit above pedestal plus the detection threshold (a single layer: at least one hit). Two time bases are shown: the batch-completion time (first to last batch received, counting only the events after the first batch; use this one) and the wall-clock time (start to finish, which includes a few seconds of setup and cleanup).
 5. Click **Background run…** and choose the background run folder. The box then shows the net rate (signal minus background) with the combined uncertainty. Both runs use the same layout, threshold and pedestals.
 6. The **area** field is filled from the plint overlap (cm²) and can be edited; the box then shows the flux per cm² per minute. Check that the area is what you measured in section 2.
@@ -839,6 +857,7 @@ Plateau scan folder:
 Hold delay used for the muon run (ns), from the section 6 muon sweep:
 Ctest hold-scan peak (ns, optional, pulser only):
 Gain and shaping codes used (paT, paHG, paLG, shaping HG/LG):
+Pedestals from the pedestal run (HG median, ch N / ch M), and run folder:
 Calibration file saved (name):
 
 ## Signal run

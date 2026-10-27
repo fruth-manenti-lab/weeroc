@@ -73,6 +73,28 @@ class CalibrationFileBarTests(unittest.TestCase):
         self.assertEqual(worker.ops, [])
         self.assertIn("not re-applied", other.status_label.text())
 
+    def test_pedestals_saved_and_restored(self):
+        from radioroc.data.pedestals import compute_pedestals
+        ps = compute_pedestals([{"channel": 6, "hg": 90 + i, "lg": 80} for i in range(6)])
+        bar = self._bar()
+        bar.selection.pedestals = ps
+        path = self.tmp / "c.json"
+        self.assertTrue(bar.save_to(path))
+        self.assertEqual(json.loads(path.read_text())["pedestals"], ps.to_dict())
+        other = self._bar()
+        seen = []
+        other.selection.pedestals_changed.connect(seen.append)
+        self.assertTrue(other.load_from(path))
+        self.assertEqual(other.selection.pedestals, ps)
+        self.assertEqual(seen, [ps])
+        # an old file without the key still loads and leaves pedestals alone
+        data = json.loads(path.read_text())
+        del data["pedestals"]
+        path.write_text(json.dumps(data))
+        third = self._bar()
+        self.assertTrue(third.load_from(path))
+        self.assertIsNone(third.selection.pedestals)
+
     def test_reapply_after_confirmation(self):
         worker = FakeWorker()
         bar = self._bar(worker, SimpleNamespace(_active_directory=self._autocal_dir()))

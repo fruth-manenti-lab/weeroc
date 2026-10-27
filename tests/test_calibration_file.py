@@ -50,6 +50,20 @@ class CalibrationFileTests(unittest.TestCase):
             with self.assertRaises(cf.CalibrationFileError):
                 cf.validate_document(data)
 
+    def test_pedestals_round_trip_and_old_files(self):
+        from radioroc.data.pedestals import compute_pedestals
+        ps = compute_pedestals([{"channel": 6, "hg": 90 + i, "lg": 80} for i in range(6)])
+        path = cf.save_document(self.tmp / "p.json", _doc(pedestals=ps))
+        self.assertEqual(json.loads(path.read_text())["pedestals"], ps.to_dict())
+        self.assertEqual(cf.load_document(path)["pedestals"], ps)
+        old = cf.save_document(self.tmp / "o.json", _doc())
+        self.assertNotIn("pedestals", json.loads(old.read_text()))
+        self.assertIsNone(cf.load_document(old)["pedestals"])
+        data = json.loads(path.read_text())
+        data["pedestals"] = {"schema_version": 1, "channels": {"99": {}}}
+        with self.assertRaises(cf.CalibrationFileError):
+            cf.validate_document(data)
+
     def test_no_trims(self):
         path = cf.save_document(self.tmp / "a.json", _doc())
         self.assertIsNone(cf.load_document(path)["autocalibration"])

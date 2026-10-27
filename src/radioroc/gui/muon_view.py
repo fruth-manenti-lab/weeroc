@@ -286,6 +286,8 @@ class MuonView(QWidget):
         self._manual_pedestals: dict[int, float] = {}
         self._pedestals_from_simulator = False
         self._pedestal_warning = ""
+        self._run_pedestal_set = None  # PedestalSet saved with the loaded run (pedestals.json), if in use
+        self._no_run_pedestals = False  # a real run was loaded without saved pedestals
         self._timing = None             # RunTiming of a loaded real run (None: simulated / nothing loaded)
         self._run_rate = None
         self._background = None         # (path, RunRate) of the background run
@@ -1301,6 +1303,7 @@ class MuonView(QWidget):
             self._set_status(f"Could not open run: {exc}")
             return False
         self._install_events(events, None)
+        self._adopt_run_pedestals(Path(path))
         try:
             self._timing = muon_rate.read_run_timing(Path(path))
         except Exception as exc:  # noqa: BLE001 - the page still works without a rate
@@ -1314,6 +1317,44 @@ class MuonView(QWidget):
         note = f" Ignored channels not in the layout: {extra}." if extra else ""
         self._set_status(f"Loaded {len(events)} events from {path}.{note}")
         return True
+
+    def _adopt_run_pedestals(self, path):
+        """Use pedestals.json saved with the run (from the Calibration page's Pedestals step) if it covers the data."""
+        had_run_set = self._run_pedestal_set is not None
+        self._run_pedestal_set = None
+        self._no_run_pedestals = True
+        found = None
+        try:
+            from radioroc.data.pedestals import find_pedestals_for_run
+            found = find_pedestals_for_run(path)
+        except Exception as exc:  # noqa: BLE001 - a bad file must not block loading the run
+            self._set_status(f"Could not read saved pedestals: {exc}")
+        wanted = [c for c in self._layout.channels() if c in self._data_channels]
+        if found is not None:
+            hg = found.hg()
+            if hg and all(c in hg for c in wanted):
+                self._file_pedestals = dict(hg)
+                self._run_pedestal_set = found
+                self._no_run_pedestals = False
+                self._pedestals_from_simulator = False
+                self._pedestal_mode = "file"
+                self._recompute_pedestals()
+                return
+        if had_run_set and self._pedestal_mode == "file":
+            self._pedestal_mode = "auto"
+        self._recompute_pedestals()
+
+    def pedestal_source_text(self) -> str:
+        """Which pedestals the analysis uses (for the Rate box and the lab-log summary)."""
+        from radioroc.data import pedestal_flow
+        mode = self._pedestal_mode
+        if mode == "file" and self._run_pedestal_set is not None:
+            return f"from pedestal run {pedestal_flow.pedestal_time(self._run_pedestal_set)}".rstrip()
+        if mode == "file":
+            return "file"
+        if mode == "manual":
+            return "simulator truth" if self._pedestals_from_simulator else "manual"
+        return pedestal_flow.MEDIAN_TEXT
 
     def append_events(self, events):
         """Hook for a future live feed: add events to the replay list."""
@@ -1388,6 +1429,9 @@ class MuonView(QWidget):
             text = f"Pedestals (HG, {len(vals)} ch): median {vals[len(vals) // 2]:.0f}, range {vals[0]:.0f}..{vals[-1]:.0f}"
         source = {"auto": "estimate", "file": "file/run", "manual": "simulator" if self._pedestals_from_simulator
                   else "manual"}[self._pedestal_mode]
+        if self._pedestal_mode == "file" and self._run_pedestal_set is not None:
+            from radioroc.data import pedestal_flow
+            source = f"from pedestal run ({pedestal_flow.pedestal_time(self._run_pedestal_set)})"
         self.pedestal_label.setText(f"{text} ({source})")
         warning = ""
         wanted = [c for c in self._layout.channels() if c in self._data_channels]
@@ -1398,7 +1442,10 @@ class MuonView(QWidget):
             biased = [c for c in muon_analysis.pedestals_look_biased(
                 self.events, peds, float(self.threshold_spin.value())) if c in wanted]
             if biased:
-                warning = "Estimate may include muon signal: load a pedestal run or enter values"
+                warning = ("Estimate may include muon signal: load a pedestal run or enter values")
+                if self._no_run_pedestals:
+                    from radioroc.data import pedestal_flow
+                    warning = pedestal_flow.NOT_SAVED_WARNING + ". " + warning
         self._pedestal_warning = warning
         self.pedestal_warning_label.setText(warning)
         self.pedestal_warning_label.setVisible(bool(warning))
@@ -1428,6 +1475,7 @@ class MuonView(QWidget):
             self._set_status("Invalid pedestals: values must be finite numbers.")
             return False
         self._manual_pedestals = clean
+        self._run_pedestal_set = None
         self._pedestals_from_simulator = False
         self._pedestal_mode = "manual"
         self._recompute_pedestals()
@@ -1440,6 +1488,7 @@ class MuonView(QWidget):
             self._set_status(f"Could not load pedestals: {exc}")
             return False
         self._file_pedestals = dict(peds)
+        self._run_pedestal_set = None
         self._pedestals_from_simulator = False
         self._pedestal_mode = "file"
         self._recompute_pedestals()
@@ -1560,7 +1609,8 @@ class MuonView(QWidget):
         self.save_summary_button.setEnabled(True)
         duration = result.batch_seconds if result.batch_seconds is not None else result.wall_seconds
         dur = "unknown" if duration is None else f"{duration:.0f} s"
-        lines = [f"Duration: {dur} ({result.basis} basis)",
+        lines = [f"Pedestals: {self.pedestal_source_text()}",
+                 f"Duration: {dur} ({result.basis} basis)",
                  f"Events {result.trigger_events}, accepted {result.accepted} ({result.accepted_fraction * 100:.0f}%)",
                  f"Rate: {muon_rate._fmt(result.rate_per_min, result.sigma_per_min)}"]
         if result.basis == "batch" and result.wall_rate_per_min is not None:
@@ -1631,7 +1681,7 @@ class MuonView(QWidget):
             background=bg.result if bg else None, background_timing=bg.timing if bg else None,
             net=net, area_cm2=self.area_spin.value() or None,
             settings=[f"Layout: {self._layout.name}", f"Detection threshold: {self.threshold_spin.value():g} counts",
-                      f"Pedestals: {self._pedestal_mode}"])
+                      f"Pedestals: {self.pedestal_source_text()}"])
 
     def copy_summary(self):
         text = self.rate_summary_text()

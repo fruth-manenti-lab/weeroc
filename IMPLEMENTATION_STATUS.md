@@ -1,5 +1,17 @@
 # Implementation status
 
+## RADIOROC 47 — pedestal step, muon rate per minute
+
+Bench (2026-10-27): a forced-trigger ADC acquisition (FPGA synchro pulse per batch, trigger type 0, no input stimulus) with the SiPMs
+attached reads clean pedestals: ch6 HG 95.0 (robust sd about 1.1), ch32 HG 107.5, LG 89 and 120; 100 events/channel in 6 s; one
+real muon in 100 events inflated the plain sd (hence robust sd). New: Calibration page "Pedestals" tab (`PedestalJob` wrapping the
+acquisition job, `radioroc.data.pedestals`, `pedestals.json`, saved/restored in the calibration file, `scripts/radioroc_pedestals.py`);
+Acquisition page shows the pedestals and writes `pedestals.json` into each completed run folder; Muon page and
+`scripts/radioroc_muon_rate.py` use it (summary states the source); Muon page "Rate" box (`radioroc.data.muon_rate`: batch-completion
+and wall-clock time bases, background subtraction, flux, block drift check). Offline check on the saved 2026-10-26 run: automatic
+pedestals accepted 9/50 (5.7 +- 1.9 /min), measured pedestals 42/50 (23.4 +- 3.9 /min). Not done on hardware: the Pedestals tab
+through the app, a real muon run with `pedestals.json` saved by the Acquisition page.
+
 ## RADIOROC 47 — pulse-referred autocalibration: S-curve clock on IO0, defaults buttons, section titles, guide rewrite
 
 Bench (2026-10-27, operator present): FPGA IO mux index 4 = "S-curves clock" (recovered from the vendor GUI's IO combo items in

@@ -34,6 +34,7 @@ class CalibrationSelection(QObject):
     hold_delay_changed = Signal(int)      # external hold delay, ns
     trigger_gain_changed = Signal(int)    # trigger preamp gain code 1..63
     operating_threshold_changed = Signal(int)  # threshold DAC code 0..1023
+    pedestals_changed = Signal(object)    # PedestalSet or None
 
     def __init__(self, channels=(4, 5), parent=None):
         super().__init__(parent)
@@ -42,6 +43,7 @@ class CalibrationSelection(QObject):
         self._hold_delay_ns = DEFAULT_HOLD_DELAY_NS
         self._trigger_gain = DEFAULT_TRIGGER_GAIN
         self._operating_threshold = DEFAULT_OPERATING_THRESHOLD
+        self._pedestals = None
         self._t1, self._t2 = self._auto_triggers()
 
     @staticmethod
@@ -87,6 +89,15 @@ class CalibrationSelection(QObject):
     def auto_triggers(self) -> bool:
         return self._auto
 
+    @property
+    def pedestals(self):
+        """Latest measured ``PedestalSet`` (or None); saved in the calibration file."""
+        return self._pedestals
+
+    @pedestals.setter
+    def pedestals(self, value) -> None:
+        self.set_pedestals(value)
+
     # -- writing ------------------------------------------------------------
     def set_channels(self, channels) -> None:
         cleaned = self._clean(channels)
@@ -122,6 +133,12 @@ class CalibrationSelection(QObject):
         if (t1, t2) != (self._t1, self._t2):
             self._t1, self._t2 = t1, t2
             self.triggers_changed.emit(t1, t2)
+
+    def set_pedestals(self, pedestals) -> None:
+        if pedestals is self._pedestals or (pedestals is not None and pedestals == self._pedestals):
+            return
+        self._pedestals = pedestals
+        self.pedestals_changed.emit(pedestals)
 
     def set_hold_delay_ns(self, value: int) -> None:
         value = int(value)
