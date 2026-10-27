@@ -696,7 +696,22 @@ Self-triggered acquisition is fast (100,000 events in a few minutes). External-t
 
 ## 7. From counts to a rate per minute
 
-The rate is accepted events divided by elapsed minutes, after removing the background. Do it by hand first so you understand it.
+The rate is accepted events divided by elapsed minutes, after removing the background.
+
+**Let the app do it (Muon page, "Rate" box).** Every run folder saves its start and finish times and the time each batch arrived, so the app can compute the rate for you.
+
+1. Click **Muon** in the sidebar. Set the detector layout (channels N and M on layers 1 and 2, plint sizes) and the detection threshold.
+2. Click **Open saved run…** and choose the signal run folder.
+3. Set the **pedestals** from a pedestal run or manual values. The automatic (median) pedestals are wrong for a muon run, because every event holds a muon, and they make the accepted count too low (on the 2026-10-26 test run the automatic pedestals accepted only 18% of events).
+4. In the **Rate** box read the duration, the number of events, the accepted events and the rate per minute with its uncertainty. **Accepted** means both layers have a hit above pedestal plus the detection threshold (a single layer: at least one hit). Two time bases are shown: the batch-completion time (first to last batch received, counting only the events after the first batch; use this one) and the wall-clock time (start to finish, which includes a few seconds of setup and cleanup).
+5. Click **Background run…** and choose the background run folder. The box then shows the net rate (signal minus background) with the combined uncertainty. Both runs use the same layout, threshold and pedestals.
+6. The **area** field is filled from the plint overlap (cm²) and can be edited; the box then shows the flux per cm² per minute. Check that the area is what you measured in section 2.
+7. Read the stability line: the run is split into four blocks, and the box warns if the block rates scatter more than their uncertainties allow (chi²/dof above 2). Then check bias, temperature, interference and the board state before trusting the number.
+8. Click **Copy summary** and paste it into the lab log, or **Save summary…**. The same numbers can be printed without the GUI with `scripts/radioroc_muon_rate.py RUN_DIR --background BKG_DIR --layout layout.json`.
+
+**What the rate means.** It is accepted events per wall-clock time. Between batches the board reads out the ADC and is not triggering, so the rate is a lower bound if that dead time is large; the dead-time check with a pulser (section 6) tells you how large it is. The batch times are the time the computer received each batch, so the rate is only as accurate as that. If the CSV holds several appended runs, the app uses only the run you opened (the latest segment) and warns.
+
+**By hand (to understand it, or to check the app).** Do it by hand first once so you understand it.
 
 1. Count accepted events in the signal run: N_s. Elapsed time from your wall-clock times: T_s in minutes.
 2. Do the same for the background run: N_b and T_b.
