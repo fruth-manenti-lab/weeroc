@@ -283,7 +283,10 @@ class AcquisitionJob:
             token.checkpoint()
             acquisition_started = True
             if acquisition.trigger_preamp_gain is not None:
-                device.set_trigger_preamp_gain(acquisition.trigger_preamp_gain, channels=[acquisition.trigger_channel])
+                # Every recorded channel, not only the trigger channel: this is what registers() snapshots and
+                # restores, and what the scans do. In a coincidence run the second trigger channel must run at
+                # the same paT as the one the trims were calibrated at.
+                device.set_trigger_preamp_gain(acquisition.trigger_preamp_gain, channels=list(acquisition.channels))
             device.set_energy_shaper_gain(channels=acquisition.channels, high_gain_code=acquisition.high_gain_code,
                                           low_gain_code=acquisition.low_gain_code)
             device.prepare_trigger_masks(t1=acquisition.t1, use_mask=acquisition.use_mask, use_ctest=False)

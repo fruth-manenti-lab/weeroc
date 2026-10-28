@@ -1,5 +1,20 @@
 # Implementation status
 
+## RADIOROC 47 — paT written to every recorded channel; first one-hour muon runs
+
+Bug (found 2026-10-28): `AcquisitionJob` wrote the trigger preamp gain (paT) only to the first trigger channel, while the scans write it to every selected channel
+and the job already snapshots and restores (channel, 1) for all recorded channels. In a two-channel coincidence run the second channel kept its old paT (8 after Apply
+defaults) while its trims had been calibrated at paT 1. Fix: `set_trigger_preamp_gain(..., channels=list(acquisition.channels))`; test
+`test_trigger_preamp_gain_is_written_to_every_recorded_channel`; guide section 6 "paT on every channel".
+Bench (operator present, scripts, ch6+ch32 coincidence, threshold 540, hold 30 ns, gain 1, measured pedestals from a forced-trigger pedestal run: ch6 94.5, ch32 107.2):
+run 1 (ch6 paT 1, ch32 paT 8): 1000 events in 45.1 min, trigger 22.1/min, accepted 911 (91.1%), rate 20.08 +- 0.67 /min, block chi2/dof 4.5 (drift flag; pulse heights stable);
+run 2 (paT 1 on both, set by hand via a helper before the fix): 450 events in 17.6 min, trigger 25.7/min, accepted 381 (84.7%), 21.7 +- 1.1 /min. The paT change did not fix
+the ch6 misses: when ch32 has a huge pulse (> 700 counts, near ADC saturation) ch6 reads at pedestal in 29% (run 1) and 32% (run 2) of those events (ch6-triggered tests:
+about 25 to 42% at threshold 540, 17% at 700, small samples); 89 of 1000 events failed the 40-count cut in run 1, 70 of them with ch6 exactly at pedestal (no pulse), 19 small pulses.
+Unresolved whether this is electrical crosstalk or physical. Run 2 also had 11 events (batches 8 to 12, about 14:45 to 14:47 local, 2026-10-28) with BOTH channels 17 to 48 counts
+below the pedestal at the same time: a short common-mode interference burst of unknown origin (none in run 1); the cut rejects them. Area of the plint overlap not recorded, so no flux.
+Not done: background (bias-off) control, per-channel gain test on ch32 via the ASIC config Main tab, longer symmetric-paT run for the final rate.
+
 ## RADIOROC 47 — hold scan with a Co-60 gamma source
 
 Bench (2026-10-27, Co-60 on the plints, SiPMs biased; without bias the threshold-scan rate drops to zero by DAC 360 and every trigger is noise): self-triggered single-channel hold
