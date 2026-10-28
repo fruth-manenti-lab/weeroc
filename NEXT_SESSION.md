@@ -21,6 +21,9 @@ interpreter). Start new work from `main`.
   fetch returns only the first 1 us).
 
 ## Next
+000. Muon rate so far: 20.1 +- 0.7 /min (run 1, paT mismatch) and 21.7 +- 1.1 /min (run 2, paT symmetric); plint overlap area still to measure (flux). Take a longer
+   symmetric-paT run for the final number, a 10 minute bias-off background control, and try lowering ch32 gain alone (ASIC config Main tab) to see whether the ch6-at-pedestal
+   events with a huge ch32 pulse go away. Check the board state after any interrupted script run (reapply defaults and recalibrate).
 00. Hold delay: gamma-source scans (Co-60) put the plateau at 20 to 50 ns on both plints (guide Step 4d); confirm with a short muon sweep (Step 4b) if time
    allows, then use 30 ns. Board left with IO0 mux 0, trims from the last autocalibration; SiPM bias and generator output should be off, source stored.
 0. Run the new Calibration > Pedestals tab in the app (after the hold delay is chosen), then a coincidence run; check the Acquisition page

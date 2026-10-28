@@ -166,6 +166,28 @@ class AcquisitionJobTests(unittest.TestCase):
         self.assertEqual(self.transport.asic[(4, 66)] & 0xF, 0)
         self.assertEqual(self.transport.asic[(9, 66)], 0b10100000)
 
+    def test_trigger_preamp_gain_is_written_to_every_recorded_channel(self):
+        # A coincidence run on two channels must not leave the second channel at its old paT.
+        from unittest.mock import patch
+        acquisition = AcquisitionConfig(channels=[4, 5], trigger_channel=4, trigger_channel_2=5, trigger_type=1,
+                                        trigger_source=3, trigger_source_2=3, batches=1, acquisitions_per_batch=2,
+                                        timeout_s=1.0, threshold_dac=530, trigger_preamp_gain=1,
+                                        out_dir=Path(self.tmp.name) / "run2")
+        transport = AcquisitionTransport(nb_acq=2, adc_batches=[
+            adc_payload(2, {4: ([100.0, 200.0], [10.0, 20.0]), 5: ([110.0, 210.0], [11.0, 21.0])})])
+        device = RadiorocDevice(transport)
+        original = RadiorocDevice.set_trigger_preamp_gain
+        calls = []
+
+        def spy(self_, gain, *, channels):
+            calls.append((gain, list(channels)))
+            return original(self_, gain, channels=channels)
+
+        with patch.object(RadiorocDevice, "set_trigger_preamp_gain", spy):
+            result = AcquisitionJob().run(device, AcquisitionJobConfig(acquisition))
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(calls, [(1, [4, 5])])
+
     def test_success_values_progress_and_manifest(self):
         events = []
         result = self.run_job(on_event=events.append)
