@@ -1,7 +1,7 @@
 # RADIOROC development
 
 - Read `IMPLEMENTATION_STATUS.md` for the current delivery and evidence, and
-  `CROSS_PLATFORM_REBUILD_PLAN.md` for architecture and feature scope.
+  `docs/project/CROSS_PLATFORM_REBUILD_PLAN.md` for architecture and feature scope.
 - `local_artifacts/` is a primary evidence source, not just archived downloads:
   `extracted/RadiorocUI_2_2_0_5.exe_extracted/` is a full PyInstaller extraction
   of the vendor Windows app, and its `.pyc` files are genuine CPython 3.13

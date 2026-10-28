@@ -37,3 +37,6 @@ radioroc_runs/
 /build/
 /dist/
 *.egg-info/
+
+# Claude Code local worktrees
+.claude/

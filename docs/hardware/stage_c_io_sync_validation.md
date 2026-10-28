@@ -1,7 +1,7 @@
 # Stage-C FPGA IO0/IO1 sync-pulse validation (RADIOROC 15/16/22 — PASSED)
 
 **State: PASSED.** This is the project's first Stage-C physical result
-(`CROSS_PLATFORM_REBUILD_PLAN.md` section 5: "Oscilloscope and suitable
+(`docs/project/CROSS_PLATFORM_REBUILD_PLAN.md` section 5: "Oscilloscope and suitable
 probe/cables — Actual FPGA routing, sync clocks/pulses... register readback
 alone cannot establish signal correctness"). It confirms, by direct
 oscilloscope observation on the current board, that FPGA IO1 carries a real

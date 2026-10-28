@@ -1,7 +1,7 @@
 # Stage-B completion sweep (RADIOROC 14 — PASSED)
 
 **State: PASSED.** This card completes the remaining Stage-B items identified
-in `CROSS_PLATFORM_REBUILD_PLAN.md` section 5 (powered bare board over USB
+in `docs/project/CROSS_PLATFORM_REBUILD_PLAN.md` section 5 (powered bare board over USB
 only — no oscilloscope, pulse generator, or SiPM/detector) that had existing
 code but no physical evidence: Ctest, trigger preamp gain, wider DAC ranges,
 broader/all-64-channel coverage, HG/LG gain and shaping, a first-ever
@@ -111,4 +111,4 @@ self-test sub-item, as listed above. All further physical validation
 (F07/F10/F11 signal-timing correctness, S-curves, hold scans, full DAQ
 trigger combinations, detector response) requires Stage C (oscilloscope),
 Stage D (pulse generator), or Stage E (SiPM) equipment per
-`CROSS_PLATFORM_REBUILD_PLAN.md` section 5.
+`docs/project/CROSS_PLATFORM_REBUILD_PLAN.md` section 5.

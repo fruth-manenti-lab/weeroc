@@ -1,22 +1,22 @@
 # WEEROC RADIOROC 2 Tools
 
-Python tools for working with a WEEROC RADIOROC 2 evaluation board over USB
-serial on macOS.
+Python tools and a desktop app for working with a WEEROC RADIOROC 2 evaluation
+board over USB serial. Used with the board on macOS; Linux (Raspberry Pi) has
+been seen to detect it; Windows is untested.
 
-The cross-platform rebuild has started with an installable CLI/core package.
-See [development setup](DEVELOPMENT.md), [implementation status](IMPLEMENTATION_STATUS.md),
-and the [rebuild plan](CROSS_PLATFORM_REBUILD_PLAN.md). The optional desktop now
-supports threshold scans in simulation:
+**New here? Start with the [installation guide](docs/installation_guide.md).**
 
 ```bash
-.venv-foundation/bin/python -m pip install -e '.[gui,dev]'
-.venv-foundation/bin/radioroc-desktop
+python3 -m venv .venv && source .venv/bin/activate
+python -m pip install -e '.[gui,analysis]'
+radioroc-desktop
 ```
 
-Configure channels and DAC settings, preview, run or cancel, and reopen saved
-results. Synthetic runs are labelled **SIMULATION** throughout. Desktop hardware
-execution and application bundles are later milestones; existing CLI commands
-remain available.
+The desktop app can run in **Simulation** with no board; simulated runs are
+labelled **SIMULATION** throughout. For development setup see
+[DEVELOPMENT.md](DEVELOPMENT.md); for current state see
+[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the
+[rebuild plan](docs/project/CROSS_PLATFORM_REBUILD_PLAN.md). The CLI commands remain available.
 
 This repository intentionally does not include the WEEROC installer, extracted
 binaries, local conda environment, or generated run outputs.
@@ -210,6 +210,6 @@ python -m py_compile radioroc_client.py radioroc_analysis.py scripts/*.py tests/
 python -m unittest discover -s tests -v
 ```
 
-Live hardware smoke tests are documented in `SMOKE_TESTS.md`; they are not
+Live hardware smoke tests are documented in [`docs/project/SMOKE_TESTS.md`](docs/project/SMOKE_TESTS.md); they are not
 automatic tests because they require board state, cabling, and sometimes an
 oscilloscope.
