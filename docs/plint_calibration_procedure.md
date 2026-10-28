@@ -1,4 +1,4 @@
-# Plint calibration procedure (Priority 2, `PLINT_STUDENT_MVP_DIRECTIVE.md`)
+# Plint calibration procedure (Priority 2, `docs/project/PLINT_STUDENT_MVP_DIRECTIVE.md`)
 
 > **Status note (2026-10-22).** The student-facing procedure is now
 > `docs/muon_rate_measurement_guide.md`. Use it; this file is the older
@@ -22,7 +22,7 @@ software required for any step below except recording the results). It
 does not invent automatic gain/bias equalization or a position-calibration
 model — every step below has a documented, existing tool behind it.
 
-Read `PLINT_STUDENT_MVP_DIRECTIVE.md` first for why each step exists.
+Read `docs/project/PLINT_STUDENT_MVP_DIRECTIVE.md` first for why each step exists.
 Prerequisite: SiPMs biased to their operating voltage (see the bench's own
 HV supply notes — RADIOROC 39 biased 3 test channels at 29.5V/10mA as a
 worked example, not a universal setting for every SiPM batch).

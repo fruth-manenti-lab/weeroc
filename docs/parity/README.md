@@ -2,7 +2,7 @@
 
 Date: 2026-10-22 (RADIOROC 46).
 
-This folder holds the vendor feature-parity table that `CROSS_PLATFORM_REBUILD_PLAN.md` (milestone M0, section 3)
+This folder holds the vendor feature-parity table that `docs/project/CROSS_PLATFORM_REBUILD_PLAN.md` (milestone M0, section 3)
 asked for and that `IMPLEMENTATION_STATUS.md` recorded as never built.
 
 - `parity_table.md`: one row per plan feature F01..F17, with sub-rows (F04a, F05b, ...) where the plan or the code

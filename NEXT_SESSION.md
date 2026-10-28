@@ -97,7 +97,7 @@ pedestals and HG/LG handling for real data, bigger SiPM squares in the canvas.
 
 # (RADIOROC 43 title) RADIOROC 43 — Check HG/LG gain mapping, then LED photoelectron spectrum
 
-Read `PLINT_STUDENT_MVP_DIRECTIVE.md`, `AGENTS.md`, then the RADIOROC 42 entry at
+Read `docs/project/PLINT_STUDENT_MVP_DIRECTIVE.md`, `AGENTS.md`, then the RADIOROC 42 entry at
 the top of `IMPLEMENTATION_STATUS.md` (full evidence and run paths). Branch:
 `lab/newest-app-test` (from `origin/main` `c1b1993`), all work committed
 locally, nothing pushed. Earlier the same day, a separate branch
@@ -145,7 +145,7 @@ Board USB: keep it on its own port, not a shared hub (hangs stopped after the mo
 see `docs/bench_runbook.md` section 3).
 
 ## Next tasks, in order
-Follow `SOLO_PLAN.md` style: no option menus, execute and log.
+Follow `docs/project/SOLO_PLAN.md` style: no option menus, execute and log.
 0. FIRST: the board hung during the LED sweep (see the "Solo hour" entry). Ask the
    operator for a power cycle if not already done, then apply defaults (verify),
    re-set ch6 HG 15 (`hgcode.py 6 15`) and the probe only if the DSO is still used.
@@ -166,7 +166,7 @@ channel-to-position map, calibration tolerances, student machine/OS, hold delay
 
 # RADIOROC 41 — Step 5 hold-scan rehearsal, write the real Step 6 record, then the Priority 4 rehearsal
 
-Read `PLINT_STUDENT_MVP_DIRECTIVE.md` in full before anything else, then
+Read `docs/project/PLINT_STUDENT_MVP_DIRECTIVE.md` in full before anything else, then
 `AGENTS.md`, then this file in full, then `IMPLEMENTATION_STATUS.md`'s three
 RADIOROC 40 entries (search "RADIOROC 40" -- one plus two "(continued)"
 entries, near the top), which this handoff continues directly from. The
