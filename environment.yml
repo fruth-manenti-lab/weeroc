@@ -1,0 +1,12 @@
+# RADIOROC desktop app and CLI. Create with:
+#   conda env create -f environment.yml
+#   conda activate radioroc-app
+# Run from the repository root (the pip line installs this checkout).
+name: radioroc-app
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  - pip
+  - pip:
+      - -e .[gui,analysis]

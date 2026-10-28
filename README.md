@@ -7,8 +7,8 @@ been seen to detect it; Windows is untested.
 **New here? Start with the [installation guide](docs/installation_guide.md).**
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-python -m pip install -e '.[gui,analysis]'
+conda env create -f environment.yml
+conda activate radioroc-app
 radioroc-desktop
 ```
 
@@ -46,7 +46,14 @@ binaries, local conda environment, or generated run outputs.
 
 ## Environment
 
-Create the conda environment:
+The standard setup is the conda environment in `environment.yml`, as described in
+the [installation guide](docs/installation_guide.md), which also gives a plain venv
+alternative.
+
+`environment-radioroc.yml` is the older lab environment (Python 3.13 with
+numpy, pandas, scipy, ftd2xx and PyQt6). It runs the scripts from a source
+checkout but does not install the `radioroc` package or PySide6, so it cannot
+run `radioroc-desktop`. Use it only for existing lab work:
 
 ```bash
 conda env create -f environment-radioroc.yml

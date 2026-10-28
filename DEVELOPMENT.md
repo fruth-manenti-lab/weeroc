@@ -7,8 +7,9 @@ These commits are local until pushed.
 
 ## Install
 
-Users who only want to run the app: see [`docs/installation_guide.md`](docs/installation_guide.md).
-The steps below are for development.
+Users who only want to run the app: see [`docs/installation_guide.md`](docs/installation_guide.md)
+(conda, via `environment.yml`). The steps below use a plain venv and are for development;
+the conda environment also works for development.
 
 Use Python 3.11 or later (CI targets 3.11 and 3.13). Create a separate environment
 so development does not change the existing `.conda-radioroc` lab environment:
