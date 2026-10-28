@@ -12,6 +12,10 @@ WEEROC Windows installer.
 | Raspberry Pi / Debian / Ubuntu | Board seen as `/dev/ttyUSB0`; permission steps untested (see `linux_usb_permissions.md`). |
 | Windows | Not tested. The package is pure Python, so the install steps should work, but the COM port and driver behaviour are unverified. |
 
+The conda install (`environment.yml`) was verified on macOS: environment created from
+scratch, all offline tests pass. PySide6 is capped below 6.12 because 6.12.0 crashed the
+test process at exit.
+
 You can install and try everything in **Simulation** mode with no board.
 
 ## 1. Requirements
@@ -31,7 +35,29 @@ cd weeroc
 
 (Use the HTTPS URL if you have no SSH key set up.)
 
-## 3. Create an environment and install
+## 3. Create the environment and install
+
+Install [Miniconda](https://docs.conda.io/en/latest/miniconda.html) if you do not
+have conda. Then, from the repository folder:
+
+```bash
+conda env create -f environment.yml
+conda activate radioroc-app
+```
+
+This creates an environment named `radioroc-app` with Python 3.13 and installs the
+app, the command-line tools, the desktop GUI (PySide6) and plotting (Matplotlib).
+It takes a few minutes. Run `conda activate radioroc-app` in every new terminal.
+
+To update later: `git pull`, then `python -m pip install -e '.[gui,analysis]'`
+inside the activated environment.
+
+Do not use `environment-radioroc.yml`. That is the older lab environment for
+running scripts from a checkout; it does not include the desktop GUI.
+
+### Alternative: plain Python venv
+
+If you do not want conda (Python 3.11 or newer):
 
 ```bash
 python3 -m venv .venv
@@ -40,13 +66,9 @@ python -m pip install --upgrade pip
 python -m pip install -e '.[gui,analysis]'
 ```
 
-Extras:
-
-- `gui`: the desktop app (PySide6 and Matplotlib).
-- `analysis`: plotting for the command-line tools.
-- `dev`: test and build tools, only needed if you change the code.
-
-For the command-line tools only, `python -m pip install -e .` is enough.
+Extras: `gui` is the desktop app, `analysis` is plotting for the command-line
+tools, `dev` is test and build tools (only if you change the code). For the
+command-line tools alone, `python -m pip install -e .` is enough.
 
 ## 4. Check the install (no hardware needed)
 
@@ -103,17 +125,10 @@ unless you add `--execute`, so check cabling first.
 Runs are saved under `radioroc_runs/` in the folder you launch from. This folder
 holds measured data: do not delete it, and it is not committed to git.
 
-## Updating
-
-```bash
-git pull
-python -m pip install -e '.[gui,analysis]'
-```
-
 ## Troubleshooting
 
 - **`radioroc-desktop: command not found`**: the environment is not active.
-  Run `source .venv/bin/activate`, or install with the `gui` extra.
+  Run `conda activate radioroc-app` (or `source .venv/bin/activate`).
 - **`No module named PySide6`**: reinstall with `'.[gui]'`.
 - **No port listed**: try another cable or a direct USB port (not a hub), and
   check the 5 V supply is on.
