@@ -105,3 +105,27 @@ def read_hold_run(path: Path) -> SavedHoldRun:
     execution_mode = manifest.get("execution_mode") if isinstance(manifest.get("execution_mode"), str) else "unknown"
 
     return SavedHoldRun(directory, manifest, tuple(rows), status, execution_mode, x_name, tuple(warnings))
+
+
+def read_hold_samples(directory: Path) -> dict:
+    """Raw samples of a saved run: ``{x: {"ch4_hg": [...], "ch4_lg": [...]}}`` (empty if none saved)."""
+
+    path = Path(directory) / "holdscan_samples.csv"
+    samples: dict = {}
+    if not path.is_file():
+        return samples
+    try:
+        with path.open(newline="", encoding="utf-8") as stream:
+            reader = csv.DictReader(stream)
+            x_name = (reader.fieldnames or [None])[0]
+            for row in reader:
+                try:
+                    x, channel = int(row[x_name]), int(row["channel"])
+                    point = samples.setdefault(x, {})
+                    point.setdefault(f"ch{channel}_hg", []).append(float(row["hg"]))
+                    point.setdefault(f"ch{channel}_lg", []).append(float(row["lg"]))
+                except (TypeError, ValueError, KeyError):
+                    continue
+    except (OSError, UnicodeError):
+        return {}
+    return samples

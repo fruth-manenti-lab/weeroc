@@ -18,7 +18,7 @@ from radioroc_client import AcquisitionConfig, N_CHANNELS, RadiorocDevice, Radio
 from radioroc.application import CancellationToken, JobBusyError
 from radioroc.application.acquisition import AcquisitionJob, AcquisitionJobConfig
 from radioroc.data.acquisition import AcquisitionRunWriter
-from radioroc.transport.errors import TransportIOError, TransportTimeoutError
+from radioroc.transport.errors import TransportIOError, TransportProtocolError, TransportTimeoutError
 from scripts import radioroc_acquire as cli
 
 
@@ -409,6 +409,61 @@ class AcquisitionJobTests(unittest.TestCase):
         self.assertEqual(combined[4], {"batch": "2", "event": "0", "channel": "4", "hg": "500.0", "lg": "50.0"})
         # The second run's manifest replaces the first, per append semantics.
         self.assertEqual(self.manifest()["completed_points"], 1)
+
+    def test_time_limited_run_records_batches_actually_taken(self):
+        import time as real_time
+        from types import SimpleNamespace
+        config = AcquisitionJobConfig(replace(self.acquisition, batches=1, duration_s=2.5))
+        events = []
+        clock = [0.0]
+        original = self.device.acquire_adc_batch
+
+        def timed_batch(**kwargs):
+            clock[0] += 1.0  # each batch takes one fake second
+            return original(**kwargs)
+        fake_time = SimpleNamespace(monotonic=lambda: clock[0], perf_counter=real_time.perf_counter)
+        with patch("radioroc.application.acquisition.time", fake_time), \
+                patch.object(self.device, "acquire_adc_batch", side_effect=timed_batch):
+            result = AcquisitionJob().run(self.device, config, on_event=events.append)
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.points, 3)
+        manifest = self.manifest()
+        self.assertEqual(manifest["completed_points"], result.points)
+        self.assertEqual(manifest["operation"]["acquisition"]["batches"], result.points)
+        self.assertEqual(manifest["total_points"], 0)
+        self.assertTrue(all(e.total_points == 0 for e in events))
+
+    def _flaky_batches(self, failures):
+        original = self.device.acquire_adc_batch
+        state = {"calls": 0}
+
+        def flaky(**kwargs):
+            state["calls"] += 1
+            if state["calls"] <= failures:
+                raise TransportProtocolError("incomplete/malformed response: expected 12804 bytes, received 4080")
+            return original(**kwargs)
+        return patch.object(self.device, "acquire_adc_batch", side_effect=flaky)
+
+    def test_cut_off_batch_is_retried_and_run_completes(self):
+        with patch("radioroc.application.acquisition.time.sleep"), self._flaky_batches(1):
+            result = self.run_job()
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.points, 2)
+        self.assertTrue(any("retry 1/2" in w for w in result.warnings))
+        manifest = self.manifest()
+        self.assertEqual(manifest["batch_retries"][0]["batch"], 0)
+        self.assertEqual(len(rows(self.directory / "events.csv")), 4)  # no duplicate/partial rows
+
+    def test_batch_fails_after_retries_are_exhausted(self):
+        with patch("radioroc.application.acquisition.time.sleep"), self._flaky_batches(99):
+            result = self.run_job()
+        self.assertEqual(result.status, "failed")
+        self.assertIsInstance(result.error, TransportProtocolError)
+        self.assertEqual(len(self.manifest()["batch_retries"]), 2)
+
+    def test_duration_must_be_positive(self):
+        with self.assertRaises(ValueError):
+            replace(self.acquisition, duration_s=0).validate()
 
     def test_legacy_source_execution_without_installed_project_metadata(self):
         from importlib.metadata import PackageNotFoundError

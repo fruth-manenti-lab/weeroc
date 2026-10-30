@@ -46,3 +46,30 @@ def session_lock(transport):
         if transport not in _session_locks:
             _session_locks[transport] = Lock()
         return _session_locks[transport]
+
+
+class CleanupRunner:
+    """Run best-effort cleanup calls, recording failures instead of raising.
+
+    After one call fails because the board stopped answering (timeout) the remaining calls are skipped: each would otherwise wait out
+    its own full timeout, leaving the app stuck "cancelling" for minutes.
+    """
+
+    def __init__(self, errors: list, describe):
+        self.errors = errors
+        self.describe = describe
+        self.dead = False
+        self._skip_noted = False
+
+    def __call__(self, label, call):
+        if self.dead:
+            if not self._skip_noted:
+                self.errors.append("remaining cleanup skipped: the board is not responding")
+                self._skip_noted = True
+            return
+        try:
+            call()
+        except BaseException as exc:
+            self.errors.append(f"{label}: {self.describe(exc)}")
+            if isinstance(exc, TimeoutError):  # TransportTimeoutError subclasses it; fast I/O errors don't count
+                self.dead = True

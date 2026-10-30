@@ -19,7 +19,7 @@ from radioroc_client import (
 )
 from radioroc.data.hold_scan import HoldRunWriter
 from radioroc.transport.errors import TransportClosedError, TransportIOError, TransportProtocolError
-from .jobs import CancellationToken, JobBusyError, JobCancelled, JobEvent, session_lock
+from .jobs import CancellationToken, CleanupRunner, JobBusyError, JobCancelled, JobEvent, session_lock
 from .verification import verify_restoration as run_restoration_check
 
 # The job's own FPGA state footprint to snapshot/restore/verify: ADC hold/timing
@@ -209,11 +209,7 @@ class HoldScanJob:
             manifest["cleanup"] = {"status": result.cleanup_status, "errors": list(result.cleanup_errors)}
             writer.update(manifest)
 
-        def cleanup_call(label, call):
-            try:
-                call()
-            except BaseException as exc:
-                result.cleanup_errors.append(f"{label}: {_describe(exc)}")
+        cleanup_call = CleanupRunner(result.cleanup_errors, _describe)
 
         try:
             emit("state")
@@ -312,9 +308,18 @@ class HoldScanJob:
                 row["requested"] = scan.acquisitions
                 row["received"] = received
                 writer.append_point(row)
+                raw = {}
+                samples = []
+                for channel in scan.channels:
+                    raw[f"ch{channel}_hg"] = list(high_gain[channel])
+                    raw[f"ch{channel}_lg"] = list(low_gain[channel])
+                    for event, (hg, lg) in enumerate(zip(high_gain[channel], low_gain[channel])):
+                        samples.append({x_name: hold_value, "event": event, "channel": channel,
+                                        "hg": hg, "lg": lg})
+                writer.append_samples(samples)
                 result.points += 1
                 persist()
-                emit("point", hold_value=hold_value, row=row)
+                emit("point", hold_value=hold_value, row={**row, "raw": raw})
             token.checkpoint()
             result.status = "completed"
         except (JobCancelled, KeyboardInterrupt) as exc:
@@ -344,7 +349,7 @@ class HoldScanJob:
             if result.cleanup_errors and result.status == "completed":
                 result.status = "failed"
             try:
-                if verify_restoration:
+                if verify_restoration and not cleanup_call.dead:
                     result.verification = run_restoration_check(
                         device, snapshot, config.registers(), execution_mode=mode,
                         fpga_addresses=_FPGA_HOLD_ADDRESSES)
