@@ -34,6 +34,7 @@ from .main_panel import MainPanel
 from .probes_masks_panel import ProbesMasksPanel
 from .raw_register_panel import RawRegisterPanel
 from .scurve_window import ScurveWindow
+from .spin_util import install_wheel_guard
 from .threshold_calibration_panel import ThresholdCalibrationPanel
 from .threshold_window import ThresholdWindow
 
@@ -258,6 +259,8 @@ class MainWindow(QMainWindow):
         # cannot reach them. Make every dropdown focusable and arrow-key selectable.
         for combo in self.findChildren(QComboBox):
             combo.setFocusPolicy(Qt.StrongFocus)
+        # Wheel-scrolling a page must not change spin boxes/dropdowns under the pointer.
+        install_wheel_guard(self)
 
         # -- Persistent connection status strip (mirrors the vendor app's
         # bottom power-button/status bar, visible regardless of the active

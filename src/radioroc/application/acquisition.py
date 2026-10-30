@@ -11,6 +11,7 @@ aggregated row per point.
 
 from copy import deepcopy
 import csv
+import itertools
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -24,7 +25,7 @@ from radioroc_client import (
 )
 from radioroc.data.acquisition import AcquisitionRunWriter
 from radioroc.transport.errors import TransportClosedError, TransportIOError, TransportProtocolError
-from .jobs import CancellationToken, JobBusyError, JobCancelled, JobEvent, session_lock
+from .jobs import CancellationToken, CleanupRunner, JobBusyError, JobCancelled, JobEvent, session_lock
 from .verification import verify_restoration as run_restoration_check
 
 # The job's own FPGA state footprint to snapshot/restore/verify: ADC hold/timing
@@ -36,6 +37,11 @@ _FPGA_ACQUISITION_ADDRESSES = (21, 22, 23, 24, 25, 26, 27, 30, 31, 77, 78)
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+# A cut-off ADC reply is retried this many times per batch before the run fails.
+MAX_BATCH_RETRIES = 2
+BATCH_RETRY_PAUSE_S = 0.5
 
 
 def _describe(error):
@@ -128,7 +134,7 @@ class AcquisitionJob:
         config = deepcopy(config)
         config.load_rows()
         return {"execution_mode": "dry-run", "operation": config.as_dict(),
-                "total_points": config.acquisition.batches,
+                "total_points": 0 if config.acquisition.duration_s is not None else config.acquisition.batches,
                 "temporary_asic_registers": len(config.registers()),
                 "preparation_policy": "explicit initialization/defaults persist; temporary acquisition settings are restored"}
 
@@ -149,7 +155,8 @@ class AcquisitionJob:
             raise ValueError("append must be boolean")
         rows = config.load_rows(device.i2c_rows)
         acquisition = config.acquisition
-        total = acquisition.batches
+        timed = acquisition.duration_s is not None
+        total = 0 if timed else acquisition.batches  # 0 = open-ended (time-limited) run
         result = AcquisitionResult(csv_path=Path(acquisition.out_dir) / "events.csv",
                                    metadata=metadata, channels=list(acquisition.channels))
         result.status = "preparing"
@@ -170,6 +177,7 @@ class AcquisitionJob:
     def _run_locked(self, device, config, rows, result, total, token, on_event,
                     verify_restoration, append):
         acquisition = config.acquisition
+        timed = acquisition.duration_s is not None
         mode = "simulation" if isinstance(device.transport, RadiorocMemoryTransport) else "hardware"
         result.execution_mode = mode
         source_files = sorted(Path(__file__).parents[1].rglob("*.py"))
@@ -232,14 +240,12 @@ class AcquisitionJob:
                             error=_describe(result.error),
                             error_notes=list(getattr(result.error, "__notes__", [])),
                             warnings=list(result.warnings), persistence_errors=list(result.persistence_errors))
+            if timed:  # batch count is only known as the run proceeds
+                manifest["operation"]["acquisition"]["batches"] = result.points
             manifest["cleanup"] = {"status": result.cleanup_status, "errors": list(result.cleanup_errors)}
             writer.update(manifest)
 
-        def cleanup_call(label, call):
-            try:
-                call()
-            except BaseException as exc:
-                result.cleanup_errors.append(f"{label}: {_describe(exc)}")
+        cleanup_call = CleanupRunner(result.cleanup_errors, _describe)
 
         try:
             emit("state")
@@ -315,12 +321,33 @@ class AcquisitionJob:
                 rstn_manual=acquisition.rstn_manual, ext_trig=acquisition.external_trigger, peak_sensing=acquisition.peak_sensing,
                 adc_window_ns=acquisition.adc_window_ns, adc_nb_trig=acquisition.adc_nb_trig,
                 trigger_source_2=acquisition.trigger_source_2, trigger_channel_2=acquisition.trigger_channel_2)
-            for batch_offset in range(acquisition.batches):
+            run_started = time.monotonic()
+            batch_offsets = itertools.count() if timed else range(acquisition.batches)
+            for batch_offset in batch_offsets:
+                if timed and batch_offset and time.monotonic() - run_started >= acquisition.duration_s:
+                    break
                 token.checkpoint()
                 batch = acquisition.start_batch + batch_offset
-                high_gain, low_gain = device.acquire_adc_batch(
-                    nb_acq=acquisition.acquisitions_per_batch, timeout_s=acquisition.timeout_s,
-                    synchro_trigger=acquisition.synchro_trigger)
+                attempts = 0
+                while True:
+                    try:
+                        high_gain, low_gain = device.acquire_adc_batch(
+                            nb_acq=acquisition.acquisitions_per_batch, timeout_s=acquisition.timeout_s,
+                            synchro_trigger=acquisition.synchro_trigger)
+                        break
+                    except TransportProtocolError as exc:
+                        # A cut-off/garbled reply: nothing from this batch was kept, so discard it
+                        # and read the batch again (the next read clears stale input first).
+                        attempts += 1
+                        if attempts > MAX_BATCH_RETRIES:
+                            raise
+                        note = (f"batch {batch}: reply cut off, retry {attempts}/{MAX_BATCH_RETRIES} "
+                                f"({_describe(exc)})")
+                        result.warnings.append(note)
+                        manifest.setdefault("batch_retries", []).append(
+                            {"batch": batch, "attempt": attempts, "error": _describe(exc)})
+                        token.checkpoint()
+                        time.sleep(BATCH_RETRY_PAUSE_S)
                 manifest["batch_received_at"].append({"batch": batch, "received_at": _now()})
                 token.checkpoint()
                 accounting = getattr(device, "last_adc_batch", None) or {}
@@ -378,7 +405,7 @@ class AcquisitionJob:
             if result.cleanup_errors and result.status == "completed":
                 result.status = "failed"
             try:
-                if verify_restoration:
+                if verify_restoration and not cleanup_call.dead:
                     result.verification = run_restoration_check(
                         device, snapshot, config.registers(), execution_mode=mode,
                         fpga_addresses=_FPGA_ACQUISITION_ADDRESSES)

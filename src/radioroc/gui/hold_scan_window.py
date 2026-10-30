@@ -24,8 +24,9 @@ from radioroc_client import FPGA_IO_NAMES, HoldScanConfig
 from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.application.hold_scan import HoldScanJob, HoldScanJobConfig
 from radioroc.application.hold_scan_worker import HoldScanWorker
-from radioroc.data.hold_reader import read_hold_run
+from radioroc.data.hold_reader import read_hold_run, read_hold_samples
 from radioroc.gui.spin_util import select_all_on_focus
+from radioroc.data.hold_profile import fit_hold_profile
 from radioroc.gui.layout_util import fit_controls_pane, fit_special_text, wrap_plot_title
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
 from radioroc.gui.channel_select import ChannelSelectGrid
@@ -324,8 +325,11 @@ class HoldScanWindow(QMainWindow):
         # (and trigger spin boxes) and mirror the model into them.
         self.shared_selection = selection
         if selection is not None:
-            from radioroc.gui.calibration_selection import bind_trigger_gain
+            from radioroc.gui.calibration_selection import bind_operating_threshold, bind_trigger_gain
             bind_trigger_gain(self.trigger_preamp_gain, selection)
+            # Follow the top panel's operating threshold, and actually send it with the scan.
+            bind_operating_threshold(self.threshold_dac, selection)
+            self.set_threshold_dac.setChecked(True)
             from radioroc.gui.calibration_selection_panel import bind_shared_selection
             self._sync_shared_selection = bind_shared_selection(
                 selection, form, self.channel_select, trigger_1=self.trigger_channel,
@@ -715,7 +719,10 @@ class HoldScanWindow(QMainWindow):
         self.trigger_source.setValue(3)
         self.trigger_source_2.setValue(0)
         self.set_threshold_dac.setChecked(True)
-        self.threshold_dac.setValue(480)
+        if self.shared_selection is not None:
+            self.threshold_dac.setValue(self.shared_selection.operating_threshold)
+        else:
+            self.threshold_dac.setValue(480)
 
     def operation(self):
         channels = self.channel_select.selected_channels()
@@ -953,8 +960,22 @@ class HoldScanWindow(QMainWindow):
                         continue
                     means = [row[mean_key] for row in rows]
                     stdevs = [row.get(stdev_key, 0) for row in rows]
-                    self.axes.errorbar(xs, means, yerr=stdevs, fmt=style + ".", linewidth=1.2,
-                                       capsize=2, label=f"ch{channel} {gain}")
+                    # Every raw sample as a faint dot behind the mean +/- stdev.
+                    raw_key = f"ch{channel}_{gain}"
+                    raw_x = [x for x, row in zip(xs, rows) for _ in row.get("raw", {}).get(raw_key, ())]
+                    raw_y = [v for row in rows for v in row.get("raw", {}).get(raw_key, ())]
+                    line = self.axes.errorbar(xs, means, yerr=stdevs, fmt="o", markersize=4, linewidth=1.2,
+                                              capsize=2, zorder=3, label=f"ch{channel} {gain} mean ± σ")
+                    if raw_x:
+                        self.axes.scatter(raw_x, raw_y, s=6, color=line[0].get_color(), alpha=0.25, linewidths=0, zorder=1)
+                    fit = fit_hold_profile(xs, means, stdevs)
+                    if fit is not None:
+                        colour = line[0].get_color()
+                        self.axes.plot(fit["x"], fit["y"], style, color=colour, linewidth=1.5, zorder=2,
+                                       label=f"ch{channel} {gain} fit · max {fit['y_peak']:.1f} "
+                                             f"at {fit['x_peak']:.0f}")
+                        self.axes.plot([fit["x_peak"]], [fit["y_peak"]], "*", color=colour,
+                                       markersize=10, zorder=4)
             # Fixed outside-axes placement instead of loc="best": "best"
             # re-picks a position from the current data shape on every
             # redraw, which visibly jumps around during a live scan and can
@@ -985,7 +1006,9 @@ class HoldScanWindow(QMainWindow):
                 from radioroc.gui.calibration_selection import apply_saved_channels, channels_from_manifest
                 apply_saved_channels(self.shared_selection, channels_from_manifest(saved.manifest))
             self.banner.setText(f"SAVED RESULT · {label} · {saved.status} · {saved.directory} · Controls show current settings, not this run's")
-            self._plot(saved.rows, saved.x_name, f"{label} · {saved.status} · {len(saved.rows)} saved points")
+            raw = read_hold_samples(saved.directory)
+            plot_rows = tuple({**row, "raw": raw.get(row[saved.x_name], {})} for row in saved.rows)
+            self._plot(plot_rows, saved.x_name, f"{label} · {saved.status} · {len(saved.rows)} saved points")
             status = f"{label} · {saved.status} · {len(saved.rows)} points"
             self.status.setText(status + (" · " + "; ".join(saved.warnings) if saved.warnings else ""))
             self.details.setPlainText(json.dumps({"warnings": saved.warnings, "manifest": saved.manifest}, indent=2))

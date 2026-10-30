@@ -115,6 +115,17 @@ class HoldScanGuiTests(unittest.TestCase):
         self.addCleanup(window.close)
         self.assertEqual(window.operation().scan.trigger_channel_2, 32)
 
+    def test_shared_operating_threshold_is_sent_with_the_scan(self):
+        from radioroc.gui.calibration_selection import CalibrationSelection
+        from radioroc.gui.hold_scan_window import HoldScanWindow
+        selection = CalibrationSelection(channels=(6, 32))
+        window = HoldScanWindow(selection=selection)
+        self.addCleanup(window.close)
+        selection.set_operating_threshold(437)
+        self.assertEqual(window.operation().scan.threshold_dac, 437)
+        window.apply_source_preset()
+        self.assertEqual(window.operation().scan.threshold_dac, 437)
+
     def test_configure_finish_plot_reopen(self):
         self.window.discriminator.setCurrentIndex(1)
         self.window.ctest.setChecked(True)

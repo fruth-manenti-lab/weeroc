@@ -54,6 +54,58 @@ class AcquisitionGuiTests(unittest.TestCase):
             time.sleep(0.005)
         self.assertIsNone(self.window.worker, "worker failed to finish and release session")
 
+    def test_manual_x_range_rebins_histogram(self):
+        import numpy as np
+        from radioroc.gui.acquisition_window import _SpectraData
+        w = self.window
+        data = _SpectraData()
+        counts = np.zeros(4096)
+        counts[100:900] = 1
+        data.hg[4] = counts
+        data.rows = 1
+        w._set_spectra_channels([4])
+        w._render_spectra(data, "t")
+        self.assertEqual(w._auto_x_range, (100, 900))
+        w.spectra_auto_x.setChecked(False)
+        self.assertEqual((w.spectra_x_min.value(), w.spectra_x_max.value()), (100, 900))
+        w.spectra_x_min.setValue(300)
+        w.spectra_x_max.setValue(500)
+        w._render_spectra(data, "t")
+        xs = [p.get_x() for p in w.axes.patches]
+        self.assertGreaterEqual(min(xs), 300)
+        self.assertLessEqual(max(xs), 500)
+
+    def test_time_limited_run_shows_a_real_progress_bar(self):
+        w = self.window
+        w.output.setText(str(self.directory))
+        w.stop_by.setCurrentIndex(1)
+        w.duration_min.setValue(0.01)  # 0.6 s
+        w.start_run()
+        self.wait_idle()
+        self.assertEqual(w.progress.maximum(), 1000)  # not the 0..0 busy indicator
+        self.assertEqual(w.progress.value(), 1000)  # completed run fills the bar
+
+    def test_subtract_pedestal_shifts_histogram_and_marks_pedestal(self):
+        import numpy as np
+        from radioroc.data.pedestals import ChannelPedestal, PedestalSet
+        from radioroc.gui.acquisition_window import _SpectraData
+        w = self.window
+        w._current_pedestals = lambda: PedestalSet(
+            {4: ChannelPedestal(4, 200.0, 3.0, 20.0, 1.0, 100)}, "now")
+        data = _SpectraData()
+        counts = np.zeros(4096)
+        counts[300:700] = 1
+        data.hg[4] = counts
+        data.rows = 1
+        w._set_spectra_channels([4])
+        w._render_spectra(data, "t")
+        self.assertEqual(w._auto_x_range, (300, 700))
+        self.assertEqual([line.get_xdata()[0] for line in w.axes.lines], [200.0])
+        w.spectra_subtract_pedestal.setChecked(True)
+        w._render_spectra(data, "t")
+        self.assertEqual(w._auto_x_range, (100.0, 500.0))
+        self.assertEqual([line.get_xdata()[0] for line in w.axes.lines], [0.0])
+
     def test_preview_and_invalid_input_are_offline(self):
         self.assertIsNotNone(self.window.preview())
         self.assertIn("temporary_asic_registers", self.window.details.toPlainText())

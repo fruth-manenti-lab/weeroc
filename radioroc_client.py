@@ -452,6 +452,10 @@ class AcquisitionConfig:
     - `conversion_delay_ns` (`int`): ADC conversion delay, divisible by 40 ns.
     - `acquisitions_per_batch` (`int`): Requested ADC acquisitions per batch.
     - `batches` (`int`): Number of acquisition batches to run.
+    - `duration_s` (`float | None`): When set, run batches until this much wall
+      time has elapsed (the batch in progress is completed) instead of for a
+      fixed `batches` count; `batches` is then ignored and recorded afterwards
+      as the number actually taken.
     - `start_batch` (`int`): First batch number, for append-mode continuation.
     - `timeout_s` (`float`): Per-batch ADC timeout.
     - `trigger_preamp_gain` (`int | None`): Optional paT gain code `1..63`.
@@ -494,6 +498,7 @@ class AcquisitionConfig:
     conversion_delay_ns: int = 400
     acquisitions_per_batch: int = 50
     batches: int = 10
+    duration_s: float | None = None
     start_batch: int = 0
     timeout_s: float = 5.0
     trigger_preamp_gain: int | None = None
@@ -556,6 +561,8 @@ class AcquisitionConfig:
             raise ValueError("acquisitions_per_batch must be in range 1..255")
         if self.batches < 1:
             raise ValueError("batches must be at least 1")
+        if self.duration_s is not None and not self.duration_s > 0:
+            raise ValueError("duration_s must be positive")
         if self.start_batch < 0:
             raise ValueError("start_batch must be non-negative")
         if self.timeout_s <= 0:

@@ -20,7 +20,7 @@ from radioroc_client import (
 )
 from radioroc.data.threshold import ThresholdRunWriter
 from radioroc.transport.errors import TransportClosedError, TransportIOError, TransportProtocolError
-from .jobs import CancellationToken, JobBusyError, JobCancelled, JobEvent, session_lock
+from .jobs import CancellationToken, CleanupRunner, JobBusyError, JobCancelled, JobEvent, session_lock
 from .verification import verify_restoration as run_restoration_check
 
 
@@ -199,11 +199,7 @@ class ThresholdJob:
             manifest["cleanup"] = {"status": result.cleanup_status, "errors": list(result.cleanup_errors)}
             writer.update(manifest)
 
-        def cleanup_call(label, call):
-            try:
-                call()
-            except BaseException as exc:
-                result.cleanup_errors.append(f"{label}: {_describe(exc)}")
+        cleanup_call = CleanupRunner(result.cleanup_errors, _describe)
 
         try:
             emit("state")
@@ -322,7 +318,7 @@ class ThresholdJob:
             if result.cleanup_errors and result.status == "completed":
                 result.status = "failed"
             try:
-                if verify_restoration:
+                if verify_restoration and not cleanup_call.dead:
                     result.verification = run_restoration_check(
                         device, snapshot, config.registers(), execution_mode=mode, fpga_addresses=(0, 1, 6))
                     manifest["verification"] = deepcopy(result.verification)

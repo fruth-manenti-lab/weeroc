@@ -11,11 +11,12 @@ readback path for these registers.
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
+    QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
     QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from radioroc.application.channel_config import ChannelConfigOperation
+from radioroc.application.asic_config_file import load_asic_config, save_asic_config
 from radioroc.application.chip_init import ChipInitOperation
 
 # Packaged default config's channel-0 values (configs/radio_default_i2c.csv,
@@ -126,12 +127,23 @@ class MainPanel(QWidget):
             "Write packaged default registers; wipes autocalibration trims (persists).")
         self.apply_defaults_button.clicked.connect(lambda _checked=False: self.apply_defaults())
         init_row.addWidget(self.apply_defaults_button)
+        self.save_config_button = QPushButton("Save config…")
+        self.save_config_button.setToolTip(
+            "Read every ASIC register from the chip and save it to a CSV file.")
+        self.save_config_button.clicked.connect(lambda _checked=False: self.save_config())
+        init_row.addWidget(self.save_config_button)
+        self.load_config_button = QPushButton("Load config…")
+        self.load_config_button.setToolTip(
+            "Write a saved ASIC config file to the chip; wipes autocalibration trims (persists).")
+        self.load_config_button.clicked.connect(lambda _checked=False: self.load_config())
+        init_row.addWidget(self.load_config_button)
         init_row.addStretch(1)
         outer.addLayout(init_row)
         self.status_label = QLabel("—")
         self.status_label.setWordWrap(True)
         outer.addWidget(self.status_label)
         self._init_pending = None
+        self._save_path = None
 
         self._load_channel(0)
         self.channel_spin.valueChanged.connect(self._on_channel_changed)
@@ -293,10 +305,14 @@ class MainPanel(QWidget):
             self.update_controls()
             return
         snapshot = self.connection_worker.snapshot()
-        if snapshot.state == "configuring":
+        if snapshot.state in ("configuring", "reading"):
             return  # still in flight
         self.timer.stop()
         self._applying = False
+        if self._save_path is not None:
+            self._finish_save(snapshot)
+            self.update_controls()
+            return
         if self._init_pending is not None:
             label, self._init_pending = self._init_pending, None
             error = getattr(snapshot, "error", None) or getattr(snapshot, "fault", None)
@@ -315,6 +331,8 @@ class MainPanel(QWidget):
                  and worker.snapshot().state == "connected")
         self.initialize_fpga_button.setEnabled(ready)
         self.apply_defaults_button.setEnabled(ready)
+        self.save_config_button.setEnabled(ready)
+        self.load_config_button.setEnabled(ready)
 
     def initialize_fpga(self):
         return self._run_chip_init(
@@ -325,6 +343,63 @@ class MainPanel(QWidget):
             ChipInitOperation(apply_defaults=True), "Apply defaults",
             "Apply defaults resets every setting on the chip to the packaged "
             "defaults and wipes autocalibration trims. Continue?")
+
+    def save_config(self, path=None):
+        """Read every register back from the chip and save the table as CSV."""
+        worker = self.connection_worker
+        if worker is None or self._applying:
+            return None
+        if worker.snapshot().state != "connected":
+            self.status_label.setText("Save config: not connected")
+            return None
+        if path is None:
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save ASIC config", "asic_config.csv", "ASIC config (*.csv)")
+            if not path:
+                self.status_label.setText("Save config: cancelled")
+                return None
+        try:
+            worker.read_all_registers()
+        except Exception as exc:
+            self.status_label.setText(f"Save config error · {type(exc).__name__}: {exc}")
+            return None
+        self._save_path = path
+        self._applying = True
+        self.status_label.setText("Reading ASIC registers…")
+        self.update_controls()
+        self.timer.start()
+        return path
+
+    def _finish_save(self, snapshot):
+        path, self._save_path = self._save_path, None
+        error = getattr(snapshot, "error", None) or getattr(snapshot, "fault", None)
+        rows = self.connection_worker.raw_registers_snapshot()
+        if snapshot.state != "connected" or error or not rows:
+            self.status_label.setText(f"Save config FAILED · {error or snapshot.state}")
+            return
+        try:
+            count = save_asic_config(rows, path)
+        except OSError as exc:
+            self.status_label.setText(f"Save config FAILED · {exc}")
+            return
+        self.status_label.setText(f"Saved {count} registers to {path}")
+
+    def load_config(self, path=None):
+        """Write a saved ASIC config file to the chip (replaces every setting)."""
+        if path is None:
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Load ASIC config", "", "ASIC config (*.csv)")
+            if not path:
+                return None
+        try:
+            rows = load_asic_config(path)
+        except ValueError as exc:
+            self.status_label.setText(f"Load config: {exc}")
+            return None
+        return self._run_chip_init(
+            ChipInitOperation(apply_defaults=True, config_path=path), "Load config",
+            f"Load config writes {len(rows)} registers from {path} to the chip, "
+            "replacing every setting and wiping autocalibration trims. Continue?")
 
     def _confirm(self, text):
         return QMessageBox.question(
@@ -409,6 +484,12 @@ class MainPanel(QWidget):
         hint_bar.attach(self.initialize_fpga_button,
                         "Re-initialize the FPGA control words (same as the scan option "
                         "'Initialize FPGA'). Persists on the board.")
+        hint_bar.attach(self.save_config_button,
+                        "Read all ASIC registers from the chip and save them as a CSV file "
+                        "you can load again later.")
+        hint_bar.attach(self.load_config_button,
+                        "Write a saved ASIC config CSV to the chip. Resets every setting and "
+                        "wipes autocalibration trims.")
         hint_bar.attach(self.apply_defaults_button,
                         "Write the packaged default registers to the chip (same as the scan "
                         "option 'Apply defaults'). Resets every setting and wipes "

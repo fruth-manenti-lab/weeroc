@@ -1,5 +1,28 @@
 # Implementation status
 
+## Tester requests (2026-10-30) — config save/load, acquisition time, wheel guard, hold-scan fit, retry
+
+Offline only; full suite passes in `.venv-foundation` (726 tests). Hardware-confirmed by the operator: Load config works once the board answers.
+New: ASIC config Save/Load config (vendor-style partial CSV with `x` bits overlays the packaged table); Acquisition "Stop after" batches or time (`duration_s`, real progress bar);
+wheel guard on spin boxes/dropdowns; hold scan stores every sample (`holdscan_samples.csv`) and plots raw points, mean +/- sigma and a polynomial profile fit with its maximum;
+Hold scan follows the top-bar operating threshold; Acquisition spectra X range and "Subtract pedestal"; cut-off ADC batch replies are retried twice (`MAX_BATCH_RETRIES`, manifest `batch_retries`);
+cleanup stops after the first timeout (`CleanupRunner`) so a dead board no longer leaves the app "cancelling" for minutes. Guide: `docs/gamma_co60_guide.md`.
+Open: two self-triggered runs (thr 500, ch38, ~230 events/s) lost the board at about 1:00 and 2:00; cause unknown (trigger rate is the main suspect). Retry untested on hardware.
+TQ trigger path is unverified on the board. The "about 20 events/s" figure is an external-trigger bench observation, not a board limit.
+Batch size: the operator found 10 acquisitions per batch ran without the cut-off replies seen at 50 (not systematically tested; guide default now 10).
+Retry observed once on hardware (run 20261030-130300): batch 703 reply cut off at 9690 of 12804 bytes, retry 1 got no response in 3 s, run failed `TransportTimeoutError`, cleanup skipped. The board went silent, so a re-read cannot help.
+
+Unfinished / not verified (notes for the next session):
+- Root cause of the board going silent after a partial reply (batch 50 vs 10, trigger rate, USB link) is unknown; needs a 3 to 5 minute run at a few events/s.
+- TQ trigger: unverified end to end. The guide's experimental section lists ThresholdQ (Main), TQ mask (Probes/Masks), source NORTQ and re-scanning the hold delay with TQ.
+  The vendor screenshots (Windows app 2.2.0.5, Downloads `image (13..23).png`) show Main "Trigger selection" (External, Local/Global T1/T2/TQ; default Global T1); the guide does
+  not yet say to set it to Global TQ for a TQ run. Images 24 to 29 not yet viewed.
+- No TQ option in our S-curve/threshold scan or hold scan (vendor app has none either: T1/T2 switch only; hold scan has no trigger selector). Counter routing to TQ (register (66, ch), vendor
+  uses `00010000` T1 / `00100000` T2) is unknown; ask the manufacturer. A hold scan with trigger source 2 (NORTQ) typed into the Trigger source field is untested.
+- Hold delay: the last runs used 380 ns (origin unknown), the guide says 30 ns (bench ch6/ch32); re-run a self-trigger hold scan on ch38 before trusting either.
+- Which discriminator level "Individual trigger" taps is still unestablished.
+- Subtract pedestal and the X range/progress bar changes are offline-tested only; the wheel guard has not been confirmed by the operator.
+
 ## RADIOROC 47 — hold scan with a Co-60 gamma source
 
 Bench (2026-10-27, Co-60 on the plints, SiPMs biased; without bias the threshold-scan rate drops to zero by DAC 360 and every trigger is noise): self-triggered single-channel hold

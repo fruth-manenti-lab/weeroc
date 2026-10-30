@@ -27,6 +27,7 @@ growing CSV. The same histogram also renders a previously saved run
 
 import csv
 import os
+import time
 from datetime import datetime
 import json
 from pathlib import Path
@@ -88,6 +89,11 @@ def _decimal(low, high, value):
     field.setRange(low, high)
     field.setValue(value)
     return select_all_on_focus(field)
+
+
+def _clock(seconds):
+    seconds = int(seconds)
+    return f"{seconds // 60}:{seconds % 60:02d}"
 
 
 def _new_directory(execution_mode="simulation"):
@@ -311,6 +317,9 @@ def _read_live_events(path):
 
 
 class AcquisitionWindow(QMainWindow):
+    _run_started = 0.0
+    _run_duration_s = None
+
     _CONNECTION_BUSY = {"discovering", "connecting", "reading", "disconnecting", "scanning",
                         "configuring"}
     _CONNECTION_LOCKS_MODE = _CONNECTION_BUSY | {"connected", "close_failed", "faulted"}
@@ -419,6 +428,12 @@ class AcquisitionWindow(QMainWindow):
         self.conversion_delay_ns.setSingleStep(40)
         self.acquisitions_per_batch = _integer(1, 255, 50)
         self.batches = _integer(1, 1000000, 10)
+        self.stop_by = QComboBox()
+        self.stop_by.addItems(["Number of batches", "Acquisition time"])
+        self.duration_min = _decimal(0.01, 100000, 10.0)
+        self.duration_min.setSuffix(" min")
+        self.stop_by.currentIndexChanged.connect(self._update_stop_by)
+        self._update_stop_by()
         self.timeout_s = _decimal(0.001, 3600, 5.0)
         self.trigger_preamp_gain = _integer(0, 63, 0)
         self.trigger_preamp_gain.setSpecialValueText("Keep current")
@@ -467,7 +482,9 @@ class AcquisitionWindow(QMainWindow):
                                              ("Hold delay (ns)", self.hold_delay_ns),
                                              ("Conversion delay (ns)", self.conversion_delay_ns)])
         add_section("Batches and timeout", [("Acquisitions per batch", self.acquisitions_per_batch),
+                                            ("Stop after", self.stop_by),
                                             ("Batches", self.batches),
+                                            ("Acquisition time", self.duration_min),
                                             ("Timeout (s)", self.timeout_s)])
         add_section("Gain overrides", [("Trigger preamp gain code", self.trigger_preamp_gain),
                                        ("High-gain shaper code", self.high_gain_code),
@@ -537,11 +554,26 @@ class AcquisitionWindow(QMainWindow):
         spectra_controls.addWidget(self.spectra_log_y)
         spectra_controls.addStretch(1)
         spectra_layout.addLayout(spectra_controls)
+        spectra_controls = QHBoxLayout()  # second row keeps the minimum window width unchanged
+        self.spectra_auto_x = QCheckBox("Auto range")
+        self.spectra_auto_x.setChecked(True)
+        spectra_controls.addWidget(self.spectra_auto_x)
+        self.spectra_x_min = _integer(0, 1000000, 0)
+        self.spectra_x_max = _integer(1, 1000000, 4096)
+        self._auto_x_range = (0, 4096)  # data range of the last auto-scaled render
+        for label, field in (("X min:", self.spectra_x_min), ("X max:", self.spectra_x_max)):
+            spectra_controls.addWidget(QLabel(label))
+            spectra_controls.addWidget(field)
+            field.setEnabled(False)
+        spectra_controls.addStretch(1)
+        spectra_layout.addLayout(spectra_controls)
         spectra_buttons = QHBoxLayout()
         self.spectra_clear_button = QPushButton("Clear plot")
         spectra_buttons.addWidget(self.spectra_clear_button)
         self.import_vendor_button = QPushButton("Import vendor file…")
         spectra_buttons.addWidget(self.import_vendor_button)
+        self.spectra_subtract_pedestal = QCheckBox("Subtract pedestal")
+        spectra_buttons.addWidget(self.spectra_subtract_pedestal)
         spectra_buttons.addStretch(1)
         spectra_layout.addLayout(spectra_buttons)
         self.spectra_channels_widget = QWidget()
@@ -602,6 +634,10 @@ class AcquisitionWindow(QMainWindow):
         self.spectra_gain.currentIndexChanged.connect(self._refresh_spectra)
         self.spectra_bins.valueChanged.connect(self._refresh_spectra)
         self.spectra_log_y.toggled.connect(self._refresh_spectra)
+        self.spectra_auto_x.toggled.connect(self._auto_x_toggled)
+        self.spectra_subtract_pedestal.toggled.connect(self._pedestal_display_toggled)
+        self.spectra_x_min.valueChanged.connect(self._refresh_spectra)
+        self.spectra_x_max.valueChanged.connect(self._refresh_spectra)
         self.spectra_clear_button.clicked.connect(self.clear_spectra)
         self.import_vendor_button.clicked.connect(self.choose_vendor_file)
         self.mode.currentIndexChanged.connect(self._mode_changed)
@@ -662,7 +698,8 @@ class AcquisitionWindow(QMainWindow):
                              "completes they are saved as pedestals.json in the new run folder, so the Muon "
                              "page analyses that run with them.")
             if hasattr(selection, "pedestals_changed"):
-                selection.pedestals_changed.connect(lambda *_: self._update_pedestal_status())
+                selection.pedestals_changed.connect(lambda *_: (self._update_pedestal_status(),
+                                                                self._refresh_spectra()))
             selection.channels_changed.connect(lambda *_: self._update_pedestal_status())
             self._update_pedestal_status()
 
@@ -687,6 +724,8 @@ class AcquisitionWindow(QMainWindow):
                           "divisible by 40.")
         self.hint.attach(self.acquisitions_per_batch, "Requested ADC acquisitions per batch.")
         self.hint.attach(self.batches, "Number of acquisition batches to run.")
+        self.hint.attach(self.stop_by, "End the run after a fixed number of batches or after a set acquisition time.")
+        self.hint.attach(self.duration_min, "Run batches until this much time has passed (the current batch finishes first).")
         self.hint.attach(self.timeout_s, "Per-batch ADC timeout, in seconds.")
         self.hint.attach(self.trigger_preamp_gain, "Optional trigger-path preamp gain code "
                           "to set before running; leave at 'Keep current' to leave it alone.")
@@ -730,6 +769,12 @@ class AcquisitionWindow(QMainWindow):
         self.hint.attach(self.spectra_gain, "Which gain's values the histogram below "
                           "plots -- high gain (HG) or low gain (LG).")
         self.hint.attach(self.spectra_bins, "Number of histogram bins.")
+        self.hint.attach(self.spectra_subtract_pedestal,
+                         "Show counts above each channel's pedestal (from the Calibration page's Pedestals "
+                         "step) instead of raw ADC counts. A dashed line marks the pedestal either way.")
+        self.hint.attach(self.spectra_auto_x, "Fit the X axis to the data; untick to set X min/max yourself.")
+        self.hint.attach(self.spectra_x_min, "Left edge of the histogram (ADC counts); bins are re-spread over the range.")
+        self.hint.attach(self.spectra_x_max, "Right edge of the histogram (ADC counts); bins are re-spread over the range.")
         self.hint.attach(self.spectra_log_y, "Plot the histogram's counts axis (Y) on a "
                           "log scale instead of linear.")
         self.hint.attach(self.spectra_clear_button, "Clear the histogram display. This does "
@@ -961,6 +1006,11 @@ class AcquisitionWindow(QMainWindow):
             self.channel_config_group.setEnabled(hardware)
             self.channel_config_apply_button.setEnabled(hardware_run_available)
 
+    def _update_stop_by(self, _index=None):
+        timed = self.stop_by.currentIndex() == 1
+        self.batches.setEnabled(not timed)
+        self.duration_min.setEnabled(timed)
+
     def operation(self):
         channels = self.channel_select.selected_channels()
         output = self.output.text().strip()
@@ -974,7 +1024,9 @@ class AcquisitionWindow(QMainWindow):
             hold_delay_ns=self.hold_delay_ns.value(),
             conversion_delay_ns=self.conversion_delay_ns.value(),
             acquisitions_per_batch=self.acquisitions_per_batch.value(),
-            batches=self.batches.value(), timeout_s=self.timeout_s.value(),
+            batches=self.batches.value(),
+            duration_s=(self.duration_min.value() * 60.0 if self.stop_by.currentIndex() == 1 else None),
+            timeout_s=self.timeout_s.value(),
             trigger_preamp_gain=self.trigger_preamp_gain.value() or None,
             high_gain_code=self.high_gain_code.value() or None,
             low_gain_code=self.low_gain_code.value() or None,
@@ -1030,7 +1082,7 @@ class AcquisitionWindow(QMainWindow):
                 data["external_trigger_note"] = (
                     f"Each batch waits for {per_batch} pulses on IO6. The pulse source must deliver at "
                     f"least {min_rate:.1f} pulses/s, or the batch times out after {timeout:g} s. "
-                    "The board itself handles at most about 20 events/s.")
+                    "On the bench the board delivered about 20 events/s in this mode (docs/bench_runbook.md).")
                 note = f" · IO6 pulses needed: at least {min_rate:.1f}/s"
             if not operation.acquisition.external_trigger and operation.acquisition.hold_delay_ns > 200:
                 hold_note = (f"Hold delay {operation.acquisition.hold_delay_ns} ns is long for a "
@@ -1038,7 +1090,9 @@ class AcquisitionWindow(QMainWindow):
                 data["hold_delay_note"] = hold_note
                 note += f" · {hold_note}"
             self.details.setPlainText(json.dumps(data, indent=2))
-            self.status.setText(f"Preview valid · {data['total_points']} batches · no output created{note}")
+            length = (f"{operation.acquisition.duration_s / 60:g} min" if operation.acquisition.duration_s
+                      else f"{data['total_points']} batches")
+            self.status.setText(f"Preview valid · {length} · no output created{note}")
             return operation
         except Exception as exc:
             self.status.setText(f"Preview failed: {exc}")
@@ -1050,6 +1104,8 @@ class AcquisitionWindow(QMainWindow):
         operation = self.preview()
         if operation is None:
             return
+        self._run_started = time.monotonic()
+        self._run_duration_s = operation.acquisition.duration_s
         if self.mode.currentIndex() == 1:
             worker = self.connection_worker
             if (worker is None or worker.snapshot().state != "connected" or
@@ -1165,14 +1221,24 @@ class AcquisitionWindow(QMainWindow):
             self.batch_summary.setPlainText(_format_batch_summary(mode, snapshot.rows[-1]))
         if snapshot.event:
             event = snapshot.event
-            self.progress.setRange(0, event.total_points)
-            self.progress.setValue(event.completed_points)
+            # total_points == 0 marks a time-limited run: progress is elapsed / requested time.
+            timed = not event.total_points and self._run_duration_s
+            if timed:
+                elapsed = time.monotonic() - self._run_started
+                fraction = 1.0 if event.status == "completed" else min(1.0, elapsed / self._run_duration_s)
+                self.progress.setRange(0, 1000)
+                self.progress.setValue(int(fraction * 1000))
+                progress_text = (f"{_clock(min(elapsed, self._run_duration_s))} / "
+                                 f"{_clock(self._run_duration_s)} · {event.completed_points} batches")
+            else:
+                self.progress.setRange(0, event.total_points)
+                self.progress.setValue(event.completed_points)
+                progress_text = f"{event.completed_points}/{event.total_points} batches"
             if self.cancel_button.isEnabled():
                 state = event.status
                 if mode == "SIMULATION" and state in {"completed", "cancelled", "failed", "disconnected"}:
                     state = "closing session"
-                self.status.setText(f"{mode.title()} · {state} · "
-                                    f"{event.completed_points}/{event.total_points} batches")
+                self.status.setText(f"{mode.title()} · {state} · {progress_text}")
         still_running = snapshot.outcome is None or alive
         if still_running:
             self._live_refresh_tick += 1
@@ -1283,6 +1349,22 @@ class AcquisitionWindow(QMainWindow):
             self.spectra_channel_checks[channel] = box
         self.spectra_channels_layout.addStretch(1)
 
+    def _pedestal_display_toggled(self, _checked):
+        # Manual X limits are in the displayed units, which just changed; go back to auto-fit.
+        self.spectra_auto_x.setChecked(True)
+        self._refresh_spectra()
+
+    def _auto_x_toggled(self, auto):
+        for field in (self.spectra_x_min, self.spectra_x_max):
+            field.setEnabled(not auto)
+        if not auto:  # start from what is currently shown so the plot does not jump
+            for field, value in ((self.spectra_x_min, self._auto_x_range[0]),
+                                 (self.spectra_x_max, self._auto_x_range[1])):
+                field.blockSignals(True)
+                field.setValue(value)
+                field.blockSignals(False)
+        self._refresh_spectra()
+
     def _refresh_spectra(self):
         self._render_spectra(self._spectra, self._spectra_title)
 
@@ -1305,6 +1387,12 @@ class AcquisitionWindow(QMainWindow):
         selected = [channel for channel, box in sorted(self.spectra_channel_checks.items())
                    if box.isChecked()]
         plotted = False
+        auto_x = self.spectra_auto_x.isChecked()
+        auto_lo = auto_hi = None
+        pedestals = self._current_pedestals()
+        pedestal_by_channel = ({} if pedestals is None else
+                               (pedestals.hg() if gain_field == "hg" else pedestals.lg()))
+        subtract = self.spectra_subtract_pedestal.isChecked()
         if rows and selected:
             table = rows.hg if gain_field == "hg" else rows.lg
             for channel in selected:
@@ -1315,12 +1403,29 @@ class AcquisitionWindow(QMainWindow):
                 if not len(nonzero):
                     continue
                 lo, hi = int(nonzero[0]), int(nonzero[-1]) + 1
+                # With "Subtract pedestal" the axis is counts above this channel's pedestal.
+                shift = pedestal_by_channel.get(channel, 0.0) if subtract else 0.0
+                auto_lo = lo - shift if auto_lo is None else min(auto_lo, lo - shift)
+                auto_hi = hi - shift if auto_hi is None else max(auto_hi, hi - shift)
+                if not auto_x:
+                    lo = max(0, int(round(self.spectra_x_min.value() + shift)))
+                    hi = min(int(round(self.spectra_x_max.value() + shift)), len(counts))
+                    if hi <= lo:
+                        continue
                 edges = np.linspace(lo, hi, bins + 1)
                 weights, _ = np.histogram(np.arange(lo, hi) + 0.5, bins=edges,
                                           weights=counts[lo:hi])
-                self.axes.hist(edges[:-1] + np.diff(edges) / 2, bins=edges, weights=weights,
-                               alpha=0.55, label=f"ch{channel}")
+                shown = edges - shift
+                patch = self.axes.hist(shown[:-1] + np.diff(shown) / 2, bins=shown, weights=weights,
+                                       alpha=0.55, label=f"ch{channel}")[2]
+                ped = pedestal_by_channel.get(channel)
+                if ped is not None:  # dashed line at this channel's pedestal (0 when subtracted)
+                    colour = patch[0].get_facecolor() if len(patch) else None
+                    self.axes.axvline(0.0 if subtract else ped, color=colour, linestyle="--",
+                                      linewidth=1.0, alpha=0.9)
                 plotted = True
+        if auto_x and auto_lo is not None:
+            self._auto_x_range = (auto_lo, auto_hi)
         if plotted:
             # Fixed outside-axes placement instead of loc="best": "best"
             # re-picks a position from the current data shape on every

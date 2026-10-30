@@ -8,11 +8,12 @@ Both persist on the board.
 
 from __future__ import annotations
 
-import csv
 from dataclasses import dataclass
 from pathlib import Path
 
-from radioroc_client import DEFAULT_CONFIG, I2CRow, RadiorocDevice
+from radioroc_client import DEFAULT_CONFIG, RadiorocDevice
+
+from .asic_config_file import load_asic_config, merge_asic_config
 
 
 @dataclass(frozen=True)
@@ -21,11 +22,16 @@ class ChipInitOperation:
 
     initialize_fpga: bool = False
     apply_defaults: bool = False
+    config_path: Path | None = None  # custom table to write instead of the packaged default
 
     def validate(self) -> None:
         for name in ("initialize_fpga", "apply_defaults"):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be a bool")
+        if self.config_path is not None:
+            if not self.apply_defaults:
+                raise ValueError("config_path requires apply_defaults")
+            load_asic_config(self.config_path)
         if not (self.initialize_fpga or self.apply_defaults):
             raise ValueError("select at least one of initialize_fpga / apply_defaults")
 
@@ -50,9 +56,10 @@ def run_chip_init(device: RadiorocDevice, operation: ChipInitOperation) -> ChipI
     if operation.initialize_fpga:
         device.initialize_fpga()
     if operation.apply_defaults:
-        with Path(DEFAULT_CONFIG).open(newline="") as stream:
-            device.i2c_rows = [I2CRow(int(r["add"]), int(r["subadd"]), r["data"].strip())
-                               for r in csv.DictReader(stream)]
+        rows = load_asic_config(DEFAULT_CONFIG)
+        if operation.config_path is not None:  # custom/vendor file overlays the packaged table
+            rows = merge_asic_config(rows, load_asic_config(operation.config_path))
+        device.i2c_rows = rows
         device.apply_default_config()
         rows_written = len(device.i2c_rows)
     return ChipInitResult(operation.initialize_fpga, operation.apply_defaults, rows_written)

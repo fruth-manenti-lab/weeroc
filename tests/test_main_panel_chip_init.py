@@ -42,6 +42,81 @@ class ChipInitCoreTests(unittest.TestCase):
         self.assertEqual(dev.calls, [f"apply_default_config:{result.rows_written}"])
 
 
+class CustomAsicConfigTests(unittest.TestCase):
+    def test_save_load_roundtrip_and_custom_write(self):
+        import tempfile
+        from pathlib import Path
+        from radioroc_client import I2CRow
+        from radioroc.application.asic_config_file import load_asic_config, save_asic_config
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "custom.csv"
+            saved = [I2CRow(0, 1, "00001000"), I2CRow(3, 7, "11110000")]
+            self.assertEqual(save_asic_config(saved, path), 2)
+            self.assertEqual(load_asic_config(path), saved)
+            dev = FakeDevice()
+            result = run_chip_init(dev, ChipInitOperation(apply_defaults=True, config_path=path))
+            # A partial file overlays the packaged table: its rows win, the rest stay default.
+            self.assertGreater(result.rows_written, 2)
+            by_key = {(r.add, r.subadd): r.data for r in dev.i2c_rows}
+            self.assertEqual((by_key[(0, 1)], by_key[(3, 7)]), ("00001000", "11110000"))
+
+    def test_partial_vendor_style_file_overlays_defaults(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "partial.csv"
+            path.write_text("add,subadd,data\r\n0,1,xx1xxxx1\r\n")
+            base = FakeDevice()
+            run_chip_init(base, ChipInitOperation(apply_defaults=True))
+            dev = FakeDevice()
+            result = run_chip_init(dev, ChipInitOperation(apply_defaults=True, config_path=path))
+            self.assertEqual(result.rows_written, len(base.i2c_rows))
+            old = next(r.data for r in base.i2c_rows if (r.add, r.subadd) == (0, 1))
+            new = next(r.data for r in dev.i2c_rows if (r.add, r.subadd) == (0, 1))
+            self.assertEqual(new, "".join(n if n != "x" else o for n, o in zip("xx1xxxx1", old)))
+
+    def test_malformed_files_rejected(self):
+        import tempfile
+        from pathlib import Path
+        from radioroc.application.asic_config_file import load_asic_config
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "bad.csv"
+            for text in ("a,b\n1,2\n", "add,subadd,data\n0,1,101\n", "add,subadd,data\n"):
+                bad.write_text(text)
+                with self.assertRaises(ValueError):
+                    load_asic_config(bad)
+            with self.assertRaises(ValueError):
+                ChipInitOperation(initialize_fpga=True, config_path=bad).validate()
+
+
+@unittest.skipUnless(GUI_AVAILABLE, "install [gui] for desktop acceptance checks")
+class WheelGuardTests(unittest.TestCase):
+    def test_unfocused_spin_ignores_wheel_but_focused_accepts(self):
+        from PySide6.QtCore import QPoint, QPointF, Qt
+        from PySide6.QtGui import QWheelEvent
+        from PySide6.QtWidgets import QApplication, QSpinBox
+        from radioroc.gui.spin_util import install_wheel_guard
+        app = QApplication.instance() or QApplication([])
+        owner = QSpinBox()
+        install_wheel_guard(owner)
+        spin = QSpinBox()
+        spin.setRange(0, 100)
+        spin.setValue(10)
+        spin.show()
+
+        def wheel():
+            event = QWheelEvent(QPointF(1, 1), QPointF(1, 1), QPoint(0, 0), QPoint(0, 120),
+                                Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+            app.sendEvent(spin, event)
+        wheel()
+        self.assertEqual(spin.value(), 10)
+        spin.setFocus()
+        app.processEvents()
+        if spin.hasFocus():  # offscreen platforms may refuse focus
+            wheel()
+            self.assertEqual(spin.value(), 11)
+
+
 @unittest.skipUnless(GUI_AVAILABLE, "install [gui] for desktop acceptance checks")
 class MainPanelChipInitTests(unittest.TestCase):
     @classmethod
