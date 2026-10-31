@@ -4978,8 +4978,9 @@ Delivery 3 limits and follow-ups:
   were preserved. Compare those semantics with the vendor before broader register
   refactoring. Other commands' offline dry-run, acquisition/autocalibration jobs,
   HG/LG mapping, Windows parity and Linux hardware checks remain separate work.
-- Local commit identity follows preceding commits (Tengiz Ibrayev,
-  `tengiz@agqhcqjdw32.tail819d22.ts.net`); confirm it before publication.
+- The local commit identity inherited a machine-generated address during this
+  delivery; use the repository's intended public author identity before any
+  future publication.
 
 ## Earlier deliveries: implemented
 

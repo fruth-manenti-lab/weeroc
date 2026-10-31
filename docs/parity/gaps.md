@@ -11,7 +11,7 @@ hardware, 4 Not started, 1 Excluded (F15).
 | F02c | Hold-source bit and TQ/delay/slope paths have no unit evidence of vendor parity; Main tab cannot read the chip back, and Apply writes the whole tab. |
 | F05c | Digital probe routing and discriminator output select (`(66,ch)`) are not implemented in API, CLI or GUI. |
 | F06b | No standalone Reset-to-defaults button in the GUI (only CLI and scan-window checkbox). |
-| F06c | Vendor configuration file import/save, masked partial import, drag-drop, embedded field help; the vendor file format is unknown. |
+| F06c | Save/Load config is delivered for the supported CSV format. Masked partial import, drag-drop and embedded field help remain missing; compatibility with other vendor revisions is unverified. |
 | F07b | S-curve fitting and 50% extraction display/export in the S-curve tab; CLI plot for S-curves is unknown. |
 | F10c | Peak-sensing path and HG/LG statistics plots have no evidence beyond the checkbox. |
 | F11d | Trigger selection (selTrig) combo exists on Main; no test evidence of vendor-equivalent coverage of local/global/external. |
