@@ -14,7 +14,6 @@ local_artifacts/
 *.dmg
 *.dll
 *.pdf
-!docs/vendor/*.pdf
 *.pyd
 *.zip
 *_extracted/

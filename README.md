@@ -142,6 +142,5 @@ cabling and, for some workflows, external instruments and an operator.
 
 ## License
 
-No open-source license has been selected yet. The source is public for review,
-but reuse and redistribution are not granted until a license is added. Lab
-members should agree on a license before inviting external contributions.
+Released under the [MIT License](LICENSE). Vendor documentation is linked from
+[`docs/vendor/README.md`](docs/vendor/README.md) rather than redistributed.
