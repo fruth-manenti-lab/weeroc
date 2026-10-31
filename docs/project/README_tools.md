@@ -6,10 +6,10 @@ Use commands through the conda environment:
 conda activate radioroc
 ```
 
-or call the environment Python directly:
+or call the active environment's Python directly:
 
 ```bash
-/Users/tengiz/weeroc/.conda-radioroc/bin/python <script>
+python <script>
 ```
 
 ## Read-Only

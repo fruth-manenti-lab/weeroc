@@ -16,7 +16,7 @@ and powered. The synchronized Ctest commands assume:
 ## Read-Only Serial Probe
 
 ```bash
-/Users/tengiz/weeroc/.conda-radioroc/bin/python scripts/radioroc_serial_probe.py \
+python scripts/radioroc_serial_probe.py \
   --port /dev/cu.usbserial-RD3_320 \
   --baud 115200 \
   --address 100 \
@@ -34,7 +34,7 @@ aa 00 e4 05 55
 Preset form:
 
 ```bash
-/Users/tengiz/weeroc/.conda-radioroc/bin/python scripts/radioroc_sync_pulse.py \
+python scripts/radioroc_sync_pulse.py \
   --execute \
   --preset configs/presets/sync_pulse_io1_mux5.json
 ```
@@ -42,7 +42,7 @@ Preset form:
 Expanded form:
 
 ```bash
-/Users/tengiz/weeroc/.conda-radioroc/bin/python scripts/radioroc_sync_pulse.py \
+python scripts/radioroc_sync_pulse.py \
   --execute \
   --sync-io io1 \
   --sync-io-mux-index 5 \
@@ -58,7 +58,7 @@ the generator trigger.
 Preset form:
 
 ```bash
-/Users/tengiz/weeroc/.conda-radioroc/bin/python scripts/radioroc_io_mux_scan.py \
+python scripts/radioroc_io_mux_scan.py \
   --execute \
   --preset configs/presets/io_mux_scan_io1.json
 ```
@@ -66,7 +66,7 @@ Preset form:
 Expanded form:
 
 ```bash
-/Users/tengiz/weeroc/.conda-radioroc/bin/python scripts/radioroc_io_mux_scan.py \
+python scripts/radioroc_io_mux_scan.py \
   --execute \
   --sync-io io1 \
   --pulses-per-index 100 \
@@ -80,7 +80,7 @@ Expected result: the connected IO line shows pulses at mux index `5`.
 Preset form:
 
 ```bash
-/Users/tengiz/weeroc/.conda-radioroc/bin/python scripts/radioroc_threshold_scan.py \
+python scripts/radioroc_threshold_scan.py \
   --execute \
   --preset configs/presets/threshold_ch4_sipm_dark.json \
   --out-dir radioroc_runs/smoke_threshold_ch4_gain1
@@ -89,7 +89,7 @@ Preset form:
 Expanded form:
 
 ```bash
-/Users/tengiz/weeroc/.conda-radioroc/bin/python scripts/radioroc_threshold_scan.py \
+python scripts/radioroc_threshold_scan.py \
   --execute \
   --apply-defaults \
   --channels 4 \
@@ -110,7 +110,7 @@ SiPM is powered and dark.
 Preset form:
 
 ```bash
-/Users/tengiz/weeroc/.conda-radioroc/bin/python scripts/radioroc_hold_scan.py \
+python scripts/radioroc_hold_scan.py \
   --execute \
   --preset configs/presets/hold_external_track_ctest_ch4.json \
   --out-dir radioroc_runs/smoke_external_hold_ch4_ctest
@@ -119,7 +119,7 @@ Preset form:
 Expanded form:
 
 ```bash
-/Users/tengiz/weeroc/.conda-radioroc/bin/python scripts/radioroc_hold_scan.py \
+python scripts/radioroc_hold_scan.py \
   --execute \
   --mode external \
   --channels 4 \
@@ -147,7 +147,7 @@ then rolls off after roughly `575 ns`.
 Preset form:
 
 ```bash
-/Users/tengiz/weeroc/.conda-radioroc/bin/python scripts/radioroc_hold_scan.py \
+python scripts/radioroc_hold_scan.py \
   --execute \
   --preset configs/presets/hold_external_peak_ctest_ch4.json \
   --out-dir radioroc_runs/smoke_external_peak_ch4_ctest
@@ -156,7 +156,7 @@ Preset form:
 Expanded form:
 
 ```bash
-/Users/tengiz/weeroc/.conda-radioroc/bin/python scripts/radioroc_hold_scan.py \
+python scripts/radioroc_hold_scan.py \
   --execute \
   --mode external \
   --peak-sensing \
