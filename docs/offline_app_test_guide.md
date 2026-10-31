@@ -10,10 +10,9 @@ usability problems a student would hit. Report what you find; don't fix it.
   devices), and don't run any script with `--execute`. Don't pick "Hardware
   connection" and press Connect. Even with nothing plugged in, keep to
   Simulation.
-- **Don't change the code or the git state.** Work on branch
-  `lab/newest-app-test` as it is. Don't commit, push, reset, stash or switch
-  branches. If you want to try a fix, describe it in your report instead.
-  Claude is maintaining this branch, and parallel edits will collide.
+- **Don't change the code or the git state.** Use a clean checkout and don't
+  commit, push, reset, stash or switch branches during the test. If you want to
+  try a fix, describe it in your report instead.
 - **Never delete or edit anything in `radioroc_runs/`**: it holds real measured
   data. You may *open* runs from it in the app (read-only). Write your own
   simulation outputs to a new folder, e.g. `radioroc_runs/simulation/test_<date>/`.
@@ -22,12 +21,13 @@ usability problems a student would hit. Report what you find; don't fix it.
 ## Setup
 
 ```bash
-cd /Users/tengiz/weeroc
-git status                     # should show branch lab/newest-app-test, no changes
+cd /path/to/weeroc
+git status                     # should show a clean working tree
 .venv-foundation/bin/radioroc-desktop
 ```
 
-Automated checks, about a minute (all 487 should pass, with none skipped):
+Automated checks (the exact test count grows over time; rely on the final
+summary rather than a number written in this guide):
 
 ```bash
 PYTHONPATH=src QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg \

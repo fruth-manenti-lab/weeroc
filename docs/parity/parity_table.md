@@ -3,7 +3,7 @@
 Date: 2026-10-22. Read `README.md` first for the column and status definitions.
 
 Evidence notation: `reg_map §n` = `docs/register_map.md` section n; `UG §n` = vendor user guide 2.1.0.x
-(`docs/vendor/Radioroc2_User_Guide_2.1.0.6.pdf`); `Log: RADIOROC nn` = the entry of that title in
+([official vendor documentation](../vendor/README.md)); `Log: RADIOROC nn` = the entry of that title in
 `IMPLEMENTATION_STATUS.md` (cited by title, not line number, because the log is edited concurrently).
 CLI = `scripts/<name>.py`. GUI paths are under `src/radioroc/gui/`; job code under `src/radioroc/application/`;
 tests under `tests/`. "unknown" means no evidence was found, not that the answer is no.

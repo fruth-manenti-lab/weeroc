@@ -1,5 +1,11 @@
 # RADIOROC 48 — Pulse-referred autocalibration on the bench, then the muon rate run
 
+> **Historical handoff (written 27 October 2026).** This file records the next
+> bench session as understood on that date; later pull requests and dated
+> [`logbooks/`](logbooks/) entries supersede individual implementation and test
+> counts below. Check current GitHub issues and open pull requests before using
+> it as a work plan.
+
 Read `AGENTS.md`, this file, the RADIOROC 47 entries at the top of `IMPLEMENTATION_STATUS.md`, and
 `docs/muon_rate_measurement_guide.md` (section 3 has the pulse generator section, section 5 Step 2a/2b the calibration).
 Only the operator (Tengiz) accesses the board; agents use offline tests, fake transports or saved data unless the operator

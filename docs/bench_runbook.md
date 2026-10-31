@@ -16,7 +16,7 @@ Last updated: 16 October 2026 (RADIOROC 42).
 | Aim-TTi TGF4162 generator | `/dev/cu.usbmodemDA20FE0E1` (pyvisa, `.conda-radioroc`) | **Use channel 1 only** (see §4). |
 | SiPMs | On channels 4, 6 and 32 of the plint | Bias from a separate supply that this Mac cannot see (≈29–29.5 V used so far). Record the voltage for every run. |
 | LED | Flush against the plint, driven by generator CH1 | Its connection is loose: the light output flickers. |
-| Keysight PSU, Tektronix scope | Not visible over USB from this Mac | Ask the operator to read them. |
+| Keysight PSU, Tektronix scope | Not visible over USB from the macOS host used for this 16 October procedure | Other dated sessions reached both over VISA; verify the current host rather than assuming. |
 
 Only one program may own the board. Close the desktop app before running any
 script, and the other way round. Check with `lsof /dev/cu.usbserial-RD3_32*`.
@@ -170,10 +170,9 @@ saved data). Never delete those folders.
 
 - Development and the GUI: `.venv-foundation` (PySide6 6.11). Run checks with
   `PYTHONPATH=src QT_QPA_PLATFORM=offscreen MPLBACKEND=Agg .venv-foundation/bin/python tools/check_development.py`
-  (487 tests as of 16 October).
+  and rely on its final test summary; the suite grows over time.
 - `.conda-radioroc` has **no PySide6 here**: the same check "passes" while
-  silently skipping ~148 GUI tests. Use it only for pyvisa/generator scripts
-  and legacy tools.
+  skipping GUI tests. Use it only for pyvisa/generator scripts and legacy tools.
 - Launch the app: `.venv-foundation/bin/radioroc-desktop`.
 
 ## 8. External-trigger acquisition rate (19 October)

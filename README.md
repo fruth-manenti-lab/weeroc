@@ -1,222 +1,147 @@
-# WEEROC RADIOROC 2 Tools
+# RADIOROC tools
 
-Python tools and a desktop app for working with a WEEROC RADIOROC 2 evaluation
-board over USB serial. Used with the board on macOS; Linux (Raspberry Pi) has
-been seen to detect it; Windows is untested.
+[![Offline CI](https://github.com/fruth-manenti-lab/weeroc/actions/workflows/python.yml/badge.svg)](https://github.com/fruth-manenti-lab/weeroc/actions/workflows/python.yml)
+![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![Status: research software](https://img.shields.io/badge/status-research%20software-6f42c1)
 
-**New here? Start with the [installation guide](docs/installation_guide.md).**
+An independent desktop application and Python toolkit for commissioning a
+WEEROC RADIOROC 2 evaluation board and taking data from silicon
+photomultipliers (SiPMs).
+
+The project began because the supplied application was unreliable on our lab
+setup. It now supports the full loop from configuring the ASIC to acquiring,
+plotting, saving and reopening measurements. Simulation mode makes most of the
+workflow usable without a board.
+
+![A saved hardware autocalibration result reopened in the RADIOROC desktop app](docs/app_test_report_channel_calibration_2026-10-20/30_taskB_autocal.png)
+
+*A real saved autocalibration result reopened without rerunning the hardware.*
+
+> This is research software developed in the Fruth–Manenti lab, not an official
+> WEEROC product. Hardware support is based on the board and firmware available
+> to our group.
+
+## What works today
+
+| Area | Current status |
+| --- | --- |
+| Desktop app | ASIC configuration, acquisition, threshold scans, S-curves, hold scans and autocalibration |
+| Reproducibility | Saved configurations, run metadata, raw events, plots and saved-run replay |
+| Offline use | Simulation mode is clearly labelled and does not require hardware |
+| Analysis | Threshold and hold summaries, spectra and muon-rate analysis |
+| Hardware | Used with a real RADIOROC 2 board on macOS |
+| Automated checks | More than 700 offline tests across 64 test files |
+| CI | Ubuntu 24.04 and macOS 14, using Python 3.11 and 3.13 |
+| Windows | Not yet tested |
+
+See [the public project status](docs/public_status.md) for the boundary between
+verified, simulated and experimental features.
+
+## Try it without hardware
+
+Python 3.11 or newer is required. Conda is the shortest route:
 
 ```bash
+git clone https://github.com/fruth-manenti-lab/weeroc.git
+cd weeroc
 conda env create -f environment.yml
 conda activate radioroc-app
 radioroc-desktop
 ```
 
-The desktop app can run in **Simulation** with no board; simulated runs are
-labelled **SIMULATION** throughout. For development setup see
-[DEVELOPMENT.md](DEVELOPMENT.md); for current state see
-[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the
-[rebuild plan](docs/project/CROSS_PLATFORM_REBUILD_PLAN.md). The CLI commands remain available.
+Choose **Simulation** in the application. Simulated runs are marked
+**SIMULATION** throughout and are saved separately from hardware runs.
 
-This repository intentionally does not include the WEEROC installer, extracted
-binaries, local conda environment, or generated run outputs.
+For a plain virtual environment, updating an existing checkout, and platform
+notes—including a double-clickable macOS desktop icon—use the
+[installation guide](docs/installation_guide.md).
 
-## Layout
+## Working with the board
 
-- `radioroc_client.py`: hardware-facing library for serial frames, FPGA words,
-  ASIC I2C slow control, scan configuration, scan execution, metadata, and
-  non-hardware fake transport tests.
-- `radioroc_analysis.py`: CSV parsing, latest-run discovery, plot rendering,
-  and simple threshold/hold scan summaries.
-- `scripts/radioroc_check_connection.py`: read-only FPGA status-word check.
-- `scripts/radioroc_apply_defaults.py`: apply and optionally verify the default
-  ASIC I2C table.
-- `scripts/radioroc_threshold_scan.py`: trigger-rate threshold scans.
-- `scripts/radioroc_scurve.py`: S-curve scans.
-- `scripts/radioroc_hold_scan.py`: internal/external hold scans.
-- `scripts/radioroc_sync_pulse.py`: FPGA synchro-trigger pulse test.
-- `scripts/radioroc_io_mux_scan.py`: FPGA IO mux diagnostic scan.
-- `scripts/plot_threshold_scan.py`, `scripts/plot_hold_scan.py`,
-  `scripts/plot_hold_comparison.py`: plotting wrappers.
-- `configs/radio_default_i2c.csv`: default RADIOROC 2 ASIC I2C table.
-- `configs/presets/`: known-good workflow presets.
-- `tests/`: non-hardware unit tests.
-- `scripts/radioroc_standard_scurves.py`: legacy compatibility script kept as a
-  reference until the new scripts fully replace it in daily use.
+The desktop application and command-line tools support:
 
-## Environment
+- ASIC configuration with save/load and known presets
+- repeated ADC acquisition with spectra and raw event storage
+- trigger-threshold and S-curve scans
+- internal and external hold scans
+- autocalibration and per-channel calibration workflows
+- saved-run replay and offline analysis
+- muon-coincidence inspection and rate analysis
 
-The standard setup is the conda environment in `environment.yml`, as described in
-the [installation guide](docs/installation_guide.md), which also gives a plain venv
-alternative.
+Start with the [bench runbook](docs/bench_runbook.md) and the
+[installation guide](docs/installation_guide.md). The tested macOS control port
+was `/dev/cu.usbserial-RD3_320`; Linux permissions and Windows driver behaviour
+depend on the local setup.
 
-`environment-radioroc.yml` is the older lab environment (Python 3.13 with
-numpy, pandas, scipy, ftd2xx and PyQt6). It runs the scripts from a source
-checkout but does not install the `radioroc` package or PySide6, so it cannot
-run `radioroc-desktop`. Use it only for existing lab work:
+### Safety model
+
+- Write-capable command-line tools are dry-run by default. Hardware changes
+  require the explicit `--execute` flag.
+- Only one process should control the board at a time.
+- Live tests require an operator to verify power, cabling, limits and the
+  intended board state.
+- Instrument-assisted bench work described in the project logs was performed
+  within explicit operator-approved limits. It is not part of the unattended
+  offline test suite.
+- Generated measurements belong under `radioroc_runs/`, which is ignored by
+  git. Treat measured data as irreplaceable.
+
+## Useful commands
+
+List candidate ports without opening them:
 
 ```bash
-conda env create -f environment-radioroc.yml
-conda activate radioroc
+radioroc ports --json
 ```
 
-The tested Mac setup used:
+Run the offline development checks:
 
-```text
-/dev/cu.usbserial-RD3_320
+```bash
+python tools/check_development.py
 ```
 
-## Safety Model
-
-Write-capable scripts are dry-run by default. Add `--execute` only when the
-board is connected, powered, and the input cabling is correct.
-
-Generated outputs go under `radioroc_runs/`, which is ignored by git. Vendor
-installers, extracted files, archives, and local notes belong under
-`local_artifacts/`, also ignored by git.
-
-## Quick Checks
-
-Read the FPGA firmware/status word:
+Read the FPGA status word:
 
 ```bash
 python scripts/radioroc_check_connection.py
 ```
 
-Expected response on the tested board:
-
-```text
-OK: address 100 = 00000101 (5)
-```
-
-Apply default ASIC settings:
+Apply and verify the default ASIC configuration only after checking the bench:
 
 ```bash
 python scripts/radioroc_apply_defaults.py --execute --verify --verify-limit 0
 ```
 
-## Preset Workflows
+The command-line scans accept JSON presets from `configs/presets/`. Run any
+command with `--help` before using it on hardware.
 
-The short user-facing commands use JSON presets. Command-line flags override
-values from the preset.
+## Repository guide
 
-Channel-4 SiPM dark threshold scan:
+- `src/radioroc/`: packaged protocol, transport, application, data and GUI code
+- `scripts/`: command-line acquisition, calibration and plotting tools
+- `configs/`: the default ASIC table and reusable workflow presets
+- `tests/`: offline unit, integration, simulation and GUI tests
+- `docs/installation_guide.md`: installation and first simulation run
+- `docs/bench_runbook.md`: safe setup and recovery notes for the lab bench
+- `docs/muon_rate_measurement_guide.md`: coincidence and rate workflow
+- `docs/gamma_co60_guide.md`: Co-60 acquisition workflow
+- `docs/project/SMOKE_TESTS.md`: operator-run hardware checks
+- `IMPLEMENTATION_STATUS.md`: detailed engineering record and evidence log
 
-```bash
-python scripts/radioroc_threshold_scan.py \
-  --execute \
-  --preset configs/presets/threshold_ch4_sipm_dark.json \
-  --out-dir radioroc_runs/threshold_ch4_sipm_dark
-```
+Vendor installers, extracted binaries, local environments and generated run
+outputs are intentionally excluded from the repository.
 
-External track-and-hold Ctest scan:
+## Development
 
-```bash
-python scripts/radioroc_hold_scan.py \
-  --execute \
-  --preset configs/presets/hold_external_track_ctest_ch4.json \
-  --out-dir radioroc_runs/hold_external_track_ctest_ch4
-```
+Development setup and CI-equivalent checks are documented in
+[DEVELOPMENT.md](DEVELOPMENT.md). Pull requests run the offline suite, build a
+wheel, verify the installed package, exercise analysis, and launch the desktop
+application offscreen on both Ubuntu and macOS.
 
-External peak-sensing Ctest scan:
+Hardware smoke tests are deliberately separate: they require board state,
+cabling and, for some workflows, external instruments and an operator.
 
-```bash
-python scripts/radioroc_hold_scan.py \
-  --execute \
-  --preset configs/presets/hold_external_peak_ctest_ch4.json \
-  --out-dir radioroc_runs/hold_external_peak_ctest_ch4
-```
+## License
 
-IO1 synchro pulse test at mux index 5:
-
-```bash
-python scripts/radioroc_sync_pulse.py \
-  --execute \
-  --preset configs/presets/sync_pulse_io1_mux5.json
-```
-
-IO1 mux scan:
-
-```bash
-python scripts/radioroc_io_mux_scan.py \
-  --execute \
-  --preset configs/presets/io_mux_scan_io1.json
-```
-
-## Plotting
-
-Plot the newest threshold scan:
-
-```bash
-python scripts/plot_threshold_scan.py --latest --steps --summary
-```
-
-Plot the newest hold scan:
-
-```bash
-python scripts/plot_hold_scan.py --latest --channels 4 --gain hg --summary
-```
-
-For internal hold scans, code `0` can be a bad edge-case point. Use:
-
-```bash
-python scripts/plot_hold_scan.py --latest --exclude-zero
-```
-
-Compare several hold scans:
-
-```bash
-python scripts/plot_hold_comparison.py \
-  radioroc_runs/run_a/holdscan.csv \
-  radioroc_runs/run_b/holdscan.csv \
-  --channel 4 \
-  --gain hg
-```
-
-## Physical Meaning
-
-Threshold scan / SiPM staircase:
-The threshold DAC is swept while the FPGA counts discriminator triggers in a
-fixed time window. With a biased SiPM, the trigger rate versus DAC reveals the
-dark-count staircase and the useful threshold region.
-
-S-curve:
-The ASIC threshold is swept while a pulse/noise occupancy counter is read. It is
-used for pedestal/noise studies and later calibration work.
-
-Internal hold:
-The ASIC internal delay-cell hold code is swept and ADC values are read. Code
-`0` can produce an invalid or misleading edge point, so diagnostic plots often
-exclude it.
-
-External track-and-hold:
-The FPGA-generated external hold delay is swept. With synchronized Ctest
-injection, this maps the timing region where the ADC samples the injected pulse
-properly.
-
-External peak sensing:
-The vendor external peak-sensing path is used instead of a simple external hold
-sample. It is useful as a timing diagnostic and comparison to track-and-hold.
-
-## Known Lab Setup
-
-- FPGA `IO1` is connected to the signal generator external trigger input.
-- `IO1` mux index `5` produces the usable synchro trigger pulses.
-- The signal generator output goes through a 20 dB attenuator into `in-test1`
-  for Ctest scans.
-- A typical Ctest setup used a 500 mV generator pulse before attenuation, about
-  50 mV at the board input, 100 ns width, triggered burst mode.
-- Channel `4` is the current test channel.
-
-## Tests
-
-Run non-hardware tests:
-
-```bash
-python -m py_compile radioroc_client.py radioroc_analysis.py scripts/*.py tests/*.py
-python -m unittest discover -s tests -v
-```
-
-Live hardware smoke tests are documented in [`docs/project/SMOKE_TESTS.md`](docs/project/SMOKE_TESTS.md); they are not
-automatic tests because they require board state, cabling, and sometimes an
-oscilloscope.
+Released under the [MIT License](LICENSE). Vendor documentation is linked from
+[`docs/vendor/README.md`](docs/vendor/README.md) rather than redistributed.

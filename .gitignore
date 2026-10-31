@@ -14,7 +14,6 @@ local_artifacts/
 *.dmg
 *.dll
 *.pdf
-!docs/vendor/*.pdf
 *.pyd
 *.zip
 *_extracted/
@@ -27,6 +26,8 @@ radioroc2_user_guide.txt
 radioroc_runs/
 
 # Local experiment results (retain locally, never commit)
+/asic_config.csv
+/co60work.csv
 /test0/
 /test1/
 /test1_std/
