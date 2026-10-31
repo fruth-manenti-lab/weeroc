@@ -83,6 +83,23 @@ the board.
 
 Developers can also run `python tools/check_development.py`.
 
+### Optional: add a macOS desktop icon
+
+With `radioroc-app` activated, create the same double-clickable RADIOROC icon
+used on the lab Mac:
+
+```bash
+python tools/make_desktop_launcher.py
+```
+
+This creates `RADIOROC.app` on your Desktop. Double-click it to start the app;
+it does not open a Terminal window. The launcher remembers the current checkout
+and Python environment, so run the command again if either one is moved or
+recreated. To put it somewhere else, use `--dest /path/to/folder`.
+
+The helper is currently macOS-only. Windows and Linux users can still launch
+the installed application with `radioroc-desktop`.
+
 ## 5. Connect the board
 
 1. Power the board from its external 5 V supply, then connect USB.

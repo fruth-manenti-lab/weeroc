@@ -1,19 +1,23 @@
 """Build a double-clickable macOS RADIOROC.app (with icon) that starts the desktop app.
 
-usage: .venv-foundation/bin/python tools/make_desktop_launcher.py [--dest ~/Desktop]
+usage: python tools/make_desktop_launcher.py [--dest ~/Desktop]
 
-The app only wraps `python -m radioroc.gui` from this checkout's `.venv-foundation`;
-it contains no device logic. Re-run it after moving the checkout or the venv.
+Run this from the conda environment or virtual environment where RADIOROC is
+installed. The app only wraps `python -m radioroc.gui`; it contains no device
+logic. Re-run it after moving the checkout or Python environment.
 """
 
 from __future__ import annotations
 
 import argparse
+import io
 import math
 import plistlib
+import shlex
 import shutil
+import struct
 import subprocess
-import tempfile
+import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -94,22 +98,26 @@ def draw_icon() -> Image.Image:
 
 
 def build_icns(img: Image.Image, target: Path) -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        iconset = Path(tmp) / "AppIcon.iconset"
-        iconset.mkdir()
-        for base in (16, 32, 128, 256, 512):
-            img.resize((base, base), Image.LANCZOS).save(iconset / f"icon_{base}x{base}.png")
-            img.resize((base * 2, base * 2), Image.LANCZOS).save(iconset / f"icon_{base}x{base}@2x.png")
-        subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(target)], check=True)
+    """Write a modern ICNS container whose image entries are PNG encoded."""
+    entries = bytearray()
+    for icon_type, size in (
+        (b"icp4", 16), (b"icp5", 32), (b"icp6", 64),
+        (b"ic07", 128), (b"ic08", 256), (b"ic09", 512), (b"ic10", 1024),
+    ):
+        stream = io.BytesIO()
+        img.resize((size, size), Image.LANCZOS).save(stream, format="PNG")
+        data = stream.getvalue()
+        entries.extend(icon_type + struct.pack(">I", len(data) + 8) + data)
+    target.write_bytes(b"icns" + struct.pack(">I", len(entries) + 8) + entries)
 
 
 LAUNCHER = """#!/bin/bash
 # Starts the RADIOROC desktop from the checkout; logs to ~/Library/Logs/RADIOROC.log
-ROOT="{root}"
+ROOT={root}
 LOG="$HOME/Library/Logs/RADIOROC.log"
-PY="$ROOT/.venv-foundation/bin/python"
+PY={python}
 if [ ! -x "$PY" ]; then
-  osascript -e 'display alert "RADIOROC" message "Python environment not found:\\n'"$PY"'\\nRun tools/make_desktop_launcher.py again after fixing the checkout path."'
+  osascript -e 'display alert "RADIOROC" message "Python environment not found:\\n'"$PY"'\\nRecreate the environment, then run tools/make_desktop_launcher.py again."'
   exit 1
 fi
 cd "$ROOT" || exit 1
@@ -118,14 +126,18 @@ exec "$PY" -m radioroc.gui >> "$LOG" 2>&1
 """
 
 
-def build_app(dest: Path) -> Path:
+def build_app(dest: Path, python: Path | None = None) -> Path:
+    python = python or Path(sys.executable).resolve()
+    dest.mkdir(parents=True, exist_ok=True)
     app = dest / "RADIOROC.app"
     if app.exists():
         shutil.rmtree(app)
     (app / "Contents" / "MacOS").mkdir(parents=True)
     (app / "Contents" / "Resources").mkdir()
     script = app / "Contents" / "MacOS" / "RADIOROC"
-    script.write_text(LAUNCHER.format(root=ROOT))
+    script.write_text(LAUNCHER.format(
+        root=shlex.quote(str(ROOT)), python=shlex.quote(str(python)),
+    ))
     script.chmod(0o755)
     build_icns(draw_icon(), app / "Contents" / "Resources" / "AppIcon.icns")
     with (app / "Contents" / "Info.plist").open("wb") as stream:

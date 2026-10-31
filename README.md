@@ -53,7 +53,8 @@ Choose **Simulation** in the application. Simulated runs are marked
 **SIMULATION** throughout and are saved separately from hardware runs.
 
 For a plain virtual environment, updating an existing checkout, and platform
-notes, use the [installation guide](docs/installation_guide.md).
+notes—including a double-clickable macOS desktop icon—use the
+[installation guide](docs/installation_guide.md).
 
 ## Working with the board
 
