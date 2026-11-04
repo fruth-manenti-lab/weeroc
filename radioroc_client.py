@@ -2611,7 +2611,7 @@ class RadiorocDevice:
         - `peak_sensing` (`bool`): Use external peak-sensing control path.
           Mutually exclusive with `trigger_source_2 == 3`: both write FPGA
           word 23.
-        - `adc_window_ns` (`int`): ADC trigger window in ns, divisible by 5.
+        - `adc_window_ns` (`int`): ADC trigger window in ns, divisible by 10.
         - `adc_nb_trig` (`int`): ADC time-window trigger count.
         - `trigger_source_2` (`int`): Vendor ADC second coincidence-input
           code, same encoding as `trigger_source`. This is the vendor GUI's
@@ -2645,8 +2645,8 @@ class RadiorocDevice:
             raise ValueError("trigger_source must be in range 0..7")
         if not 0 <= trigger_source_2 <= 7:
             raise ValueError("trigger_source_2 must be in range 0..7")
-        if adc_window_ns < 0 or adc_window_ns % 5 != 0:
-            raise ValueError("adc_window_ns must be non-negative and divisible by 5")
+        if adc_window_ns < 0 or adc_window_ns % 10 != 0:
+            raise ValueError("adc_window_ns must be non-negative and divisible by 10")
         if not 0 <= adc_nb_trig <= 63:
             raise ValueError("adc_nb_trig must be in range 0..63")
         if trigger_source_2 == 3 and peak_sensing:
@@ -2675,7 +2675,7 @@ class RadiorocDevice:
             self.write_word(23, "00" + bits(trigger_channel_2, 6))
         else:
             self.write_word(23, "00000000")
-        self.write_word(24, bits(adc_window_ns // 5, 8))
+        self.write_word(24, bits(adc_window_ns // 10, 8))
         self.write_word(
             25,
             bits(trigger_source, 3) + str(int(rstn_manual)) + "1" + str(int(peak_or_ext_trig)) + bits(trigger_type, 2),
