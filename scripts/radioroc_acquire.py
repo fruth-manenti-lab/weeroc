@@ -160,7 +160,8 @@ def build_parser(preset: dict[str, object] | None = None, preset_path: Path | No
     parser.add_argument("--t2", action="store_true", help="Use T2 threshold instead of T1")
     parser.add_argument("--no-mask", action="store_true", help="Do not isolate the trigger channel with masks")
     parser.add_argument("--adc-trigger-type", type=int, help="Vendor ADC trigger type code")
-    parser.add_argument("--adc-trigger-source", type=int, help="Vendor ADC first coincidence-input code (T1 slot)")
+    parser.add_argument("--adc-trigger-source", type=int, help="Vendor ADC first coincidence-input code (T1 slot): 0 NORT1, 1 NORT2, "
+                         "2 NORTQ, 3 Individual, 4 OR64, 5 Custom FPGA trigger")
     parser.add_argument("--adc-trigger-source-2", type=int,
                          help="Vendor ADC second coincidence-input code (T2 slot)")
     parser.add_argument("--trigger-channel-2", type=int,

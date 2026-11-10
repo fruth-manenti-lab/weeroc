@@ -106,6 +106,13 @@ class AcquisitionGuiTests(unittest.TestCase):
         self.assertEqual(w._auto_x_range, (100.0, 500.0))
         self.assertEqual([line.get_xdata()[0] for line in w.axes.lines], [0.0])
 
+    def test_custom_fpga_trigger_is_t1_source_5(self):
+        w = self.window
+        self.assertEqual(w.trigger_source.itemText(5), "Custom FPGA trigger")
+        self.assertEqual(w.trigger_source_2.findText("Custom FPGA trigger"), -1)  # T1 slot only
+        w.trigger_source.setCurrentIndex(5)
+        self.assertEqual(w.operation().acquisition.trigger_source, 5)
+
     def test_preview_and_invalid_input_are_offline(self):
         self.assertIsNotNone(self.window.preview())
         self.assertIn("temporary_asic_registers", self.window.details.toPlainText())
