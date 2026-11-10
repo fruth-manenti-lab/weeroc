@@ -386,7 +386,8 @@ class HoldScanWindow(QMainWindow):
                           "mode acquisitions.")
         self.hint.attach(self.trigger_source, "Vendor ADC trigger-source code: which signal "
                           "arms the ADC acquisition (e.g. a specific channel's discriminator, "
-                          "or the FPGA synchro pulse) in external hold mode.")
+                          "or the FPGA synchro pulse) in external hold mode. 0 NORT1, 1 NORT2, "
+                          "2 NORTQ, 3 Individual trigger, 4 OR64, 5 Custom FPGA trigger.")
         self.hint.attach(self.trigger_channel_2, "Second trigger channel (T2 slot), used when "
                           "Trigger source (T2 slot) is 3 (Individual trigger).")
         self.hint.attach(self.trigger_source_2, "Second trigger-source code. 3 = Individual "

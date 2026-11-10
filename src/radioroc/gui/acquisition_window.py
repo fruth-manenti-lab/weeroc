@@ -455,7 +455,10 @@ class AcquisitionWindow(QMainWindow):
         self.trigger_type = QComboBox()
         self.trigger_type.addItems(["Simple trigger", "2 channels coincidence", "Time window"])
         self.trigger_source = QComboBox()
-        self.trigger_source.addItems(["NORT1", "NORT2", "NORTQ", "Individual trigger", "OR64 (FPGA)"])
+        # Code 5 (word 25 bits 7-5 = 101) exists only in the lab's updated
+        # firmware, and only for the T1 slot.
+        self.trigger_source.addItems(["NORT1", "NORT2", "NORTQ", "Individual trigger", "OR64 (FPGA)",
+                                      "Custom FPGA trigger"])
         self.trigger_source.setCurrentIndex(3)
         self.trigger_source_2 = QComboBox()
         self.trigger_source_2.addItems(["NORT1", "NORT2", "NORTQ", "Individual trigger", "OR64 (FPGA)"])
