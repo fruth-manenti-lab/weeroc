@@ -12,22 +12,32 @@ from radioroc.gui.calibration_selection import CalibrationSelection
 from radioroc.gui.channel_select import ChannelSelectGrid
 
 
-def bind_shared_selection(selection, form, grid, trigger_1=None, trigger_2=None):
+def bind_shared_selection(selection, form, grid, trigger_1=None, trigger_2=None, *,
+                          editable=False):
     """Make a scan window follow ``selection``.
 
-    Hides the window's own channel grid and trigger spin boxes (rows of ``form``)
-    and keeps the hidden widgets mirrored from the model, so the window's job
-    config code keeps working unchanged. Returns a callable that pushes the
-    model state into the widgets (already called once).
+    By default hides the window's own channel grid and trigger spin boxes
+    (rows of ``form``) and keeps the hidden widgets mirrored from the model,
+    so the window's job config code keeps working unchanged. With
+    ``editable=True`` the widgets stay visible and edits to them update the
+    shared model too (the Acquisition page uses this, so its channels can be
+    changed there as well as on the Calibration page). Returns a callable that
+    pushes the model state into the widgets (already called once).
     """
+    syncing = [False]
+
     def sync_channels(*_):
+        syncing[0] = True
         try:
             if grid.selected_channels() != selection.channels():
                 grid.set_channels(selection.channels())
         except RuntimeError:  # window already destroyed
             pass
+        finally:
+            syncing[0] = False
 
     def sync_triggers(*_):
+        syncing[0] = True
         try:
             if trigger_1 is not None:
                 trigger_1.setValue(selection.trigger_channel)
@@ -35,14 +45,33 @@ def bind_shared_selection(selection, form, grid, trigger_1=None, trigger_2=None)
                 trigger_2.setValue(selection.trigger_channel_2)
         except RuntimeError:
             pass
+        finally:
+            syncing[0] = False
 
     def sync_all():
         sync_channels()
         sync_triggers()
 
-    for widget in (grid, trigger_1, trigger_2):
-        if widget is not None:
-            form.setRowVisible(widget, False)
+    if editable:
+        def grid_edited(*_):
+            if not syncing[0]:
+                selection.set_channels(grid.selected_channels())
+
+        def trigger_edited(*_):
+            if not syncing[0]:
+                t1 = trigger_1.value() if trigger_1 is not None else selection.trigger_channel
+                t2 = trigger_2.value() if trigger_2 is not None else selection.trigger_channel_2
+                selection.set_trigger_channels(t1, t2)
+
+        for button in grid.channel_buttons:
+            button.toggled.connect(grid_edited)
+        for spin in (trigger_1, trigger_2):
+            if spin is not None:
+                spin.valueChanged.connect(trigger_edited)
+    else:
+        for widget in (grid, trigger_1, trigger_2):
+            if widget is not None:
+                form.setRowVisible(widget, False)
     selection.channels_changed.connect(sync_channels)
     selection.triggers_changed.connect(sync_triggers)
     sync_all()

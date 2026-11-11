@@ -119,14 +119,14 @@ class MainPanel(QWidget):
     and the ``low_gain_*`` equivalents (Energy measurement), ``t1_threshold_spin``/
     ``t2_threshold_spin``/``tq_threshold_spin``/``trigger_selection_combo``/
     ``delay_spin``/``slope_spin`` (Common thresholds and timing), ``apply_button``,
-    ``status_label``, ``board_diff_label``, ``load_from_board_button``.
+    ``status_label``, ``board_diff_label``.
 
-    Board-state colouring (``set_board_rows``, see
-    ``radioroc.gui.board_state_style``): each control is marked on board /
-    not on board / unknown for the channel on screen; ``board_diff_label``
-    lists every channel whose front end (as this panel would apply it)
-    differs from the board; ``load_from_board_button`` fills all 64
-    channels and the common controls with the values the board holds.
+    Board state (``set_board_rows``, see ``radioroc.gui.board_state_style``):
+    the controls show the values the board holds for every channel and the
+    common controls, except values the operator has edited and not yet
+    applied, which stay as typed and are marked "not on board" until Apply
+    writes and verifies them. ``board_diff_label`` lists every channel whose
+    front end differs from the board; ``reset_to_board`` discards all edits.
 
     Unlike ``ThresholdCalibrationPanel``'s 64-cell grids, this panel shows one
     channel's analog front end at a time and there is no per-channel readback
@@ -153,13 +153,6 @@ class MainPanel(QWidget):
         self.channel_spin = QSpinBox()
         self.channel_spin.setRange(0, 63)
         channel_row.addWidget(self.channel_spin)
-        self.load_from_board_button = QPushButton("Load from board")
-        self.load_from_board_button.setToolTip(
-            "Fill every channel and the common controls with the values the board holds"
-            " (needs the board state: Read from board first). Writes nothing.")
-        self.load_from_board_button.clicked.connect(
-            lambda _checked=False: self.load_from_board())
-        channel_row.addWidget(self.load_from_board_button)
         channel_row.addStretch(1)
         outer.addLayout(channel_row)
         self.board_diff_label = QLabel()
@@ -167,6 +160,9 @@ class MainPanel(QWidget):
         outer.addWidget(self.board_diff_label)
         self._board_rows = None
         self._marks_suspended = False
+        self._adopted: dict[int, dict[str, int | bool]] = {}  # board values, unvisited channels
+        self._edited: set[tuple[int, str]] = set()  # (channel, field key) typed, not applied
+        self._edited_common: set[str] = set()  # common-control widget attributes
 
         front_end_row = QHBoxLayout()
         front_end_row.addWidget(self._build_preamp_group())
@@ -209,11 +205,15 @@ class MainPanel(QWidget):
 
         self._load_channel(0)
         self.channel_spin.valueChanged.connect(self._on_channel_changed)
-        for widget in self._board_widgets():
+        edit_keys = ([(attr, key) for key, _, _, attr in _CHANNEL_FIELDS]
+                     + [(attr, None) for *_, attr in _COMMON_FIELDS]
+                     + [("trigger_selection_combo", None)])
+        for attr, key in edit_keys:
+            widget = getattr(self, attr)
             signal = (widget.toggled if isinstance(widget, QCheckBox) else
                       widget.currentIndexChanged if isinstance(widget, QComboBox) else
                       widget.valueChanged)
-            signal.connect(lambda *_args: self._refresh_board_marks())
+            signal.connect(lambda *_args, a=attr, k=key: self._on_user_edit(a, k))
         self.channel_spin.valueChanged.connect(lambda _value: self._refresh_board_marks())
         self.set_board_rows(None)
 
@@ -310,7 +310,7 @@ class MainPanel(QWidget):
             self._marks_suspended = False
 
     def _load_channel_values(self, channel):
-        values = self._channel_values.get(channel, dict(_DEFAULT_CHANNEL_VALUES))
+        values = self._stored_front_end(channel)
         self.compensation_spin.setValue(values["trigger_preamp_compensation"])
         self.preamp_gain_spin.setValue(values["trigger_preamp_gain"])
         self.high_gain_spin.setValue(values["high_gain"])
@@ -321,44 +321,116 @@ class MainPanel(QWidget):
         self.low_gain_shaping_slow_check.setChecked(values["low_gain_shaping_slow"])
         self._current_channel = channel
 
-    # -- Board-state colouring ---------------------------------------------
+    # -- Board state ------------------------------------------------------
 
     def _board_widgets(self):
         return ([getattr(self, attr) for *_, attr in _CHANNEL_FIELDS]
                 + [getattr(self, attr) for *_, attr in _COMMON_FIELDS]
                 + [self.trigger_selection_combo])
 
+    def _stored_front_end(self, channel):
+        """Stored values for ``channel``: visited, else from the board, else defaults."""
+        if channel in self._channel_values:
+            return self._channel_values[channel]
+        return self._adopted.get(channel, _DEFAULT_CHANNEL_VALUES)
+
     def _channel_front_end(self, channel):
-        """The front-end values this panel would apply for ``channel``."""
+        """The front-end values this panel shows (and would apply) for ``channel``."""
         if channel == self._current_channel:
             return {key: _widget_value(getattr(self, attr)) for key, _, _, attr in _CHANNEL_FIELDS}
-        return self._channel_values.get(channel, _DEFAULT_CHANNEL_VALUES)
+        return self._stored_front_end(channel)
+
+    def _on_user_edit(self, attr, key):
+        if self._marks_suspended:
+            return
+        if key is None:
+            self._edited_common.add(attr)
+        else:
+            self._edited.add((self._current_channel, key))
+        self._refresh_board_marks()
+
+    def _matches(self, operation_field, value, channel=None):
+        setting = value if channel is None else {channel: value}
+        return operation_matches(self._board_rows,
+                                 ChannelConfigOperation(**{operation_field: setting}))
 
     def set_board_rows(self, rows):
-        """Recolour against the board's register table (``None`` = unknown).
+        """Show the board's values and recolour (``rows`` ``None`` = unknown).
+
+        Values the operator edited and has not applied are kept; an edited
+        value the board now holds counts as applied.
 
         **Inputs**
         - `rows` (`dict[tuple[int, int], str] | None`): See
           ``radioroc.application.board_state.rows_by_address``.
         """
         self._board_rows = rows
-        self.load_from_board_button.setEnabled(rows is not None)
+        if rows is not None:
+            self._adopt_board_values()
         self._refresh_board_marks()
 
-    def _mark(self, widget, operation_field, value, channel=None, candidates=()):
+    def reset_to_board(self):
+        """Discard every unapplied edit and show the board's values."""
+        self._edited.clear()
+        self._edited_common.clear()
+        self.set_board_rows(self._board_rows)
+
+    def has_unapplied_edits(self):
+        return bool(self._edited or self._edited_common)
+
+    def _adopt_board_values(self):
         rows = self._board_rows
-        if rows is None:
+        current = self._current_channel
+        self._marks_suspended = True
+        try:
+            for ch in range(64):
+                shown = dict(self._channel_front_end(ch))
+                changed = False
+                for key, field, candidates, _ in _CHANNEL_FIELDS:
+                    if self._matches(field, shown[key], ch):
+                        self._edited.discard((ch, key))
+                        continue
+                    if (ch, key) in self._edited:
+                        continue
+                    held = board_value(rows, field, candidates, ch)
+                    if held is not None:
+                        shown[key] = held
+                        changed = True
+                if not changed:
+                    continue
+                if ch == current:
+                    for key, _, _, attr in _CHANNEL_FIELDS:
+                        _set_widget_value(getattr(self, attr), shown[key])
+                elif ch in self._channel_values:
+                    self._channel_values[ch] = shown
+                else:
+                    self._adopted[ch] = shown
+            common = [(field, candidates, attr) for field, candidates, attr in _COMMON_FIELDS]
+            common.append(("trigger_selection", [mode for _, mode in _TRIGGER_SELECTION_ITEMS],
+                           "trigger_selection_combo"))
+            for field, candidates, attr in common:
+                widget = getattr(self, attr)
+                if self._matches(field, _widget_value(widget)):
+                    self._edited_common.discard(attr)
+                elif attr not in self._edited_common:
+                    held = board_value(rows, field, candidates)
+                    if held is not None:
+                        _set_widget_value(widget, held)
+        finally:
+            self._marks_suspended = False
+
+    def _mark(self, widget, operation_field, value, channel=None, candidates=()):
+        if self._board_rows is None:
             mark_widget(widget, UNKNOWN)
             self._set_board_tooltip(widget, "")
             return True
-        setting = value if channel is None else {channel: value}
-        matches = operation_matches(rows, ChannelConfigOperation(**{operation_field: setting}))
+        matches = self._matches(operation_field, value, channel)
         mark_widget(widget, ON_BOARD if matches else NOT_ON_BOARD)
         if matches:
             self._set_board_tooltip(widget, "")
         else:
-            held = board_value(rows, operation_field, candidates, channel)
-            self._set_board_tooltip(widget, "Not on the board yet. " + (
+            held = board_value(self._board_rows, operation_field, candidates, channel)
+            self._set_board_tooltip(widget, "Not on the board yet (press Apply). " + (
                 "Board holds: unknown" if held is None else f"Board holds: {held}"))
         return matches
 
@@ -393,54 +465,12 @@ class MainPanel(QWidget):
                 field: {ch: self._channel_front_end(ch)[key]}
                 for key, field, _, _ in _CHANNEL_FIELDS}))]
         if not differing:
-            self.board_diff_label.setText("Front end of all 64 channels matches the board.")
+            self.board_diff_label.setText("All 64 channels match the board.")
         else:
             listed = ", ".join(str(ch) for ch in differing)
             self.board_diff_label.setText(
-                f"Front end (paT, HG/LG gain, shaping) differs from the board on "
-                f"{len(differing)} channel(s): {listed}. Apply writes the channels you have"
-                " visited; Load from board shows what the board holds.")
-
-    def load_from_board(self):
-        """Fill every channel and the common controls from the board state.
-
-        Writes nothing to the board. Fields whose board value cannot be
-        recovered keep their current value.
-        """
-        rows = self._board_rows
-        if rows is None:
-            self.status_label.setText("Board settings unknown: press Read from board first.")
-            return
-        missing = 0
-        for ch in range(64):
-            values = dict(self._channel_front_end(ch))
-            for key, field, candidates, _ in _CHANNEL_FIELDS:
-                held = board_value(rows, field, candidates, ch)
-                if held is None:
-                    missing += 1
-                else:
-                    values[key] = held
-            self._channel_values[ch] = values
-        self._load_channel(self._current_channel)
-        self._marks_suspended = True
-        try:
-            for field, candidates, attr in _COMMON_FIELDS:
-                held = board_value(rows, field, candidates)
-                if held is None:
-                    missing += 1
-                else:
-                    _set_widget_value(getattr(self, attr), held)
-            held = board_value(rows, "trigger_selection",
-                               [mode for _, mode in _TRIGGER_SELECTION_ITEMS])
-            if held is None:
-                missing += 1
-            else:
-                _set_widget_value(self.trigger_selection_combo, held)
-        finally:
-            self._marks_suspended = False
-        self._refresh_board_marks()
-        self.status_label.setText("Loaded the board's settings into this tab" + (
-            f" ({missing} field(s) not recoverable, left unchanged)." if missing else "."))
+                f"Not applied yet on {len(differing)} channel(s): {listed}."
+                " Apply writes them and checks the board.")
 
     def _on_channel_changed(self, channel):
         self._save_current_channel()

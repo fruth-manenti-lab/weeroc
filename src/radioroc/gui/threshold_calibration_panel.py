@@ -4,8 +4,9 @@ Sibling of ``InputDacGridPanel``/``ProbesMasksPanel``: same 8x8 grid shape,
 one ``QSpinBox`` per channel, plus a per-grid "Set all" control and an
 Apply button.
 
-Each spinbox is coloured by whether the board holds its value (see
-``radioroc.gui.board_state_style``); ``set_board_rows`` supplies the board table.
+Spinboxes show the board's values and are coloured by whether the board holds
+them (see ``radioroc.gui.board_state_style``); edits stay amber until applied;
+``reset_to_board`` discards edits.
 """
 
 from PySide6.QtCore import QTimer
@@ -16,7 +17,7 @@ from PySide6.QtWidgets import (
 
 from radioroc_client import N_CHANNELS
 from radioroc.application.channel_config import ChannelConfigOperation
-from radioroc.application.board_state import operation_matches
+from radioroc.application.board_state import board_value, operation_matches
 from radioroc.gui.board_state_style import NOT_ON_BOARD, ON_BOARD, UNKNOWN, mark_widget
 
 _GRID_COLUMNS = 8
@@ -38,7 +39,7 @@ def _build_dac_grid(title, prefix, panel):
         grid.addLayout(cell, channel // _GRID_COLUMNS, channel % _GRID_COLUMNS)
         spinboxes.append(spinbox)
         spinbox.valueChanged.connect(
-            lambda _value, p=panel, pre=prefix, ch=channel: p._recolor_cell(pre, ch))
+            lambda _value, p=panel, pre=prefix, ch=channel: p._on_cell_changed(pre, ch))
     setattr(panel, f"{prefix}_spinboxes", spinboxes)
 
     set_all_row = QHBoxLayout()
@@ -76,6 +77,8 @@ class ThresholdCalibrationPanel(QWidget):
         super().__init__(parent)
         self.connection_worker = connection_worker
         self._board_rows = None
+        self._edited = set()
+        self._adopting = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -106,6 +109,12 @@ class ThresholdCalibrationPanel(QWidget):
         field = "t1_calibration_dac_values" if prefix == "t1" else "t2_calibration_dac_values"
         return ChannelConfigOperation(**{field: {channel: value}})
 
+    def _on_cell_changed(self, prefix, channel):
+        if self._adopting:
+            return
+        self._edited.add((prefix, channel))
+        self._recolor_cell(prefix, channel)
+
     def _recolor_cell(self, prefix, channel):
         spin = getattr(self, f"{prefix}_spinboxes")[channel]
         if self._board_rows is None:
@@ -117,11 +126,34 @@ class ThresholdCalibrationPanel(QWidget):
         mark_widget(spin, state)
 
     def set_board_rows(self, rows):
-        """Store the board's register table (or ``None``) and recolour every cell."""
+        """Store the board table; adopt its values into unedited cells, then recolour."""
         self._board_rows = rows
+        self._adopting = True
+        try:
+            if rows is not None:
+                for prefix in ("t1", "t2"):
+                    field = f"{prefix}_calibration_dac_values"
+                    for channel, spin in enumerate(getattr(self, f"{prefix}_spinboxes")):
+                        key = (prefix, channel)
+                        matches = operation_matches(
+                            rows, self._cell_operation(prefix, channel, spin.value()))
+                        if key in self._edited:
+                            if matches:
+                                self._edited.discard(key)
+                        elif not matches:
+                            value = board_value(rows, field, range(64), channel)
+                            if value is not None:
+                                spin.setValue(value)
+        finally:
+            self._adopting = False
         for prefix in ("t1", "t2"):
             for channel in range(N_CHANNELS):
                 self._recolor_cell(prefix, channel)
+
+    def reset_to_board(self):
+        """Discard unapplied edits and show the board's values again."""
+        self._edited.clear()
+        self.set_board_rows(self._board_rows)
 
     def build_operation(self):
         operation = ChannelConfigOperation(

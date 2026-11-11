@@ -5,8 +5,11 @@
 Offline only (740 tests pass in `.venv-foundation`); not yet tried on the board. Each ASIC-config control is now marked green (the board holds this value), amber
 (the screen shows a value the board does not hold: edited but not applied, or changed on the board by defaults, a loaded config or autocalibration) or plain (board unknown).
 Covers Main (per channel for the channel on screen, plus thresholds, trigger selection, delay, slope), Threshold calibration, Probes/Masks masks, input DAC values and HiZ.
-Main also lists every channel whose front end differs from the board, shows "Board holds: N" in the tooltip of an amber control, and has "Load from board" (fills all 64
-channels and the common controls from the board; writes nothing). A bar above the tabs has the legend and "Read from board" (one batched read of every ASIC register).
+Follow-up the same day (operator request): the tabs now SHOW the board's values whenever the board state changes (every channel on Main, every grid cell);
+values the operator typed stay as typed and amber until Apply writes and verifies them, then turn green. "Reset all to board" in the bar discards every unapplied edit.
+Main lists the channels not applied yet and shows "Board holds: N" in an amber control's tooltip. A bar above the tabs has the legend, "Read from board" (one batched
+read of every ASIC register) and "Reset all to board". The Acquisition page's own channel grid and T1/T2 trigger channels are visible again and edit the shared
+Calibration selection (`bind_shared_selection(..., editable=True)`); they were hidden behind a "set on the Calibration page" line.
 How it works: `ConnectionWorker.board_state_snapshot()` holds the register table the board is known to hold. It is known only after a full read-back or a full-table write
 (Apply defaults / Load config / a job with apply_defaults), then follows every later write the worker makes; connect, disconnect, FPGA init alone, and any error or fault
 make it unknown. Comparison (`application/board_state.py`) replays a `ChannelConfigOperation` through `apply_channel_config` against an in-memory table, so no register

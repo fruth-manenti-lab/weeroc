@@ -91,12 +91,14 @@ def _swatch(text: str, color: str, fill: str = "white") -> QLabel:
 class BoardStateBar(QWidget):
     """Legend plus "Read from board" button shown above the ASIC-config tabs.
 
-    Public widgets: ``status_label``, ``read_button``. Signal
-    ``read_requested`` fires when the button is pressed. Call ``set_status``
-    whenever the connection or the known board state changes.
+    Public widgets: ``status_label``, ``read_button``, ``reset_button``.
+    Signals ``read_requested`` and ``reset_requested`` fire when the buttons
+    are pressed. Call ``set_status`` whenever the connection or the known
+    board state changes.
     """
 
     read_requested = Signal()
+    reset_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -111,6 +113,12 @@ class BoardStateBar(QWidget):
         self.read_button = QPushButton("Read from board")
         self.read_button.clicked.connect(self.read_requested)
         layout.addWidget(self.read_button)
+        self.reset_button = QPushButton("Reset all to board")
+        self.reset_button.setToolTip(
+            "Discard every edit that has not been applied and show the board's values"
+            " on all ASIC config tabs. Writes nothing.")
+        self.reset_button.clicked.connect(self.reset_requested)
+        layout.addWidget(self.reset_button)
         self.set_status(connected=False, board_state=None)
 
     def set_status(self, *, connected: bool, board_state) -> None:
@@ -122,13 +130,15 @@ class BoardStateBar(QWidget):
         """
 
         self.read_button.setEnabled(connected)
+        self.reset_button.setEnabled(board_state is not None)
         if board_state is None:
             text = ("Not connected: colours off." if not connected else
                     "Board settings unknown since connecting. Press Read from board"
                     " (or Apply defaults / Load config) to compare.")
         elif board_state.source == "read_back":
-            text = "Compared with the settings just read back from the board."
+            text = ("Showing the settings just read back from the board. Edits stay amber"
+                    " until Apply writes and checks them.")
         else:
-            text = ("Compared with the board's last read-back or full write, plus every"
-                    " change this app has written since.")
+            text = ("Showing the board's settings (last read-back or full write, plus every"
+                    " change this app has written and checked since).")
         self.status_label.setText(text)

@@ -115,6 +115,39 @@ class MainWindowTests(unittest.TestCase):
             self.assertEqual(widget.property("boardState"), "on_board")
         self.assertIn("read back", window.board_state_bar.status_label.text())
 
+    def test_reset_all_to_board_resets_every_asic_panel(self):
+        from radioroc.application.board_state import rows_by_address
+        from radioroc.application.channel_config import ChannelConfigOperation
+        window = self._make_window()
+        rows = rows_by_address(ChannelConfigOperation().load_rows())
+        for panel in window._board_state_panels():
+            panel.set_board_rows(rows)
+        window.main_panel.preamp_gain_spin.setValue(30)
+        window.threshold_calibration_panel.t1_spinboxes[3].setValue(10)
+        window.board_state_bar.reset_requested.emit()
+        self.assertEqual(window.main_panel.preamp_gain_spin.value(), 8)
+        self.assertEqual(window.threshold_calibration_panel.t1_spinboxes[3].value(), 32)
+
+    def test_acquisition_page_edits_the_shared_channel_selection(self):
+        window = self._make_window()
+        acquisition = window.acquisition_window
+        self.assertFalse(acquisition.channel_select.isHidden())
+        self.assertFalse(acquisition.trigger_channel.isHidden())
+        self.assertTrue(window.calibration_selection.auto_triggers)
+        # Following the model must not count as a manual trigger edit.
+        window.calibration_selection.set_channels([20, 21])
+        self.assertTrue(window.calibration_selection.auto_triggers)
+        self.assertEqual(acquisition.trigger_channel.value(), 20)
+
+        acquisition.channel_select.channel_buttons[12].click()
+        self.assertEqual(window.calibration_selection.channels(), [12, 20, 21])
+        self.assertEqual(window.calibration_selection_panel.channel_select.selected_channels(),
+                         [12, 20, 21])
+        acquisition.trigger_channel_2.setValue(21)
+        self.assertEqual(window.calibration_selection.trigger_channel_2, 21)
+        self.assertEqual(window.calibration_selection_panel.trigger_channel_2.value(), 21)
+        self.assertFalse(window.calibration_selection.auto_triggers)
+
     def test_calibration_tab_order(self):
         window = self._make_window()
         tabs = window.calibration_tabs

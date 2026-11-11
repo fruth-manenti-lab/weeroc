@@ -155,6 +155,52 @@ class InputDacGridPanelTests(unittest.TestCase):
         self.assertEqual(state(panel.hiz_checkbox), "unknown")
 
 
+    def test_adopts_board_values_and_tracks_edits(self):
+        panel = self.make_panel()
+        state = lambda w: w.property("boardState")
+        spin = panel.channel_value_spinboxes[4]
+        rows = _rows_after("set_input_dac_value", 4, 77)
+        panel.set_board_rows(rows)
+        self.assertEqual(spin.value(), 77)
+        self.assertEqual(state(spin), "on_board")
+        self.assertEqual(panel._edited, set())
+        spin.setValue(100)
+        self.assertEqual(state(spin), "not_on_board")
+        panel.set_board_rows(rows)
+        self.assertEqual(spin.value(), 100)
+        self.assertEqual(state(spin), "not_on_board")
+        panel.set_board_rows(_rows_after("set_input_dac_value", 4, 100))
+        self.assertEqual(state(spin), "on_board")
+        self.assertNotIn(("value", 4), panel._edited)
+        panel.set_board_rows(rows)
+        self.assertEqual(spin.value(), 77)
+        spin.setValue(5)
+        panel.reset_to_board()
+        self.assertEqual(spin.value(), 77)
+        self.assertEqual(state(spin), "on_board")
+        # HiZ follows the board's impedance setting (checked -> impedance False).
+        hiz_rows = _rows_after("set_input_dac_impedance", False)
+        panel.set_board_rows(hiz_rows)
+        self.assertTrue(panel.hiz_checkbox.isChecked())
+        self.assertEqual(state(panel.hiz_checkbox), "on_board")
+        panel.hiz_checkbox.setChecked(False)
+        self.assertEqual(state(panel.hiz_checkbox), "not_on_board")
+        panel.reset_to_board()
+        self.assertTrue(panel.hiz_checkbox.isChecked())
+
+def _rows_after(setter_name, *args, **kwargs):
+    import contextlib
+    import io
+    from radioroc.application.board_state import rows_by_address
+    from radioroc.application.channel_config import ChannelConfigOperation
+    from radioroc_client import RadiorocDevice
+    device = RadiorocDevice(None, dry_run=True)
+    device.i2c_rows = ChannelConfigOperation().load_rows()
+    with contextlib.redirect_stdout(io.StringIO()):
+        getattr(device, setter_name)(*args, **kwargs)
+    return rows_by_address(device.i2c_rows)
+
+
 
 class FakeWorker:
     def __init__(self, raise_on_apply=None):

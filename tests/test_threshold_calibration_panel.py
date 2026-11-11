@@ -141,6 +141,46 @@ class ThresholdCalibrationPanelTests(unittest.TestCase):
         self.assertEqual(state(panel.t2_spinboxes[0]), "unknown")
 
 
+    def test_adopts_board_values_and_tracks_edits(self):
+        panel = self.make_panel()
+        state = lambda w: w.property("boardState")
+        spin = panel.t1_spinboxes[7]
+        base = spin.value()
+        changed = base ^ 1
+        rows = _rows_after("set_calibration_dac_for_channel", 7, t1=True, value=changed)
+        panel.set_board_rows(rows)
+        self.assertEqual(spin.value(), changed)
+        self.assertEqual(state(spin), "on_board")
+        self.assertEqual(panel._edited, set())
+        spin.setValue(changed ^ 2)
+        self.assertEqual(state(spin), "not_on_board")
+        panel.set_board_rows(rows)
+        self.assertEqual(spin.value(), changed ^ 2)
+        self.assertEqual(state(spin), "not_on_board")
+        panel.set_board_rows(_rows_after("set_calibration_dac_for_channel", 7, t1=True,
+                                         value=changed ^ 2))
+        self.assertEqual(state(spin), "on_board")
+        self.assertNotIn(("t1", 7), panel._edited)
+        panel.set_board_rows(rows)
+        self.assertEqual(spin.value(), changed)
+        spin.setValue(base)
+        panel.reset_to_board()
+        self.assertEqual(spin.value(), changed)
+        self.assertEqual(state(spin), "on_board")
+
+def _rows_after(setter_name, *args, **kwargs):
+    import contextlib
+    import io
+    from radioroc.application.board_state import rows_by_address
+    from radioroc.application.channel_config import ChannelConfigOperation
+    from radioroc_client import RadiorocDevice
+    device = RadiorocDevice(None, dry_run=True)
+    device.i2c_rows = ChannelConfigOperation().load_rows()
+    with contextlib.redirect_stdout(io.StringIO()):
+        getattr(device, setter_name)(*args, **kwargs)
+    return rows_by_address(device.i2c_rows)
+
+
 
 class FakeWorker:
     def __init__(self, raise_on_apply=None):

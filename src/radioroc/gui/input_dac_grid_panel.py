@@ -5,9 +5,10 @@ panel); both stay independently usable. This one matches the vendor's
 8x8 grid, one raw 0..255 DAC code per channel, plus the shared HiZ
 impedance switch and "All ON"/"All OFF" buttons.
 
-Each value spinbox and the HiZ checkbox are coloured by whether the board
-holds them (see ``radioroc.gui.board_state_style``); ``set_board_rows``
-supplies the board table. "All ON"/"All OFF" are actions and stay unmarked.
+The value spinboxes and HiZ checkbox show the board's values and are coloured
+by whether the board holds them (see ``radioroc.gui.board_state_style``); edits
+stay amber until applied; ``reset_to_board`` discards edits. "All ON"/"All OFF"
+are actions and stay unmarked.
 """
 
 from PySide6.QtCore import QTimer
@@ -17,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from radioroc.application.channel_config import ChannelConfigOperation
-from radioroc.application.board_state import operation_matches
+from radioroc.application.board_state import board_value, operation_matches
 from radioroc.gui.board_state_style import NOT_ON_BOARD, ON_BOARD, UNKNOWN, mark_widget
 
 N_CHANNELS = 64
@@ -34,6 +35,8 @@ class InputDacGridPanel(QWidget):
         super().__init__(parent)
         self.connection_worker = connection_worker
         self._board_rows = None
+        self._edited = set()
+        self._adopting = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -49,7 +52,7 @@ class InputDacGridPanel(QWidget):
             spinbox.setValue(128)
             cell.addWidget(spinbox)
             self.channel_value_spinboxes.append(spinbox)
-            spinbox.valueChanged.connect(lambda _v, ch=channel: self._recolor_value(ch))
+            spinbox.valueChanged.connect(lambda _v, ch=channel: self._on_value_changed(ch))
             grid.addLayout(cell, row, col)
         outer.addLayout(grid)
 
@@ -58,7 +61,7 @@ class InputDacGridPanel(QWidget):
         # with ChannelConfigOperation.input_dac_impedance's low/high convention.
         self.hiz_checkbox = QCheckBox("HiZ input (need external resistor)")
         outer.addWidget(self.hiz_checkbox)
-        self.hiz_checkbox.toggled.connect(lambda _c: self._recolor_hiz())
+        self.hiz_checkbox.toggled.connect(lambda _c: self._on_hiz_changed())
 
         buttons = QHBoxLayout()
         self.all_on_button = QPushButton("All ON")
@@ -101,6 +104,18 @@ class InputDacGridPanel(QWidget):
             return UNKNOWN
         return ON_BOARD if operation_matches(self._board_rows, operation) else NOT_ON_BOARD
 
+    def _on_value_changed(self, channel):
+        if self._adopting:
+            return
+        self._edited.add(("value", channel))
+        self._recolor_value(channel)
+
+    def _on_hiz_changed(self):
+        if self._adopting:
+            return
+        self._edited.add("hiz")
+        self._recolor_hiz()
+
     def _recolor_value(self, channel):
         spin = self.channel_value_spinboxes[channel]
         mark_widget(spin, self._state_for(self._value_operation(channel, spin.value())))
@@ -109,11 +124,39 @@ class InputDacGridPanel(QWidget):
         mark_widget(self.hiz_checkbox, self._state_for(self._hiz_operation()))
 
     def set_board_rows(self, rows):
-        """Store the board's register table (or ``None``) and recolour every control."""
+        """Store the board table; adopt its values into unedited controls, then recolour."""
         self._board_rows = rows
+        self._adopting = True
+        try:
+            if rows is not None:
+                for channel, spin in enumerate(self.channel_value_spinboxes):
+                    key = ("value", channel)
+                    matches = operation_matches(rows, self._value_operation(channel, spin.value()))
+                    if key in self._edited:
+                        if matches:
+                            self._edited.discard(key)
+                    elif not matches:
+                        value = board_value(rows, "input_dac_values", range(256), channel)
+                        if value is not None:
+                            spin.setValue(value)
+                matches = operation_matches(rows, self._hiz_operation())
+                if "hiz" in self._edited:
+                    if matches:
+                        self._edited.discard("hiz")
+                elif not matches:
+                    impedance = board_value(rows, "input_dac_impedance", (False, True))
+                    if impedance is not None:
+                        self.hiz_checkbox.setChecked(not impedance)
+        finally:
+            self._adopting = False
         for channel in range(N_CHANNELS):
             self._recolor_value(channel)
         self._recolor_hiz()
+
+    def reset_to_board(self):
+        """Discard unapplied edits and show the board's values again."""
+        self._edited.clear()
+        self.set_board_rows(self._board_rows)
 
     def apply(self):
         """Validate, submit the 64-value grid plus impedance, and report

@@ -69,7 +69,8 @@ class WindowsUseSharedSelectionTests(_QtCase):
                     AcquisitionWindow):
             w = cls(selection=self.sel)
             self.assertEqual(w.channel_select.selected_channels(), [6, 32], cls.__name__)
-            self.assertTrue(w.channel_select.isHidden())
+            # Acquisition shows its grid and edits the shared selection; scan tabs hide theirs.
+            self.assertEqual(w.channel_select.isHidden(), cls is not AcquisitionWindow, cls.__name__)
             self.sel.set_channels([8, 9])
             self.assertEqual(w.channel_select.selected_channels(), [8, 9], cls.__name__)
             self.sel.set_channels([6, 32])
@@ -86,7 +87,7 @@ class WindowsUseSharedSelectionTests(_QtCase):
         self.assertEqual(hold.trigger_channel.value(), 6)
         self.assertEqual((acq.trigger_channel.value(), acq.trigger_channel_2.value()), (6, 32))
         self.assertTrue(hold.trigger_channel.isHidden())
-        self.assertTrue(acq.trigger_channel.isHidden() and acq.trigger_channel_2.isHidden())
+        self.assertFalse(acq.trigger_channel.isHidden() or acq.trigger_channel_2.isHidden())
         self.sel.set_trigger_channels(10, 11)
         self.assertEqual(hold.trigger_channel.value(), 10)
         self.assertEqual((acq.trigger_channel.value(), acq.trigger_channel_2.value()), (10, 11))

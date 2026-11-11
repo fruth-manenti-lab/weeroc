@@ -168,6 +168,49 @@ class ProbesMasksPanelTests(unittest.TestCase):
         self.assertIn(state(panel.probe_channel_spin), (None,))
 
 
+    def test_adopts_board_values_and_tracks_edits(self):
+        panel = self.make_panel()
+        state = lambda w: w.property("boardState")
+        button = panel.t1_checkboxes[9]
+        self.assertTrue(button.isChecked())
+        rows_off = _rows_after("set_mask_for_channel", 9, t1=True, enabled=False)
+        rows_on = _rows_after("set_mask_for_channel", 9, t1=True, enabled=True)
+        # Pick the variant that differs from the widget's current state.
+        from radioroc.application.board_state import operation_matches
+        panel.set_board_rows(rows_off)
+        self.assertFalse(button.isChecked())
+        self.assertEqual(state(button), "on_board")
+        self.assertEqual(panel._edited, set())
+        button.setChecked(True)
+        self.assertEqual(state(button), "not_on_board")
+        panel.set_board_rows(rows_off)
+        self.assertTrue(button.isChecked())
+        self.assertEqual(state(button), "not_on_board")
+        panel.set_board_rows(rows_on)
+        self.assertEqual(state(button), "on_board")
+        self.assertNotIn(("t1", 9), panel._edited)
+        panel.set_board_rows(rows_off)
+        self.assertFalse(button.isChecked())
+        panel.t1_enable_all_button.click()
+        self.assertIn(("t1", 9), panel._edited)
+        self.assertEqual(state(button), "not_on_board")
+        panel.reset_to_board()
+        self.assertFalse(button.isChecked())
+        self.assertEqual(state(button), "on_board")
+
+def _rows_after(setter_name, *args, **kwargs):
+    import contextlib
+    import io
+    from radioroc.application.board_state import rows_by_address
+    from radioroc.application.channel_config import ChannelConfigOperation
+    from radioroc_client import RadiorocDevice
+    device = RadiorocDevice(None, dry_run=True)
+    device.i2c_rows = ChannelConfigOperation().load_rows()
+    with contextlib.redirect_stdout(io.StringIO()):
+        getattr(device, setter_name)(*args, **kwargs)
+    return rows_by_address(device.i2c_rows)
+
+
 
 class FakeWorker:
     def __init__(self, raise_on_apply=None):

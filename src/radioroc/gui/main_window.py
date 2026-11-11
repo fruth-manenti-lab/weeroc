@@ -291,6 +291,7 @@ class MainWindow(QMainWindow):
         # (see radioroc.gui.board_state_style). Polled, because a short worker
         # operation can start and finish between two status_changed checks.
         self.board_state_bar.read_requested.connect(self._read_board_state)
+        self.board_state_bar.reset_requested.connect(self._reset_panels_to_board)
         self._board_state_serial = None
         self._board_state_connected = None
         self._board_state_timer = QTimer(self)
@@ -358,6 +359,10 @@ class MainWindow(QMainWindow):
         rows = None if state is None else rows_by_address(state.rows)
         for panel in self._board_state_panels():
             panel.set_board_rows(rows)
+
+    def _reset_panels_to_board(self):
+        for panel in self._board_state_panels():
+            panel.reset_to_board()
 
     def _read_board_state(self):
         worker = self.connection_panel.connection_worker

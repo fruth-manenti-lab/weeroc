@@ -677,17 +677,21 @@ class AcquisitionWindow(QMainWindow):
             bind_operating_threshold(self.threshold_dac, selection)
             from radioroc.gui.calibration_selection_panel import bind_shared_selection
             self._sync_shared_selection = bind_shared_selection(
-                selection, form, self.channel_select, trigger_1=self.trigger_channel, trigger_2=self.trigger_channel_2)
+                selection, form, self.channel_select, trigger_1=self.trigger_channel, trigger_2=self.trigger_channel_2,
+                editable=True)
             self.shared_selection_label = QLabel()
             self.shared_selection_label.setWordWrap(True)
             self.shared_selection_label.setAccessibleName("Shared channel selection")
             form.insertRow(0, self.shared_selection_label)
+            # The channel grid and trigger boxes below edit the shared selection
+            # directly, so the summary row would only repeat them.
+            form.setRowVisible(self.shared_selection_label, False)
 
             def _update_selection_label(*_):
                 chans = ",".join(str(c) for c in selection.channels()) or "none"
                 self.shared_selection_label.setText(
                     f"Channels {chans} \u00b7 trigger T1={selection.trigger_channel}, "
-                    f"T2={selection.trigger_channel_2} (set on the Calibration page)")
+                    f"T2={selection.trigger_channel_2} (shared with the Calibration page)")
             selection.channels_changed.connect(_update_selection_label)
             selection.triggers_changed.connect(_update_selection_label)
             _update_selection_label()

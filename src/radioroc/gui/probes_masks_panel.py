@@ -12,9 +12,9 @@ enabled -- matching the vendor app's own mask grid (its checkable
 ``channel_select``'s module docstring for the full recovery record) instead
 of a plain tickmark checkbox.
 
-Each mask cell is coloured by whether the board holds its state (see
-``radioroc.gui.board_state_style``); ``set_board_rows`` supplies the board
-table. The analog-probe selector is an action and stays unmarked.
+Mask cells show the board's states and are coloured by whether the board holds
+them (see ``radioroc.gui.board_state_style``); edits stay amber until applied;
+``reset_to_board`` discards edits. The analog-probe selector stays unmarked.
 """
 
 from PySide6.QtCore import QTimer
@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 
 from radioroc_client import N_CHANNELS
 from radioroc.application.channel_config import ChannelConfigOperation
-from radioroc.application.board_state import operation_matches
+from radioroc.application.board_state import board_value, operation_matches
 from radioroc.gui.board_state_style import NOT_ON_BOARD, ON_BOARD, UNKNOWN, mark_widget
 from radioroc.gui.channel_select import CHANNEL_BUTTON_STYLE
 
@@ -51,7 +51,7 @@ def _build_mask_grid(title, prefix, panel):
         checkbox.setStyleSheet(CHANNEL_BUTTON_STYLE)
         checkbox.setChecked(True)  # UI-only default; no read-back wiring in scope here.
         checkbox.toggled.connect(
-            lambda _checked, p=panel, pre=prefix, ch=channel: p._recolor_cell(pre, ch))
+            lambda _checked, p=panel, pre=prefix, ch=channel: p._on_cell_changed(pre, ch))
         grid.addWidget(checkbox, channel // _GRID_COLUMNS, channel % _GRID_COLUMNS)
         checkboxes.append(checkbox)
     setattr(panel, f"{prefix}_checkboxes", checkboxes)
@@ -61,9 +61,6 @@ def _build_mask_grid(title, prefix, panel):
     enable_none_button = QPushButton("Enable none")
     enable_all_button.clicked.connect(lambda: _set_all(checkboxes, True))
     enable_none_button.clicked.connect(lambda: _set_all(checkboxes, False))
-    # Each toggled cell recolours itself; this covers cells that did not change.
-    enable_all_button.clicked.connect(lambda: panel.recolor_all())
-    enable_none_button.clicked.connect(lambda: panel.recolor_all())
     buttons_row.addWidget(enable_all_button)
     buttons_row.addWidget(enable_none_button)
     outer.addLayout(buttons_row)
@@ -94,6 +91,8 @@ class ProbesMasksPanel(QWidget):
         super().__init__(parent)
         self.connection_worker = connection_worker
         self._board_rows = None
+        self._edited = set()
+        self._adopting = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -143,6 +142,12 @@ class ProbesMasksPanel(QWidget):
         """The operation whose match means this cell's state is on the board."""
         return ChannelConfigOperation(**{f"{prefix}_mask_states": {channel: checked}})
 
+    def _on_cell_changed(self, prefix, channel):
+        if self._adopting:
+            return
+        self._edited.add((prefix, channel))
+        self._recolor_cell(prefix, channel)
+
     def _recolor_cell(self, prefix, channel):
         button = getattr(self, f"{prefix}_checkboxes")[channel]
         if self._board_rows is None:
@@ -159,9 +164,32 @@ class ProbesMasksPanel(QWidget):
                 self._recolor_cell(prefix, channel)
 
     def set_board_rows(self, rows):
-        """Store the board's register table (or ``None``) and recolour every cell."""
+        """Store the board table; adopt its states into unedited cells, then recolour."""
         self._board_rows = rows
+        self._adopting = True
+        try:
+            if rows is not None:
+                for prefix in ("t1", "t2", "tq"):
+                    field = f"{prefix}_mask_states"
+                    for channel, button in enumerate(getattr(self, f"{prefix}_checkboxes")):
+                        key = (prefix, channel)
+                        matches = operation_matches(
+                            rows, self._cell_operation(prefix, channel, button.isChecked()))
+                        if key in self._edited:
+                            if matches:
+                                self._edited.discard(key)
+                        elif not matches:
+                            value = board_value(rows, field, (False, True), channel)
+                            if value is not None:
+                                button.setChecked(value)
+        finally:
+            self._adopting = False
         self.recolor_all()
+
+    def reset_to_board(self):
+        """Discard unapplied edits and show the board's states again."""
+        self._edited.clear()
+        self.set_board_rows(self._board_rows)
 
     def build_operation(self):
         operation = ChannelConfigOperation(
