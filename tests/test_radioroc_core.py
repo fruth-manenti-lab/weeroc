@@ -290,6 +290,18 @@ class RadiorocCoreTests(unittest.TestCase):
         self.assertEqual(after[0:4], bits(9, 4))
         self.assertEqual(after[4:8], before[4:8])  # internal bias bits untouched
 
+    def test_adc_custom_fpga_trigger_source_writes_101_to_word_25(self) -> None:
+        # Lab firmware update: T1-slot source 5 = "Custom FPGA trigger",
+        # word 25 bits 7-5 (string [0:3], MSB first) = 101.
+        device = RadiorocDevice(RadiorocMemoryTransport({4: bits(1)}), dry_run=False)  # type: ignore[arg-type]
+        device.load_default_config()
+        device.configure_adc_external_hold(
+            trigger_channel=5, hold_delay_ns=100, conversion_delay_ns=80, nb_acq=10,
+            trigger_type=0, trigger_source=5, rstn_manual=True, ext_trig=True,
+            peak_sensing=False, adc_window_ns=30, adc_nb_trig=1,
+        )
+        self.assertEqual(device.read_word(25), "101" + "1" + "1" + "1" + "00")
+
     def test_adc_two_channel_coincidence_bit_positions(self) -> None:
         # FPGA word layout recovered from radioroc2UI.pyc/adc.pyc disassembly
         # (start_adc): word 22 = T1 individual channel, word 23 = T2
@@ -304,7 +316,7 @@ class RadiorocCoreTests(unittest.TestCase):
         device.configure_adc_external_hold(
             trigger_channel=5, hold_delay_ns=100, conversion_delay_ns=80, nb_acq=10,
             trigger_type=1, trigger_source=3, rstn_manual=False, ext_trig=False,
-            peak_sensing=False, adc_window_ns=25, adc_nb_trig=1,
+            peak_sensing=False, adc_window_ns=30, adc_nb_trig=1,
             trigger_source_2=3, trigger_channel_2=2,
         )
         self.assertEqual(device.read_word(22)[2:8], bits(5, 6))
@@ -318,7 +330,7 @@ class RadiorocCoreTests(unittest.TestCase):
         device.configure_adc_external_hold(
             trigger_channel=5, hold_delay_ns=100, conversion_delay_ns=80, nb_acq=10,
             trigger_type=1, trigger_source=3, rstn_manual=False, ext_trig=False,
-            peak_sensing=False, adc_window_ns=25, adc_nb_trig=1,
+            peak_sensing=False, adc_window_ns=30, adc_nb_trig=1,
         )
         self.assertEqual(device.read_word(23), "00000000")
         self.assertEqual(device.read_word(30)[4:7], bits(0, 3))
@@ -327,7 +339,7 @@ class RadiorocCoreTests(unittest.TestCase):
             device.configure_adc_external_hold(
                 trigger_channel=5, hold_delay_ns=100, conversion_delay_ns=80, nb_acq=10,
                 trigger_type=1, trigger_source=3, rstn_manual=False, ext_trig=False,
-                peak_sensing=True, adc_window_ns=25, adc_nb_trig=1,
+                peak_sensing=True, adc_window_ns=30, adc_nb_trig=1,
                 trigger_source_2=3, trigger_channel_2=2,
             )
 

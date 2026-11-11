@@ -297,7 +297,8 @@ class HoldScanConfig:
     - `trigger_type` (`int`): Vendor ADC trigger type code (`0` simple, `1`
       2-channel coincidence, `2` time window).
     - `trigger_source` (`int`): Vendor ADC first coincidence-input code
-      (`0` NORT1, `1` NORT2, `2` NORTQ, `3` individual channel, `4` OR64).
+      (`0` NORT1, `1` NORT2, `2` NORTQ, `3` individual channel, `4` OR64,
+      `5` custom FPGA trigger, added in the lab firmware update).
       This is the vendor GUI's "T1" combo box in the ADC DAQ tab; the name
       predates recognizing it as one of two independent coincidence inputs.
     - `trigger_channel` (`int`): Channel used when `trigger_source == 3`.
@@ -467,7 +468,8 @@ class AcquisitionConfig:
     - `trigger_type` (`int`): Vendor ADC trigger type code (`0` simple, `1`
       2-channel coincidence, `2` time window).
     - `trigger_source` (`int`): Vendor ADC first coincidence-input code
-      (`0` NORT1, `1` NORT2, `2` NORTQ, `3` individual channel, `4` OR64).
+      (`0` NORT1, `1` NORT2, `2` NORTQ, `3` individual channel, `4` OR64,
+      `5` custom FPGA trigger, added in the lab firmware update).
       This is the vendor GUI's "T1" combo box in the ADC DAQ tab; the name
       predates recognizing it as one of two independent coincidence inputs.
     - `trigger_source_2` (`int`): Vendor ADC second coincidence-input code,
@@ -2602,7 +2604,8 @@ class RadiorocDevice:
           `1` 2-channel coincidence, `2` time window).
         - `trigger_source` (`int`): Vendor ADC first coincidence-input code
           (`0` NORT1, `1` NORT2, `2` NORTQ, `3` individual channel, `4`
-          OR64). This is the vendor GUI's "T1" combo box in the ADC DAQ tab;
+          OR64, `5` custom FPGA trigger from the lab firmware update; T1
+          slot only, written to word 25 bits 7-5). This is the vendor GUI's "T1" combo box in the ADC DAQ tab;
           the name predates recognizing it as one of two independent
           coincidence inputs, recovered from `radioroc2UI.pyc`/`adc.pyc`
           disassembly (see IMPLEMENTATION_STATUS.md RADIOROC 39).
