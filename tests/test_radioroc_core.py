@@ -298,7 +298,7 @@ class RadiorocCoreTests(unittest.TestCase):
         device.configure_adc_external_hold(
             trigger_channel=5, hold_delay_ns=100, conversion_delay_ns=80, nb_acq=10,
             trigger_type=0, trigger_source=5, rstn_manual=True, ext_trig=True,
-            peak_sensing=False, adc_window_ns=25, adc_nb_trig=1,
+            peak_sensing=False, adc_window_ns=30, adc_nb_trig=1,
         )
         self.assertEqual(device.read_word(25), "101" + "1" + "1" + "1" + "00")
 
@@ -316,7 +316,7 @@ class RadiorocCoreTests(unittest.TestCase):
         device.configure_adc_external_hold(
             trigger_channel=5, hold_delay_ns=100, conversion_delay_ns=80, nb_acq=10,
             trigger_type=1, trigger_source=3, rstn_manual=False, ext_trig=False,
-            peak_sensing=False, adc_window_ns=25, adc_nb_trig=1,
+            peak_sensing=False, adc_window_ns=30, adc_nb_trig=1,
             trigger_source_2=3, trigger_channel_2=2,
         )
         self.assertEqual(device.read_word(22)[2:8], bits(5, 6))
@@ -330,7 +330,7 @@ class RadiorocCoreTests(unittest.TestCase):
         device.configure_adc_external_hold(
             trigger_channel=5, hold_delay_ns=100, conversion_delay_ns=80, nb_acq=10,
             trigger_type=1, trigger_source=3, rstn_manual=False, ext_trig=False,
-            peak_sensing=False, adc_window_ns=25, adc_nb_trig=1,
+            peak_sensing=False, adc_window_ns=30, adc_nb_trig=1,
         )
         self.assertEqual(device.read_word(23), "00000000")
         self.assertEqual(device.read_word(30)[4:7], bits(0, 3))
@@ -339,7 +339,7 @@ class RadiorocCoreTests(unittest.TestCase):
             device.configure_adc_external_hold(
                 trigger_channel=5, hold_delay_ns=100, conversion_delay_ns=80, nb_acq=10,
                 trigger_type=1, trigger_source=3, rstn_manual=False, ext_trig=False,
-                peak_sensing=True, adc_window_ns=25, adc_nb_trig=1,
+                peak_sensing=True, adc_window_ns=30, adc_nb_trig=1,
                 trigger_source_2=3, trigger_channel_2=2,
             )
 
