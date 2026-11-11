@@ -70,7 +70,7 @@ def build_parser(preset: dict[str, object] | None = None, preset_path: Path | No
     parser.add_argument("--external-trigger", action="store_true", help="Use external ASIC acquisition trigger bit")
     parser.add_argument("--adc-trigger-type", type=int, help="Vendor ADC trigger type code")
     parser.add_argument("--adc-trigger-source", type=int, help="Vendor ADC trigger source code")
-    parser.add_argument("--adc-window-ns", type=int, help="ADC coincidence/window width; divisible by 5 ns")
+    parser.add_argument("--adc-window-ns", type=int, help="ADC coincidence/window width; divisible by 10 ns")
     parser.add_argument("--adc-nb-trig", type=int, help="ADC time-window trigger count")
     parser.add_argument("--rstn-manual", action="store_true", help="Set vendor ADC reset-n manual bit")
     parser.add_argument("--timeout-s", type=float, help="Timeout per ADC batch")

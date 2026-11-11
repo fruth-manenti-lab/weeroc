@@ -427,8 +427,8 @@ class RadiorocOps:
             raise ValueError("trigger_type must be in range 0..3")
         if not 0 <= trigger_source <= 7:
             raise ValueError("trigger_source must be in range 0..7")
-        if adc_window_ns < 0 or adc_window_ns % 5 != 0:
-            raise ValueError("adc_window_ns must be non-negative and divisible by 5")
+        if adc_window_ns < 0 or adc_window_ns % 10 != 0:
+            raise ValueError("adc_window_ns must be non-negative and divisible by 10")
         if not 0 <= adc_nb_trig <= 63:
             raise ValueError("adc_nb_trig must be in range 0..63")
 
@@ -447,7 +447,7 @@ class RadiorocOps:
         w22 = "00" + bits(trigger_channel, 6)
         saved_w23 = self.read_word(23) if (peak_sensing and not self.dry_run) else "00000000"
         w23 = "01" + saved_w23[2:] if peak_sensing else "00000000"
-        w24 = bits(adc_window_ns // 5, 8)
+        w24 = bits(adc_window_ns // 10, 8)
         peak_or_ext_trig = peak_sensing or ext_trig
         w25 = bits(trigger_source, 3) + str(int(rstn_manual)) + "1" + str(int(peak_or_ext_trig)) + bits(trigger_type, 2)
         w26 = ext_hold_bits[4:]
@@ -908,7 +908,7 @@ def main() -> None:
     parser.add_argument("--scan-all-sync-io-muxes", action="store_true", help="Cycle mux indices 0..7 on every FPGA IO while pulsing the synchro trigger.")
     parser.add_argument("--adc-trigger-type", type=int, default=0, help="Vendor ADC trigger type code; default 0=simple trigger.")
     parser.add_argument("--adc-trigger-source", type=int, default=3, help="Vendor ADC T1 source code; default 3=individual channel.")
-    parser.add_argument("--adc-window-ns", type=int, default=50, help="ADC trigger coincidence/window width; must be divisible by 5 ns.")
+    parser.add_argument("--adc-window-ns", type=int, default=50, help="ADC trigger coincidence/window width; must be divisible by 10 ns.")
     parser.add_argument("--adc-nb-trig", type=int, default=1, help="ADC time-window trigger count.")
     parser.add_argument("--adc-rstn-manual", action="store_true", help="Set vendor ADC Reset_n manual bit.")
     parser.add_argument("--adc-ext-trig", action="store_true", help="Use external ASIC acquisition trigger in ADC setup.")

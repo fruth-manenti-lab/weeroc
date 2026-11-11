@@ -166,7 +166,7 @@ def build_parser(preset: dict[str, object] | None = None, preset_path: Path | No
                          help="Vendor ADC second coincidence-input code (T2 slot)")
     parser.add_argument("--trigger-channel-2", type=int,
                          help="Second coincidence channel, used when --adc-trigger-source-2 selects Individual (3)")
-    parser.add_argument("--adc-window-ns", type=int, help="ADC coincidence/window width")
+    parser.add_argument("--adc-window-ns", type=int, help="ADC coincidence/window width; divisible by 10 ns")
     parser.add_argument("--adc-nb-trig", type=int, help="ADC time-window trigger count")
     parser.add_argument("--rstn-manual", action="store_true", help="Set vendor ADC reset-n manual bit")
     parser.add_argument("--synchro-trigger", action="store_true", help="Pulse FPGA synchro trigger for each ADC batch")

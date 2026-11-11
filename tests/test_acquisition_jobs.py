@@ -363,7 +363,7 @@ class AcquisitionJobTests(unittest.TestCase):
 
     def test_invalid_configuration_has_no_hardware_or_files(self):
         for changes in ({"batches": 0}, {"acquisitions_per_batch": 0}, {"acquisitions_per_batch": 256},
-                        {"adc_window_ns": 3}, {"timeout_s": 0}, {"trigger_channel": 999},
+                        {"adc_window_ns": 3}, {"adc_window_ns": 25}, {"timeout_s": 0}, {"trigger_channel": 999},
                         {"channels": [70]}, {"hold_delay_ns": 3}, {"start_batch": -1},
                         # A real bug found live (RADIOROC 40): a trigger channel
                         # absent from `channels` used to pass validation, then

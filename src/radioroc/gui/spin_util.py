@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, QTimer
-from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QComboBox
+from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QComboBox, QSpinBox
 
 
 class _SelectAllOnFocus(QObject):
@@ -12,6 +12,32 @@ class _SelectAllOnFocus(QObject):
             # Deferred so the mouse press that gave focus does not reset the selection.
             QTimer.singleShot(0, obj.selectAll)
         return False
+
+
+class MultipleOfSpinBox(QSpinBox):
+    """Integer spin box whose value is always a multiple of ``step`` (rounded to nearest).
+
+    Typed and programmatic values snap, so the hardware's granularity (for
+    example the 10 ns ADC window, 100 MHz clock) can never be violated.
+    """
+
+    def __init__(self, step, parent=None):
+        super().__init__(parent)
+        self._multiple = step
+        self.setSingleStep(step)
+
+    def _snap(self, value):
+        snapped = ((int(value) + self._multiple // 2) // self._multiple) * self._multiple
+        return max(self.minimum(), min(self.maximum(), snapped))
+
+    def setValue(self, value):
+        super().setValue(self._snap(value))
+
+    def valueFromText(self, text):
+        try:
+            return self._snap(int(text.strip()))
+        except ValueError:
+            return self.value()
 
 
 def select_all_on_focus(spin):

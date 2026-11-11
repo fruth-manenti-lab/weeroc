@@ -25,7 +25,7 @@ from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.application.hold_scan import HoldScanJob, HoldScanJobConfig
 from radioroc.application.hold_scan_worker import HoldScanWorker
 from radioroc.data.hold_reader import read_hold_run, read_hold_samples
-from radioroc.gui.spin_util import select_all_on_focus
+from radioroc.gui.spin_util import MultipleOfSpinBox, select_all_on_focus
 from radioroc.data.hold_profile import fit_hold_profile
 from radioroc.gui.layout_util import fit_controls_pane, fit_special_text, wrap_plot_title
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
@@ -200,7 +200,9 @@ class HoldScanWindow(QMainWindow):
         self.trigger_source = _integer(0, 7, 3)
         self.trigger_channel_2 = _integer(0, 63, 5)
         self.trigger_source_2 = _integer(0, 7, 0)
-        self.adc_window_ns = _integer(0, 10000, 50)
+        self.adc_window_ns = select_all_on_focus(MultipleOfSpinBox(10))
+        self.adc_window_ns.setRange(0, 10000)
+        self.adc_window_ns.setValue(50)
         self.adc_nb_trig = _integer(0, 63, 1)
         self.rstn_manual = QCheckBox("Reset-n manual")
         self.external_trigger = QCheckBox("Use external ASIC acquisition trigger")
@@ -402,7 +404,7 @@ class HoldScanWindow(QMainWindow):
                           "pulses are smaller), 0 to 150 ns in 10 ns steps, 100 events per point (a few minutes). "
                           "Run it once per plint by changing Trigger channel (T1) on the Calibration page.")
         self.hint.attach(self.adc_window_ns, "Length of the ADC's acquisition window, in "
-                          "nanoseconds, in external hold mode.")
+                          "nanoseconds, in external hold mode. Multiples of 10 ns (100 MHz clock).")
         self.hint.attach(self.adc_nb_trig, "Number of ADC triggers to accept per acquisition "
                           "window, in external hold mode.")
         self.hint.attach(self.rstn_manual, "Drive the ADC reset line manually instead of "

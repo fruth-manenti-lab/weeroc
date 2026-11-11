@@ -316,7 +316,7 @@ class HoldScanConfig:
       Mutually exclusive with `trigger_source_2 == 3`: both reuse FPGA word
       23, and this vendor-recovered register layout has never been observed
       combining them.
-    - `adc_window_ns` (`int`): ADC coincidence/window width, divisible by 5 ns.
+    - `adc_window_ns` (`int`): ADC coincidence/window width, divisible by 10 ns.
     - `adc_nb_trig` (`int`): ADC time-window trigger count.
     - `timeout_s` (`float`): Per-batch ADC timeout.
     - `synchro_trigger` (`bool`): Pulse FPGA synchro trigger per ADC batch.
@@ -420,8 +420,8 @@ class HoldScanConfig:
                 "trigger_source_2 == 3 (a second individual coincidence channel) and "
                 "peak_sensing cannot be combined: both write FPGA word 23"
             )
-        if self.adc_window_ns < 0 or self.adc_window_ns % 5 != 0:
-            raise ValueError("adc_window_ns must be non-negative and divisible by 5")
+        if self.adc_window_ns < 0 or self.adc_window_ns % 10 != 0:
+            raise ValueError("adc_window_ns must be non-negative and divisible by 10")
         if not 0 <= self.adc_nb_trig <= 63:
             raise ValueError("adc_nb_trig must be in range 0..63")
         if self.timeout_s <= 0:
@@ -480,7 +480,7 @@ class AcquisitionConfig:
       currently *unmasked* channel's T1 output, not a second specific
       channel.
     - `trigger_channel_2` (`int`): Channel used when `trigger_source_2 == 3`.
-    - `adc_window_ns` (`int`): ADC coincidence/window width, divisible by 5 ns.
+    - `adc_window_ns` (`int`): ADC coincidence/window width, divisible by 10 ns.
     - `adc_nb_trig` (`int`): ADC time-window trigger count.
     - `rstn_manual` (`bool`): Vendor ADC reset-n manual bit.
     - `external_trigger` (`bool`): Use the external ASIC acquisition trigger (the board's
@@ -602,8 +602,8 @@ class AcquisitionConfig:
                 "trigger_source_2 == 3 (a second individual coincidence channel) and "
                 "peak_sensing cannot be combined: both write FPGA word 23"
             )
-        if self.adc_window_ns < 0 or self.adc_window_ns % 5 != 0:
-            raise ValueError("adc_window_ns must be non-negative and divisible by 5")
+        if self.adc_window_ns < 0 or self.adc_window_ns % 10 != 0:
+            raise ValueError("adc_window_ns must be non-negative and divisible by 10")
         if not 0 <= self.adc_nb_trig <= 63:
             raise ValueError("adc_nb_trig must be in range 0..63")
 

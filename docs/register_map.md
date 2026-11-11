@@ -101,7 +101,7 @@ default `00011111` (probe enables already on; the per-channel `(ch,66)` nibble c
 | 21 | events per batch, 1..255 |
 | 22 | `[5:0]` trigger channel; bit 7 = synchro-trigger pulse strobe |
 | 23 | `[5:0]` second coincidence channel; bit 6 = peak-sensing flag |
-| 24 | ADC window / 5 ns |
+| 24 | ADC window / 10 ns (100 MHz clock) |
 | 25 | `[7:5]` trigger source, `[4]` reset-n manual, `[3]` = 1, `[2]` peak-or-external trigger, `[1:0]` trigger type |
 | 26 | hold code `[7:0]`; hold code = hold ns / 5, 12 bits |
 | 27 | `[5:0]` number of triggers in window |
@@ -128,7 +128,7 @@ Per event, 64 channels in order 0..63, **4 bytes each: LG (2 bytes big endian) t
 - **Mask bits are enables**: `(ch,6)` bits 4/3/2 = 1 let the channel trigger; the "mask all but the trigger channel" step writes 0 elsewhere.
 - **HG sits in the low nibble, LG in the high nibble** of `(ch,2)` and `(ch,3)`; gain rises with code, but the capacitor in the gain formula uses `16 - code`.
 - **Threshold DACs are split across four rows** (`(65,1..4)`); the order of the sub-fields is easy to swap. Check against the defaults (512 each).
-- **Hold delay**: external hold code = ns / 5; conversion delay = ns / 40; ADC window = ns / 5; delay slope x 0.85 ns.
+- **Hold delay**: external hold code = ns / 5; conversion delay = ns / 40; ADC window = ns / 10; delay slope x 0.85 ns.
 - **Count word**: events = word / 256, not the raw word.
 - **HG gain 15 = 8x default (8)** in V/V: 5 pF / 62.5 fF is 80, against 10 at code 8.
 - **Generator note:** `AMPL` only sets the amplitude around a fixed DC offset; use `LOLVL`/`HILVL` for a pulse that idles at 0 V.

@@ -50,7 +50,7 @@ from radioroc.application.acquisition_worker import AcquisitionWorker
 from radioroc.application.connection_worker import ConnectionWorker
 from radioroc.data.acquisition_reader import read_acquisition_run
 from radioroc.data.vendor_acquisition import read_vendor_acquisition_file
-from radioroc.gui.spin_util import select_all_on_focus
+from radioroc.gui.spin_util import MultipleOfSpinBox, select_all_on_focus
 from radioroc.gui.layout_util import fit_controls_pane, fit_special_text, wrap_plot_title
 from radioroc.gui.channel_config_panel import ChannelConfigPanel
 from radioroc.gui.channel_select import ChannelSelectGrid
@@ -463,8 +463,9 @@ class AcquisitionWindow(QMainWindow):
         self.trigger_source_2 = QComboBox()
         self.trigger_source_2.addItems(["NORT1", "NORT2", "NORTQ", "Individual trigger", "OR64 (FPGA)"])
         self.trigger_channel_2 = _integer(0, 63, 5)
-        self.adc_window_ns = _integer(0, 10000, 50)
-        self.adc_window_ns.setSingleStep(5)
+        self.adc_window_ns = select_all_on_focus(MultipleOfSpinBox(10))
+        self.adc_window_ns.setRange(0, 10000)
+        self.adc_window_ns.setValue(50)
         self.adc_nb_trig = _integer(0, 63, 1)
         def add_section(title, rows):
             form.addRow(_section_header(title))

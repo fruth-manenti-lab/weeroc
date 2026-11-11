@@ -170,14 +170,21 @@ class AcquisitionGuiTests(unittest.TestCase):
         self.window.trigger_source.setCurrentIndex(3)  # "Individual trigger"
         self.window.trigger_channel_2.setValue(5)
         self.window.trigger_source_2.setCurrentIndex(3)  # "Individual trigger"
-        self.window.adc_window_ns.setValue(25)
+        self.window.adc_window_ns.setValue(30)
         operation = self.window.operation()
         self.assertEqual(operation.acquisition.trigger_type, 1)
         self.assertEqual(operation.acquisition.trigger_channel, 2)
         self.assertEqual(operation.acquisition.trigger_source, 3)
         self.assertEqual(operation.acquisition.trigger_channel_2, 5)
         self.assertEqual(operation.acquisition.trigger_source_2, 3)
-        self.assertEqual(operation.acquisition.adc_window_ns, 25)
+        self.assertEqual(operation.acquisition.adc_window_ns, 30)
+
+    def test_adc_window_snaps_to_10_ns(self):
+        self.window.adc_window_ns.setValue(25)
+        self.assertEqual(self.window.adc_window_ns.value(), 30)
+        self.window.adc_window_ns.setValue(24)
+        self.assertEqual(self.window.adc_window_ns.value(), 20)
+        self.assertEqual(self.window.adc_window_ns.singleStep(), 10)
 
     def test_optional_fields_default_to_keep_current(self):
         operation = self.window.operation()

@@ -340,7 +340,7 @@ class HoldScanJobTests(unittest.TestCase):
 
     def test_invalid_configuration_has_no_hardware_or_files(self):
         for changes in ({"mode": "bogus"}, {"hold_step": 0}, {"acquisitions": 0},
-                        {"acquisitions": 256}, {"adc_window_ns": 3}, {"sync_io": "bogus"},
+                        {"acquisitions": 256}, {"adc_window_ns": 3}, {"adc_window_ns": 25}, {"sync_io": "bogus"},
                         {"timeout_s": 0}, {"trigger_channel": 999}, {"channels": [70]},
                         # Same-shaped bug as AcquisitionConfig (RADIOROC 40):
                         # application/hold_scan.py unconditionally unmasks
