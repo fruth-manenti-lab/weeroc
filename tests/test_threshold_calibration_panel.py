@@ -117,6 +117,30 @@ class ThresholdCalibrationPanelTests(unittest.TestCase):
         hint.eventFilter(panel.apply_button, QEvent(QEvent.Type.Enter))
         self.assertNotEqual(window.statusBar().currentMessage(), "default")
 
+    def test_board_state_colouring(self):
+        from radioroc.application.board_state import rows_by_address
+        from radioroc.application.channel_config import ChannelConfigOperation
+        panel = self.make_panel()
+        rows = rows_by_address(ChannelConfigOperation().load_rows())
+        state = lambda w: w.property("boardState")
+        self.assertIn(state(panel.t1_spinboxes[3]), (None, "unknown"))
+        panel.set_board_rows(rows)
+        for spin in panel.t1_spinboxes + panel.t2_spinboxes:
+            self.assertEqual(state(spin), "on_board")
+        panel.t1_spinboxes[3].setValue(panel.t1_spinboxes[3].value() ^ 1)
+        self.assertEqual(state(panel.t1_spinboxes[3]), "not_on_board")
+        self.assertEqual(state(panel.t1_spinboxes[4]), "on_board")
+        self.assertEqual(state(panel.t2_spinboxes[3]), "on_board")
+        panel.t1_spinboxes[3].setValue(panel.t1_spinboxes[3].value() ^ 1)
+        self.assertEqual(state(panel.t1_spinboxes[3]), "on_board")
+        panel.t2_set_all_spinbox.setValue(panel.t2_spinboxes[0].value() ^ 1)
+        panel.t2_set_all_button.click()
+        self.assertTrue(all(state(s) == "not_on_board" for s in panel.t2_spinboxes))
+        panel.set_board_rows(None)
+        self.assertEqual(state(panel.t1_spinboxes[0]), "unknown")
+        self.assertEqual(state(panel.t2_spinboxes[0]), "unknown")
+
+
 
 class FakeWorker:
     def __init__(self, raise_on_apply=None):

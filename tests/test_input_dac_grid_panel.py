@@ -128,6 +128,33 @@ class InputDacGridPanelTests(unittest.TestCase):
         hint.eventFilter(panel.apply_button, QEvent(QEvent.Type.Enter))
         self.assertNotEqual(window.statusBar().currentMessage(), "default")
 
+    def test_board_state_colouring(self):
+        from radioroc.application.board_state import operation_matches, rows_by_address
+        from radioroc.application.channel_config import ChannelConfigOperation
+        panel = self.make_panel()
+        rows = rows_by_address(ChannelConfigOperation().load_rows())
+        state = lambda w: w.property("boardState")
+        # Find the board default for channel 0's value and for impedance.
+        default = next(v for v in range(256)
+                       if operation_matches(rows, panel._value_operation(0, v)))
+        for spin in panel.channel_value_spinboxes:
+            spin.setValue(default)
+        default_hiz = not operation_matches(rows, ChannelConfigOperation(input_dac_impedance=True))
+        panel.hiz_checkbox.setChecked(default_hiz)
+        self.assertIn(state(panel.channel_value_spinboxes[2]), (None, "unknown"))
+        panel.set_board_rows(rows)
+        self.assertTrue(all(state(s) == "on_board" for s in panel.channel_value_spinboxes))
+        self.assertEqual(state(panel.hiz_checkbox), "on_board")
+        panel.channel_value_spinboxes[2].setValue((default + 1) % 256)
+        self.assertEqual(state(panel.channel_value_spinboxes[2]), "not_on_board")
+        self.assertEqual(state(panel.channel_value_spinboxes[3]), "on_board")
+        panel.hiz_checkbox.setChecked(not default_hiz)
+        self.assertEqual(state(panel.hiz_checkbox), "not_on_board")
+        panel.set_board_rows(None)
+        self.assertEqual(state(panel.channel_value_spinboxes[0]), "unknown")
+        self.assertEqual(state(panel.hiz_checkbox), "unknown")
+
+
 
 class FakeWorker:
     def __init__(self, raise_on_apply=None):

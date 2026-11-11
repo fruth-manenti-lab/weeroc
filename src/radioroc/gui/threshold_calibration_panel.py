@@ -3,6 +3,9 @@
 Sibling of ``InputDacGridPanel``/``ProbesMasksPanel``: same 8x8 grid shape,
 one ``QSpinBox`` per channel, plus a per-grid "Set all" control and an
 Apply button.
+
+Each spinbox is coloured by whether the board holds its value (see
+``radioroc.gui.board_state_style``); ``set_board_rows`` supplies the board table.
 """
 
 from PySide6.QtCore import QTimer
@@ -13,6 +16,8 @@ from PySide6.QtWidgets import (
 
 from radioroc_client import N_CHANNELS
 from radioroc.application.channel_config import ChannelConfigOperation
+from radioroc.application.board_state import operation_matches
+from radioroc.gui.board_state_style import NOT_ON_BOARD, ON_BOARD, UNKNOWN, mark_widget
 
 _GRID_COLUMNS = 8
 
@@ -32,6 +37,8 @@ def _build_dac_grid(title, prefix, panel):
         cell.addWidget(spinbox)
         grid.addLayout(cell, channel // _GRID_COLUMNS, channel % _GRID_COLUMNS)
         spinboxes.append(spinbox)
+        spinbox.valueChanged.connect(
+            lambda _value, p=panel, pre=prefix, ch=channel: p._recolor_cell(pre, ch))
     setattr(panel, f"{prefix}_spinboxes", spinboxes)
 
     set_all_row = QHBoxLayout()
@@ -68,6 +75,7 @@ class ThresholdCalibrationPanel(QWidget):
     def __init__(self, connection_worker=None, parent=None):
         super().__init__(parent)
         self.connection_worker = connection_worker
+        self._board_rows = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -91,6 +99,29 @@ class ThresholdCalibrationPanel(QWidget):
         self.timer = QTimer(self)
         self.timer.setInterval(100)
         self.timer.timeout.connect(self._poll)
+
+    @staticmethod
+    def _cell_operation(prefix, channel, value):
+        """The operation whose match means this cell's value is on the board."""
+        field = "t1_calibration_dac_values" if prefix == "t1" else "t2_calibration_dac_values"
+        return ChannelConfigOperation(**{field: {channel: value}})
+
+    def _recolor_cell(self, prefix, channel):
+        spin = getattr(self, f"{prefix}_spinboxes")[channel]
+        if self._board_rows is None:
+            state = UNKNOWN
+        else:
+            state = ON_BOARD if operation_matches(
+                self._board_rows, self._cell_operation(prefix, channel, spin.value())
+            ) else NOT_ON_BOARD
+        mark_widget(spin, state)
+
+    def set_board_rows(self, rows):
+        """Store the board's register table (or ``None``) and recolour every cell."""
+        self._board_rows = rows
+        for prefix in ("t1", "t2"):
+            for channel in range(N_CHANNELS):
+                self._recolor_cell(prefix, channel)
 
     def build_operation(self):
         operation = ChannelConfigOperation(

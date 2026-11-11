@@ -44,6 +44,67 @@ class MainPanelTests(unittest.TestCase):
         widget.deleteLater()
         self.app.processEvents()
 
+    @staticmethod
+    def board_rows(**setters):
+        """Packaged defaults, optionally changed by real setter calls."""
+        import contextlib
+        import io
+        from radioroc_client import RadiorocDevice
+        from radioroc.application.board_state import rows_by_address
+        from radioroc.application.channel_config import ChannelConfigOperation
+        device = RadiorocDevice(None, dry_run=True)
+        device.i2c_rows = ChannelConfigOperation().load_rows()
+        with contextlib.redirect_stdout(io.StringIO()):
+            for name, args in setters.items():
+                getattr(device, name)(*args)
+        return rows_by_address(device.i2c_rows)
+
+    def test_board_state_colours_follow_the_channel_on_screen(self):
+        panel = self.make_panel()
+        self.assertEqual(panel.preamp_gain_spin.property("boardState"), "unknown")
+        self.assertFalse(panel.load_from_board_button.isEnabled())
+
+        panel.set_board_rows(self.board_rows(set_trigger_preamp_gain_for_channel=(7, 21)))
+        self.assertEqual(panel.preamp_gain_spin.property("boardState"), "on_board")  # ch 0
+        self.assertEqual(panel.t1_threshold_spin.property("boardState"), "on_board")
+        self.assertIn("1 channel(s): 7", panel.board_diff_label.text())
+
+        panel.channel_spin.setValue(7)
+        self.assertEqual(panel.preamp_gain_spin.value(), 8)
+        self.assertEqual(panel.preamp_gain_spin.property("boardState"), "not_on_board")
+        self.assertIn("Board holds: 21", panel.preamp_gain_spin.toolTip())
+        self.assertEqual(panel.high_gain_spin.property("boardState"), "on_board")
+
+        panel.preamp_gain_spin.setValue(21)
+        self.assertEqual(panel.preamp_gain_spin.property("boardState"), "on_board")
+        self.assertIn("all 64 channels matches", panel.board_diff_label.text())
+
+        panel.t1_threshold_spin.setValue(300)
+        self.assertEqual(panel.t1_threshold_spin.property("boardState"), "not_on_board")
+        self.assertIn("Threshold for trigger T1", panel.t1_threshold_spin.toolTip())
+
+        panel.set_board_rows(None)
+        self.assertEqual(panel.preamp_gain_spin.property("boardState"), "unknown")
+        self.assertEqual(panel.board_diff_label.text(), "")
+
+    def test_load_from_board_fills_every_channel_and_common_control(self):
+        panel = self.make_panel()
+        panel.set_board_rows(self.board_rows(set_trigger_preamp_gain_for_channel=(7, 21),
+                                             set_high_gain_for_channel=(30, 3),
+                                             set_t2_threshold_dac=(300,),
+                                             set_trigger_selection=("local_t2",)))
+        panel.load_from_board()
+        self.assertEqual(panel.t2_threshold_spin.value(), 300)
+        self.assertEqual(panel.trigger_selection_combo.currentText(), "Local T2")
+        panel.channel_spin.setValue(7)
+        self.assertEqual(panel.preamp_gain_spin.value(), 21)
+        panel.channel_spin.setValue(30)
+        self.assertEqual(panel.high_gain_spin.value(), 3)
+        self.assertIn("all 64 channels matches", panel.board_diff_label.text())
+        operation = panel.build_operation()
+        self.assertEqual(operation.trigger_preamp_gain_values[7], 21)
+        self.assertEqual(operation.t2_threshold_dac, 300)
+
     def test_threshold_defaults_match_the_packaged_default_config(self):
         import csv
         from radioroc_client import DEFAULT_CONFIG

@@ -24,6 +24,7 @@ from .acquisition_worker import (
 )
 from .autocalibration import AutocalibrationJob, AutocalibrationJobConfig
 from .channel_config import ChannelConfigOperation, apply_channel_config
+from .board_state import READ_BACK, WRITTEN, BoardRegisterState
 from .chip_init import ChipInitOperation, run_chip_init
 from .hold_scan import HoldScanJob, HoldScanJobConfig
 from .jobs import CancellationToken, JobBusyError, JobCancelled, JobEvent
@@ -81,6 +82,13 @@ def _verification_problem(verification: dict) -> str:
     return " - ".join(parts)
 
 
+_BOARD_STATE_COMMANDS = frozenset({
+    "connect", "disconnect", "apply_channel_config", "chip_init", "read_all_registers",
+    "write_raw_register", "run_threshold", "run_hold_scan", "run_scurve",
+    "run_autocalibration", "run_acquisition",
+})
+
+
 class ConnectionWorker:
     """A persistent command worker for discovery and one selected session."""
 
@@ -134,6 +142,9 @@ class ConnectionWorker:
         self._chip_init_outcome = None
         self._raw_registers_rows = None
         self._raw_register_write_result = None
+        self._board_rows = None  # tuple[I2CRow, ...] the board is known to hold, else None
+        self._board_source = None
+        self._board_serial = 0
         self._hold_shutdown_for_job_fault = False
         self._pending = False
         self._queued_connect = None
@@ -254,6 +265,27 @@ class ConnectionWorker:
         """Rows from the most recent `read_all_registers`, if any."""
         with self._lock:
             return deepcopy(self._raw_registers_rows)
+
+    def board_state_snapshot(self):
+        """The ASIC register table the board is known to hold, or `None`.
+
+        Known only after a full read-back (`read_all_registers`) or a
+        full-table write (apply defaults / load config); afterwards it follows
+        every write this worker makes.  Connect, disconnect, an FPGA
+        re-initialisation, or any failed or faulted operation make it unknown
+        again.  `serial` increases on every change, including becoming
+        unknown (see `board_state_serial`).
+        """
+        with self._lock:
+            if self._board_rows is None:
+                return None
+            return BoardRegisterState(deepcopy(self._board_rows), self._board_serial,
+                                      self._board_source)
+
+    def board_state_serial(self) -> int:
+        """Cheap change counter for `board_state_snapshot`, for GUI polling."""
+        with self._lock:
+            return self._board_serial
 
     def raw_register_write_snapshot(self):
         """Outcome of the most recent `write_raw_register`, if any."""
@@ -641,7 +673,9 @@ class ConnectionWorker:
                 self._run_autocalibration(argument)
             elif command == "run_acquisition":
                 self._run_acquisition(argument)
-            elif command == "shutdown":
+            if command in _BOARD_STATE_COMMANDS:
+                self._sync_board_state(command, argument)
+            if command == "shutdown":
                 with self._lock:
                     hold = self._hold_shutdown_for_job_fault
                     self._hold_shutdown_for_job_fault = False
@@ -656,6 +690,30 @@ class ConnectionWorker:
                     return
                 with self._lock:
                     self._shutdown_queued = False
+
+    def _sync_board_state(self, command, argument):
+        """Update the known board register table after `command` finished."""
+
+        def flag(name):
+            return bool(getattr(argument, name, False)
+                        or getattr(getattr(argument, "config", None), name, False))
+
+        with self._lock:
+            device = self._device
+            ok = self._state == "connected" and self._fault is None and device is not None
+            rows, source = None, None
+            if ok and command == "read_all_registers":
+                rows, source = device.i2c_rows, READ_BACK
+            elif ok and flag("apply_defaults"):
+                rows, source = device.i2c_rows, WRITTEN
+            elif ok and flag("initialize_fpga"):
+                rows = None  # unknown whether an FPGA re-init resets the ASIC
+            elif ok and command != "connect" and self._board_rows is not None:
+                rows, source = device.i2c_rows, WRITTEN
+            new = None if rows is None else tuple(deepcopy(list(rows)))
+            if new != self._board_rows or source != self._board_source:
+                self._board_rows, self._board_source = new, source
+                self._board_serial += 1
 
     def _take_queued_connect(self):
         """Hand a connect queued during discovery straight to the worker.

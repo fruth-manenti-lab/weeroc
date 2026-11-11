@@ -130,6 +130,44 @@ class ProbesMasksPanelTests(unittest.TestCase):
         hint.eventFilter(panel.apply_button, QEvent(QEvent.Type.Enter))
         self.assertNotEqual(window.statusBar().currentMessage(), "default")
 
+    def test_board_state_colouring(self):
+        from radioroc.application.board_state import rows_by_address
+        from radioroc.application.channel_config import ChannelConfigOperation
+        panel = self.make_panel()
+        rows = rows_by_address(ChannelConfigOperation().load_rows())
+        state = lambda w: w.property("boardState")
+        # Discover each grid's default from the board table, not a guess.
+        defaults = {}
+        for prefix in ("t1", "t2", "tq"):
+            cells = getattr(panel, f"{prefix}_checkboxes")
+            for checked in (True, False):
+                op = panel._cell_operation(prefix, 0, checked)
+                from radioroc.application.board_state import operation_matches
+                if operation_matches(rows, op):
+                    defaults[prefix] = checked
+            self.assertIn(prefix, defaults)
+            for cell in cells:
+                cell.setChecked(defaults[prefix])
+        self.assertIn(state(panel.t1_checkboxes[5]), (None, "unknown"))
+        panel.set_board_rows(rows)
+        for prefix in ("t1", "t2", "tq"):
+            for cell in getattr(panel, f"{prefix}_checkboxes"):
+                self.assertEqual(state(cell), "on_board")
+        panel.t2_checkboxes[5].setChecked(not defaults["t2"])
+        self.assertEqual(state(panel.t2_checkboxes[5]), "not_on_board")
+        self.assertEqual(state(panel.t2_checkboxes[6]), "on_board")
+        self.assertEqual(state(panel.t1_checkboxes[5]), "on_board")
+        # Enable-none/all buttons recolour whole grid.
+        panel.tq_enable_all_button.click()
+        panel.tq_enable_none_button.click()
+        expected = "on_board" if defaults["tq"] is False else "not_on_board"
+        self.assertTrue(all(state(c) == expected for c in panel.tq_checkboxes))
+        panel.set_board_rows(None)
+        self.assertEqual(state(panel.t1_checkboxes[0]), "unknown")
+        self.assertEqual(state(panel.tq_checkboxes[0]), "unknown")
+        self.assertIn(state(panel.probe_channel_spin), (None,))
+
+
 
 class FakeWorker:
     def __init__(self, raise_on_apply=None):

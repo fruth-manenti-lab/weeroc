@@ -95,6 +95,26 @@ class MainWindowTests(unittest.TestCase):
         self.assertIs(worker, window.channel_config_panel.connection_worker)
         self.assertIs(worker, window.main_panel.connection_worker)
 
+    def test_board_state_from_the_worker_reaches_every_asic_panel(self):
+        from radioroc.application.channel_config import ChannelConfigOperation
+        window = self._make_window()
+        worker = window.connection_panel.connection_worker
+        panels = (window.main_panel.preamp_gain_spin,
+                  window.threshold_calibration_panel.t1_spinboxes[3],
+                  window.probes_masks_panel.t1_checkboxes[3],
+                  window.input_dac_grid_panel.channel_value_spinboxes[3])
+        window._poll_board_state()
+        for widget in panels:
+            self.assertIn(widget.property("boardState"), (None, "unknown"))
+        with worker._lock:  # what the worker publishes after a full read-back
+            worker._board_rows = tuple(ChannelConfigOperation().load_rows())
+            worker._board_source = "read_back"
+            worker._board_serial += 1
+        window._poll_board_state()
+        for widget in panels:
+            self.assertEqual(widget.property("boardState"), "on_board")
+        self.assertIn("read back", window.board_state_bar.status_label.text())
+
     def test_calibration_tab_order(self):
         window = self._make_window()
         tabs = window.calibration_tabs

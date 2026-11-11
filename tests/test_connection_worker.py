@@ -558,6 +558,49 @@ class ConnectionWorkerTests(unittest.TestCase):
         self.assertEqual(set(transport.thread_ids + session.thread_ids),
                          {worker._thread.ident})
 
+    def test_board_state_is_known_only_after_read_back_and_follows_writes(self):
+        from radioroc.application.chip_init import ChipInitOperation
+        transport = OwnedThresholdTransport()
+        session = ThresholdSession(transport)
+        worker = self.started(session_factory=lambda config: session)
+        worker.connect(RadiorocConnectionConfig(port="fake-control"))
+        self.wait_for(worker, "connected")
+        self.assertIsNone(worker.board_state_snapshot())
+        serial = worker.board_state_serial()
+
+        device = worker._device
+        device.i2c_rows = [I2CRow(4, 0, bits(0, 8)), I2CRow(4, 6, bits(0, 8))]
+        worker.apply_channel_config(ChannelConfigOperation(input_dac_values={4: 77}))
+        self.wait_for(worker, "connected")
+        self.assertIsNone(worker.board_state_snapshot())  # a write alone proves nothing
+
+        worker.read_all_registers()
+        self.wait_for(worker, "connected")
+        state = worker.board_state_snapshot()
+        self.assertEqual(state.source, "read_back")
+        self.assertGreater(state.serial, serial)
+        self.assertEqual({(r.add, r.subadd): r.data for r in state.rows}[(4, 0)], bits(77, 8))
+
+        worker.apply_channel_config(ChannelConfigOperation(input_dac_values={4: 12}))
+        self.wait_for(worker, "connected")
+        state = worker.board_state_snapshot()
+        self.assertEqual(state.source, "written")
+        self.assertEqual({(r.add, r.subadd): r.data for r in state.rows}[(4, 0)], bits(12, 8))
+
+        worker.chip_init(ChipInitOperation(initialize_fpga=True))
+        self.wait_for(worker, "connected", timeout=5)
+        self.assertIsNone(worker.board_state_snapshot())
+
+        worker.chip_init(ChipInitOperation(apply_defaults=True))
+        self.wait_for(worker, "connected", timeout=5)
+        self.assertEqual(worker.board_state_snapshot().source, "written")
+
+        before = worker.board_state_serial()
+        worker.disconnect()
+        self.wait_for(worker, "idle")
+        self.assertIsNone(worker.board_state_snapshot())
+        self.assertGreater(worker.board_state_serial(), before)
+
     def test_write_raw_register_writes_verifies_and_faults_on_mismatch(self):
         transport = OwnedThresholdTransport()
         session = ThresholdSession(transport)

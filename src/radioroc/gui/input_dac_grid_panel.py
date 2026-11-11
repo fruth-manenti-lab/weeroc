@@ -4,6 +4,10 @@ Sibling of ``ChannelConfigPanel`` (the shared single-range/single-value
 panel); both stay independently usable. This one matches the vendor's
 8x8 grid, one raw 0..255 DAC code per channel, plus the shared HiZ
 impedance switch and "All ON"/"All OFF" buttons.
+
+Each value spinbox and the HiZ checkbox are coloured by whether the board
+holds them (see ``radioroc.gui.board_state_style``); ``set_board_rows``
+supplies the board table. "All ON"/"All OFF" are actions and stay unmarked.
 """
 
 from PySide6.QtCore import QTimer
@@ -13,6 +17,8 @@ from PySide6.QtWidgets import (
 )
 
 from radioroc.application.channel_config import ChannelConfigOperation
+from radioroc.application.board_state import operation_matches
+from radioroc.gui.board_state_style import NOT_ON_BOARD, ON_BOARD, UNKNOWN, mark_widget
 
 N_CHANNELS = 64
 GRID_COLUMNS = 8
@@ -27,6 +33,7 @@ class InputDacGridPanel(QWidget):
     def __init__(self, connection_worker=None, parent=None):
         super().__init__(parent)
         self.connection_worker = connection_worker
+        self._board_rows = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -42,6 +49,7 @@ class InputDacGridPanel(QWidget):
             spinbox.setValue(128)
             cell.addWidget(spinbox)
             self.channel_value_spinboxes.append(spinbox)
+            spinbox.valueChanged.connect(lambda _v, ch=channel: self._recolor_value(ch))
             grid.addLayout(cell, row, col)
         outer.addLayout(grid)
 
@@ -50,6 +58,7 @@ class InputDacGridPanel(QWidget):
         # with ChannelConfigOperation.input_dac_impedance's low/high convention.
         self.hiz_checkbox = QCheckBox("HiZ input (need external resistor)")
         outer.addWidget(self.hiz_checkbox)
+        self.hiz_checkbox.toggled.connect(lambda _c: self._recolor_hiz())
 
         buttons = QHBoxLayout()
         self.all_on_button = QPushButton("All ON")
@@ -78,6 +87,33 @@ class InputDacGridPanel(QWidget):
         self.timer = QTimer(self)
         self.timer.setInterval(100)
         self.timer.timeout.connect(self._poll)
+
+    @staticmethod
+    def _value_operation(channel, value):
+        return ChannelConfigOperation(input_dac_values={channel: value})
+
+    def _hiz_operation(self):
+        # Checked -> high impedance -> input_dac_impedance False (as in apply()).
+        return ChannelConfigOperation(input_dac_impedance=not self.hiz_checkbox.isChecked())
+
+    def _state_for(self, operation):
+        if self._board_rows is None:
+            return UNKNOWN
+        return ON_BOARD if operation_matches(self._board_rows, operation) else NOT_ON_BOARD
+
+    def _recolor_value(self, channel):
+        spin = self.channel_value_spinboxes[channel]
+        mark_widget(spin, self._state_for(self._value_operation(channel, spin.value())))
+
+    def _recolor_hiz(self):
+        mark_widget(self.hiz_checkbox, self._state_for(self._hiz_operation()))
+
+    def set_board_rows(self, rows):
+        """Store the board's register table (or ``None``) and recolour every control."""
+        self._board_rows = rows
+        for channel in range(N_CHANNELS):
+            self._recolor_value(channel)
+        self._recolor_hiz()
 
     def apply(self):
         """Validate, submit the 64-value grid plus impedance, and report

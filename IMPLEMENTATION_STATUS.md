@@ -1,5 +1,21 @@
 # Implementation status
 
+## Board-state colouring on the ASIC config tabs (2026-11-11)
+
+Offline only (740 tests pass in `.venv-foundation`); not yet tried on the board. Each ASIC-config control is now marked green (the board holds this value), amber
+(the screen shows a value the board does not hold: edited but not applied, or changed on the board by defaults, a loaded config or autocalibration) or plain (board unknown).
+Covers Main (per channel for the channel on screen, plus thresholds, trigger selection, delay, slope), Threshold calibration, Probes/Masks masks, input DAC values and HiZ.
+Main also lists every channel whose front end differs from the board, shows "Board holds: N" in the tooltip of an amber control, and has "Load from board" (fills all 64
+channels and the common controls from the board; writes nothing). A bar above the tabs has the legend and "Read from board" (one batched read of every ASIC register).
+How it works: `ConnectionWorker.board_state_snapshot()` holds the register table the board is known to hold. It is known only after a full read-back or a full-table write
+(Apply defaults / Load config / a job with apply_defaults), then follows every later write the worker makes; connect, disconnect, FPGA init alone, and any error or fault
+make it unknown. Comparison (`application/board_state.py`) replays a `ChannelConfigOperation` through `apply_channel_config` against an in-memory table, so no register
+layout is duplicated. Vendor app (bytecode `uiroc/weedgets.pyc`): only its typed number fields changed colour (grey while edited, dark blue after Enter wrote them, red on a
+failed write), judged against its own record of writes, not the board.
+Found by it: the Probes/Masks tab starts with T1, T2 and TQ all enabled, but the packaged defaults enable only T1, so "Apply masks" unedited enables T2/TQ on every channel.
+Not verified: "Read from board" right after connecting, before "Initialize FPGA" (whether I2C reads work then); whether FPGA init resets the ASIC (treated as unknown).
+Not covered: Channel config tab (an action form, not a stored view), Registers tab, analog probe routing, Calibration/Acquisition "Keep current" overrides (restored after each job).
+
 ## Tester requests (2026-10-30) — config save/load, acquisition time, wheel guard, hold-scan fit, retry
 
 Offline only; full suite passes in `.venv-foundation` (726 tests). Hardware-confirmed by the operator: Load config works once the board answers.

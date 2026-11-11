@@ -18,7 +18,11 @@ from PySide6.QtWidgets import (
     QMainWindow, QScrollArea, QStackedWidget, QTabWidget, QVBoxLayout, QWidget,
 )
 
+from radioroc.application.board_state import rows_by_address
+from radioroc.application.jobs import JobBusyError
+
 from .acquisition_window import AcquisitionWindow
+from .board_state_style import BoardStateBar
 from .muon_view import MuonView
 from .autocalibration_window import AutocalibrationWindow
 from .calibration_file_bar import CalibrationFileBar
@@ -174,6 +178,8 @@ class MainWindow(QMainWindow):
             _scrollable(self.threshold_calibration_panel), "Threshold calibration")
         self.asic_config_tabs.addTab(_scrollable(self.probes_masks_panel), "Probes/Masks")
         self.asic_config_tabs.addTab(_scrollable(self.raw_register_panel), "Registers")
+        self.board_state_bar = BoardStateBar()
+        asic_layout.addWidget(self.board_state_bar)
         asic_layout.addWidget(self.asic_config_tabs, 1)
         self.pages.addWidget(asic_page)
 
@@ -281,6 +287,18 @@ class MainWindow(QMainWindow):
         self.connection_panel.status_changed.connect(self.main_panel.update_controls)
         self._refresh_status_strip()
 
+        # Colour ASIC-config controls by whether the board holds their value
+        # (see radioroc.gui.board_state_style). Polled, because a short worker
+        # operation can start and finish between two status_changed checks.
+        self.board_state_bar.read_requested.connect(self._read_board_state)
+        self._board_state_serial = None
+        self._board_state_connected = None
+        self._board_state_timer = QTimer(self)
+        self._board_state_timer.setInterval(250)
+        self._board_state_timer.timeout.connect(self._poll_board_state)
+        self._board_state_timer.start()
+        self._poll_board_state()
+
         self._closing = False
         self._finish_timer = QTimer(self)
         self._finish_timer.setInterval(150)
@@ -318,6 +336,37 @@ class MainWindow(QMainWindow):
 
     def _connect(self):
         self.connection_panel.connect_selected()
+
+    def _board_state_panels(self):
+        return (self.main_panel, self.input_dac_grid_panel,
+                self.threshold_calibration_panel, self.probes_masks_panel)
+
+    def _poll_board_state(self):
+        """Push a changed board register table to the ASIC-config panels."""
+
+        worker = self.connection_panel.connection_worker
+        if worker is None or not hasattr(worker, "board_state_serial"):
+            return
+        serial = worker.board_state_serial()
+        connected = worker.snapshot().state == "connected"
+        if serial == self._board_state_serial and connected == self._board_state_connected:
+            return
+        self._board_state_serial = serial
+        self._board_state_connected = connected
+        state = worker.board_state_snapshot()
+        self.board_state_bar.set_status(connected=connected, board_state=state)
+        rows = None if state is None else rows_by_address(state.rows)
+        for panel in self._board_state_panels():
+            panel.set_board_rows(rows)
+
+    def _read_board_state(self):
+        worker = self.connection_panel.connection_worker
+        if worker is None:
+            return
+        try:
+            worker.read_all_registers()
+        except JobBusyError as exc:
+            self.board_state_bar.status_label.setText(f"Cannot read the board now: {exc}")
 
     def _refresh_status_strip(self):
         worker = self.connection_panel.connection_worker

@@ -15,9 +15,11 @@ from PySide6.QtWidgets import (
     QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
+from radioroc.application.board_state import board_value, operation_matches
 from radioroc.application.channel_config import ChannelConfigOperation
 from radioroc.application.asic_config_file import load_asic_config, save_asic_config
 from radioroc.application.chip_init import ChipInitOperation
+from radioroc.gui.board_state_style import NOT_ON_BOARD, ON_BOARD, UNKNOWN, mark_widget
 
 # Packaged default config's channel-0 values (configs/radio_default_i2c.csv,
 # subadd 1: "00001000" -> compensation=0, gain=8; subadd 2: "10001000" ->
@@ -61,6 +63,47 @@ _TRIGGER_SELECTION_ITEMS = (
 )
 _DEFAULT_TRIGGER_SELECTION_INDEX = 4  # "Global T1", matches the packaged default (subadd 12).
 
+# Board-state colouring: (panel field key, ChannelConfigOperation field, allowed
+# values, widget attribute) for the per-channel front end, and (operation
+# field, allowed values, widget attribute) for the ASIC-wide controls.
+_CHANNEL_FIELDS = (
+    ("trigger_preamp_compensation", "trigger_preamp_compensation_values", range(4),
+     "compensation_spin"),
+    ("trigger_preamp_gain", "trigger_preamp_gain_values", range(64), "preamp_gain_spin"),
+    ("high_gain", "high_gain_values", range(16), "high_gain_spin"),
+    ("high_gain_shaping", "high_gain_shaping_values", range(16), "high_gain_shaping_spin"),
+    ("high_gain_shaping_slow", "high_gain_shaping_slow_states", (False, True),
+     "high_gain_shaping_slow_check"),
+    ("low_gain", "low_gain_values", range(16), "low_gain_spin"),
+    ("low_gain_shaping", "low_gain_shaping_values", range(16), "low_gain_shaping_spin"),
+    ("low_gain_shaping_slow", "low_gain_shaping_slow_states", (False, True),
+     "low_gain_shaping_slow_check"),
+)
+_COMMON_FIELDS = (
+    ("t1_threshold_dac", range(1024), "t1_threshold_spin"),
+    ("t2_threshold_dac", range(1024), "t2_threshold_spin"),
+    ("tq_threshold_dac", range(1024), "tq_threshold_spin"),
+    ("delay_code", range(256), "delay_spin"),
+    ("delay_slope", range(16), "slope_spin"),
+)
+
+
+def _widget_value(widget):
+    if isinstance(widget, QCheckBox):
+        return widget.isChecked()
+    if isinstance(widget, QComboBox):
+        return _TRIGGER_SELECTION_ITEMS[widget.currentIndex()][1]
+    return widget.value()
+
+
+def _set_widget_value(widget, value):
+    if isinstance(widget, QCheckBox):
+        widget.setChecked(value)
+    elif isinstance(widget, QComboBox):
+        widget.setCurrentIndex([mode for _, mode in _TRIGGER_SELECTION_ITEMS].index(value))
+    else:
+        widget.setValue(value)
+
 
 def _spinbox(low, high, value):
     field = QSpinBox()
@@ -76,7 +119,14 @@ class MainPanel(QWidget):
     and the ``low_gain_*`` equivalents (Energy measurement), ``t1_threshold_spin``/
     ``t2_threshold_spin``/``tq_threshold_spin``/``trigger_selection_combo``/
     ``delay_spin``/``slope_spin`` (Common thresholds and timing), ``apply_button``,
-    ``status_label``.
+    ``status_label``, ``board_diff_label``, ``load_from_board_button``.
+
+    Board-state colouring (``set_board_rows``, see
+    ``radioroc.gui.board_state_style``): each control is marked on board /
+    not on board / unknown for the channel on screen; ``board_diff_label``
+    lists every channel whose front end (as this panel would apply it)
+    differs from the board; ``load_from_board_button`` fills all 64
+    channels and the common controls with the values the board holds.
 
     Unlike ``ThresholdCalibrationPanel``'s 64-cell grids, this panel shows one
     channel's analog front end at a time and there is no per-channel readback
@@ -103,8 +153,20 @@ class MainPanel(QWidget):
         self.channel_spin = QSpinBox()
         self.channel_spin.setRange(0, 63)
         channel_row.addWidget(self.channel_spin)
+        self.load_from_board_button = QPushButton("Load from board")
+        self.load_from_board_button.setToolTip(
+            "Fill every channel and the common controls with the values the board holds"
+            " (needs the board state: Read from board first). Writes nothing.")
+        self.load_from_board_button.clicked.connect(
+            lambda _checked=False: self.load_from_board())
+        channel_row.addWidget(self.load_from_board_button)
         channel_row.addStretch(1)
         outer.addLayout(channel_row)
+        self.board_diff_label = QLabel()
+        self.board_diff_label.setWordWrap(True)
+        outer.addWidget(self.board_diff_label)
+        self._board_rows = None
+        self._marks_suspended = False
 
         front_end_row = QHBoxLayout()
         front_end_row.addWidget(self._build_preamp_group())
@@ -147,6 +209,13 @@ class MainPanel(QWidget):
 
         self._load_channel(0)
         self.channel_spin.valueChanged.connect(self._on_channel_changed)
+        for widget in self._board_widgets():
+            signal = (widget.toggled if isinstance(widget, QCheckBox) else
+                      widget.currentIndexChanged if isinstance(widget, QComboBox) else
+                      widget.valueChanged)
+            signal.connect(lambda *_args: self._refresh_board_marks())
+        self.channel_spin.valueChanged.connect(lambda _value: self._refresh_board_marks())
+        self.set_board_rows(None)
 
         # apply_channel_config is asynchronous (the worker only enqueues it
         # and returns immediately); showing the snapshot the instant it's
@@ -234,6 +303,13 @@ class MainPanel(QWidget):
         }
 
     def _load_channel(self, channel):
+        self._marks_suspended = True
+        try:
+            self._load_channel_values(channel)
+        finally:
+            self._marks_suspended = False
+
+    def _load_channel_values(self, channel):
         values = self._channel_values.get(channel, dict(_DEFAULT_CHANNEL_VALUES))
         self.compensation_spin.setValue(values["trigger_preamp_compensation"])
         self.preamp_gain_spin.setValue(values["trigger_preamp_gain"])
@@ -244,6 +320,127 @@ class MainPanel(QWidget):
         self.low_gain_shaping_spin.setValue(values["low_gain_shaping"])
         self.low_gain_shaping_slow_check.setChecked(values["low_gain_shaping_slow"])
         self._current_channel = channel
+
+    # -- Board-state colouring ---------------------------------------------
+
+    def _board_widgets(self):
+        return ([getattr(self, attr) for *_, attr in _CHANNEL_FIELDS]
+                + [getattr(self, attr) for *_, attr in _COMMON_FIELDS]
+                + [self.trigger_selection_combo])
+
+    def _channel_front_end(self, channel):
+        """The front-end values this panel would apply for ``channel``."""
+        if channel == self._current_channel:
+            return {key: _widget_value(getattr(self, attr)) for key, _, _, attr in _CHANNEL_FIELDS}
+        return self._channel_values.get(channel, _DEFAULT_CHANNEL_VALUES)
+
+    def set_board_rows(self, rows):
+        """Recolour against the board's register table (``None`` = unknown).
+
+        **Inputs**
+        - `rows` (`dict[tuple[int, int], str] | None`): See
+          ``radioroc.application.board_state.rows_by_address``.
+        """
+        self._board_rows = rows
+        self.load_from_board_button.setEnabled(rows is not None)
+        self._refresh_board_marks()
+
+    def _mark(self, widget, operation_field, value, channel=None, candidates=()):
+        rows = self._board_rows
+        if rows is None:
+            mark_widget(widget, UNKNOWN)
+            self._set_board_tooltip(widget, "")
+            return True
+        setting = value if channel is None else {channel: value}
+        matches = operation_matches(rows, ChannelConfigOperation(**{operation_field: setting}))
+        mark_widget(widget, ON_BOARD if matches else NOT_ON_BOARD)
+        if matches:
+            self._set_board_tooltip(widget, "")
+        else:
+            held = board_value(rows, operation_field, candidates, channel)
+            self._set_board_tooltip(widget, "Not on the board yet. " + (
+                "Board holds: unknown" if held is None else f"Board holds: {held}"))
+        return matches
+
+    @staticmethod
+    def _set_board_tooltip(widget, text):
+        base = widget.property("_base_tooltip")
+        if base is None:
+            base = widget.toolTip()
+            widget.setProperty("_base_tooltip", base)
+        widget.setToolTip("\n".join(part for part in (base, text) if part))
+
+    def _refresh_board_marks(self):
+        if self._marks_suspended:
+            return
+        channel = self._current_channel
+        on_screen = self._channel_front_end(channel)
+        for key, field, candidates, attr in _CHANNEL_FIELDS:
+            self._mark(getattr(self, attr), field, on_screen[key], channel, candidates)
+        for field, candidates, attr in _COMMON_FIELDS:
+            widget = getattr(self, attr)
+            self._mark(widget, field, widget.value(), candidates=candidates)
+        self._mark(self.trigger_selection_combo, "trigger_selection",
+                   _widget_value(self.trigger_selection_combo),
+                   candidates=[mode for _, mode in _TRIGGER_SELECTION_ITEMS])
+        rows = self._board_rows
+        if rows is None:
+            self.board_diff_label.setText("")
+            return
+        differing = [
+            ch for ch in range(64)
+            if not operation_matches(rows, ChannelConfigOperation(**{
+                field: {ch: self._channel_front_end(ch)[key]}
+                for key, field, _, _ in _CHANNEL_FIELDS}))]
+        if not differing:
+            self.board_diff_label.setText("Front end of all 64 channels matches the board.")
+        else:
+            listed = ", ".join(str(ch) for ch in differing)
+            self.board_diff_label.setText(
+                f"Front end (paT, HG/LG gain, shaping) differs from the board on "
+                f"{len(differing)} channel(s): {listed}. Apply writes the channels you have"
+                " visited; Load from board shows what the board holds.")
+
+    def load_from_board(self):
+        """Fill every channel and the common controls from the board state.
+
+        Writes nothing to the board. Fields whose board value cannot be
+        recovered keep their current value.
+        """
+        rows = self._board_rows
+        if rows is None:
+            self.status_label.setText("Board settings unknown: press Read from board first.")
+            return
+        missing = 0
+        for ch in range(64):
+            values = dict(self._channel_front_end(ch))
+            for key, field, candidates, _ in _CHANNEL_FIELDS:
+                held = board_value(rows, field, candidates, ch)
+                if held is None:
+                    missing += 1
+                else:
+                    values[key] = held
+            self._channel_values[ch] = values
+        self._load_channel(self._current_channel)
+        self._marks_suspended = True
+        try:
+            for field, candidates, attr in _COMMON_FIELDS:
+                held = board_value(rows, field, candidates)
+                if held is None:
+                    missing += 1
+                else:
+                    _set_widget_value(getattr(self, attr), held)
+            held = board_value(rows, "trigger_selection",
+                               [mode for _, mode in _TRIGGER_SELECTION_ITEMS])
+            if held is None:
+                missing += 1
+            else:
+                _set_widget_value(self.trigger_selection_combo, held)
+        finally:
+            self._marks_suspended = False
+        self._refresh_board_marks()
+        self.status_label.setText("Loaded the board's settings into this tab" + (
+            f" ({missing} field(s) not recoverable, left unchanged)." if missing else "."))
 
     def _on_channel_changed(self, channel):
         self._save_current_channel()
