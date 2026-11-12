@@ -15,7 +15,7 @@ How it works: `ConnectionWorker.board_state_snapshot()` holds the register table
 make it unknown. Comparison (`application/board_state.py`) replays a `ChannelConfigOperation` through `apply_channel_config` against an in-memory table, so no register
 layout is duplicated. Vendor app (bytecode `uiroc/weedgets.pyc`): only its typed number fields changed colour (grey while edited, dark blue after Enter wrote them, red on a
 failed write), judged against its own record of writes, not the board.
-Found by it: the Probes/Masks tab starts with T1, T2 and TQ all enabled, but the packaged defaults enable only T1, so "Apply masks" unedited enables T2/TQ on every channel.
+Found by it: the Probes/Masks tab started with T1, T2 and TQ all enabled, but the packaged defaults enable only T1, so "Apply masks" unedited enabled T2/TQ on every channel. Fixed (2026-11-12, agreed with the operator): the grids now start with only T1 enabled, matching the packaged defaults; a test checks the start-up masks change nothing on a board holding the defaults.
 Not verified: "Read from board" right after connecting, before "Initialize FPGA" (whether I2C reads work then); whether FPGA init resets the ASIC (treated as unknown).
 Not covered: Channel config tab (an action form, not a stored view), Registers tab, analog probe routing, Calibration/Acquisition "Keep current" overrides (restored after each job).
 

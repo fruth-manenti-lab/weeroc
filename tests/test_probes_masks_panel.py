@@ -42,15 +42,24 @@ class ProbesMasksPanelTests(unittest.TestCase):
         widget.deleteLater()
         self.app.processEvents()
 
-    def test_each_grid_has_64_checkboxes_all_checked_by_default(self):
+    def test_grids_start_like_the_packaged_board_defaults(self):
+        from radioroc.application.board_state import operation_matches, rows_by_address
+        from radioroc.application.channel_config import ChannelConfigOperation
         panel = self.make_panel()
         for checkboxes in (panel.t1_checkboxes, panel.t2_checkboxes, panel.tq_checkboxes):
             self.assertEqual(len(checkboxes), 64)
-            self.assertTrue(all(cb.isChecked() for cb in checkboxes))
+        self.assertTrue(all(cb.isChecked() for cb in panel.t1_checkboxes))
+        self.assertFalse(any(cb.isChecked() for cb in panel.t2_checkboxes))
+        self.assertFalse(any(cb.isChecked() for cb in panel.tq_checkboxes))
+        # Applying the start-up masks must not change a board holding the defaults.
+        defaults = rows_by_address(ChannelConfigOperation().load_rows())
+        self.assertTrue(operation_matches(defaults, panel.build_operation()))
 
     def test_apply_submits_operation_reflecting_unchecked_boxes_per_grid(self):
         worker = FakeWorker()
         panel = self.make_panel(worker)
+        panel.t2_enable_all_button.click()
+        panel.tq_enable_all_button.click()
         panel.t1_checkboxes[4].setChecked(False)
         panel.t2_checkboxes[10].setChecked(False)
         panel.tq_checkboxes[63].setChecked(False)
@@ -71,10 +80,13 @@ class ProbesMasksPanelTests(unittest.TestCase):
 
     def test_enable_none_and_enable_all_only_affect_their_own_grid(self):
         panel = self.make_panel()
+        panel.t2_enable_all_button.click()
+        self.assertTrue(all(cb.isChecked() for cb in panel.t2_checkboxes))
+        self.assertFalse(any(cb.isChecked() for cb in panel.tq_checkboxes))
         panel.t1_enable_none_button.click()
         self.assertTrue(all(not cb.isChecked() for cb in panel.t1_checkboxes))
         self.assertTrue(all(cb.isChecked() for cb in panel.t2_checkboxes))
-        self.assertTrue(all(cb.isChecked() for cb in panel.tq_checkboxes))
+        self.assertFalse(any(cb.isChecked() for cb in panel.tq_checkboxes))
 
         panel.t1_enable_all_button.click()
         self.assertTrue(all(cb.isChecked() for cb in panel.t1_checkboxes))

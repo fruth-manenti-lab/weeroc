@@ -49,7 +49,9 @@ def _build_mask_grid(title, prefix, panel):
         checkbox = QPushButton(str(channel))
         checkbox.setCheckable(True)
         checkbox.setStyleSheet(CHANNEL_BUTTON_STYLE)
-        checkbox.setChecked(True)  # UI-only default; no read-back wiring in scope here.
+        # Start like the packaged board defaults (only T1 enabled), so Apply masks
+        # before a read-back cannot switch T2/TQ on by surprise.
+        checkbox.setChecked(prefix == "t1")
         checkbox.toggled.connect(
             lambda _checked, p=panel, pre=prefix, ch=channel: p._on_cell_changed(pre, ch))
         grid.addWidget(checkbox, channel // _GRID_COLUMNS, channel % _GRID_COLUMNS)
